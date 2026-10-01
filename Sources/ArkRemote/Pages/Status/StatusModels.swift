@@ -93,7 +93,9 @@ struct StatusData {
     var bosses: [StatusBoss] = []             // schema.js BOSSES
     // 机器 switches (schema.js RELAY_SWITCHES, tab 状态).
     var skipShutdown = false                  // 下次别关机
-    var debugModeUntil: String? = nil         // 调试模式, value = until HH:MM when on
+    var debugModeUntil: String? = nil         // 调试模式, value = until HH:MM when on ("" = on, time unknown)
+    // The line under a switch while a sent change waits (Pending tag), keyed by StatusSwitchID.
+    var switchTags: [String: String] = [:]
     // Receipts (newest first) and the group-header note.
     var receipts: [StatusReceipt] = []
     var todayLast = ""                        // 今天.最近
