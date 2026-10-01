@@ -37,10 +37,12 @@ struct ContentView: View {
             .tag(ContentTab.wuwa)
 
             NavigationStack {
-                PhonePage(data: PhonePageData())
+                PhoneTab()
             }
             .tabItem { Label("手机", systemImage: "phone.fill") }
             .tag(ContentTab.phone)
         }
+        // the no-input link opening the app: mailbox + PIN (#k=) and game tokens (&t=), view.js fromLink / Stamina.fromLink
+        .onOpenURL { url in PhoneLink.open(url) }
     }
 }
