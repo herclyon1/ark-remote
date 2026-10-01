@@ -7,7 +7,6 @@ struct StatusPage: View {
     var data: StatusData
     var actions = StatusActions()
 
-    @State var confirmStop = false
     @State var bossIndex = 1
     @State var echoUntil = "08:30"
     @State var echoNewUntil = ""
@@ -43,12 +42,11 @@ struct StatusPage: View {
             receiptsSection
         }
         .navigationTitle("状态")
-        .confirmationDialog("停止一切？", isPresented: $confirmStop, titleVisibility: .visible) {
-            Button("停止一切", role: .destructive) { actions.stopAll() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("脚本和游戏都会停下")
-        }
+    }
+
+    /// The Pending tag under a switch row (「已寄出 HH:MM · …」).
+    @ViewBuilder private func tagLine(_ id: String) -> some View {
+        if let t = data.switchTags[id] { Text(t).font(.footnote).foregroundStyle(.blue) }
     }
 
     // MARK: device card
@@ -109,7 +107,7 @@ struct StatusPage: View {
             Button { actions.refresh() } label: {
                 tileLabel("刷新", data.lastUpdate, icon: "arrow.clockwise", tint: .gray)
             }
-            Button { confirmStop = true } label: {
+            Button { actions.stopAll() } label: {
                 tileLabel("停止一切", "脚本和游戏", icon: "stop.fill", tint: .red)
             }
         }
@@ -163,6 +161,7 @@ struct StatusPage: View {
                         Text([b.tokyo.isEmpty ? "" : "东京 \(b.tokyo)", b.runsToday ? "今天照常" : "今天跳过，明天照常"]
                                 .filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(.footnote).foregroundStyle(.secondary)
+                        tagLine(StatusSwitchID.queue(q))
                     }
                 }
             } else {
@@ -253,13 +252,15 @@ struct StatusPage: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("下次跑完不关机")
                     Text("只跳过下一次关机，再下一趟照常关").font(.footnote).foregroundStyle(.secondary)
+                    tagLine(StatusSwitchID.skipShutdown)
                 }
             }
             Toggle(isOn: Binding(get: { data.debugModeUntil != nil }, set: { actions.setDebugMode($0) })) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("调试模式")
-                    Text(data.debugModeUntil.map { "开着，到 \($0)——这期间跑完不关机" } ?? "开着的 90 分钟里跑完不关机，到点自动关掉")
+                    Text(data.debugModeUntil.flatMap { $0.isEmpty ? nil : "开着，到 \($0)——这期间跑完不关机" } ?? "开着的 90 分钟里跑完不关机，到点自动关掉")
                         .font(.footnote).foregroundStyle(.secondary)
+                    tagLine(StatusSwitchID.debugMode)
                 }
             }
         }
