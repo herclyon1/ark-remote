@@ -1,0 +1,290 @@
+// Ported from maa-automation/web/pending.js
+//
+// Changes sent to the machine that have no receipt yet. 2026-09-13, the user, on changing a setting while
+// the machine was off: nothing showed it had worked, it felt like a silent failure. The 5-second notice
+// vanished and render() wrote the machine's last reported (old) value back into the control, so the
+// change looked like it bounced back. Every sent change is kept here (UserDefaults, survives restarts);
+// the control shows the sent value with 「已寄出 HH:MM，等机器开机」 under its row; when the machine reports a
+// state **newer than the send**, each item is checked: value matches = applied, struck off; mismatch =
+// red 「机器上报的还是旧值，这项没生效」 with 「再发一次」.
+//
+// Third state (2026-09-18, the user wanted all three texts): a matched item shows 「已应用 HH:MM」 under
+// its control for one day.
+//
+// Not ported: the DOM part of applyPending (writing values back into inputs, pick buttons, pills, boxes,
+// appending the tag element, the #pendbar markup and its xmark icon). The page reads `shownValue(for:)`,
+// `tag(for:editing:)` and `bar` instead and draws them.
+
+import Foundation
+import Observation
+import SkipFuse   // @Observable types only drive the Android UI with SkipFuse imported
+
+/// One sent change waiting for the machine's receipt (pending.js `pending[id]`).
+/// src: "mas" (set_config script/path), "master" (set_master game/path) or "relay" (the exact `body` sent).
+struct PendingEdit: Codable, Sendable, Equatable {
+    var label: String
+    var src: String
+    /// set_config script or set_master game; empty for relay switches.
+    var owner: String = ""
+    var path: String = ""
+    var from: JSONValue? = nil
+    var to: JSONValue
+    /// Seconds.
+    var sentAt: Int
+    var resentAt: Int? = nil
+    /// The `at` of the state that still reported another value.
+    var mismatchAt: Int? = nil
+    /// relay switches: the command body as sent, resent as is.
+    var body: JSONValue? = nil
+}
+
+/// A change whose receipt matched (pending.js `acked[id]`): shown as 「已应用 HH:MM」 for a day.
+struct AckedEdit: Codable, Sendable, Equatable {
+    var at: Int
+    var label: String
+}
+
+/// The small line under a control (where Messages puts 「Delivered」).
+enum PendingTag: Sendable, Equatable {
+    /// 「已寄出 HH:MM · 机器开机后生效」 (class "sent").
+    case sent(text: String)
+    /// 「没生效 · 机器 HH:MM 报的还是「…」」 plus a 「再发一次」 button for `key` (class "sent bad").
+    case mismatch(text: String, key: String)
+    /// 「已应用 HH:MM」 (class "sent ok").
+    case applied(text: String)
+}
+
+/// The #pendbar line: text, whether any item was refused (the red xmark), and the 「不等了，清掉」 button.
+struct PendingBar: Sendable, Equatable {
+    let text: String
+    let hasMismatch: Bool
+    static let clearLabel = "不等了，清掉"
+}
+
+@MainActor @Observable final class Pending {
+    static let shared = Pending()
+
+    static let pendingKey = "ark-remote-pending"
+    static let ackedKey = "ark-remote-acked"
+
+    /// id -> sent change.
+    var items: [String: PendingEdit] = [:]
+    /// id -> applied change (one day).
+    var acked: [String: AckedEdit] = [:]
+    /// The value of every field on the machine at the last render: id -> value. The page's render sets it,
+    /// then calls `reconcile()`.
+    var liveVals: [String: JSONValue] = [:]
+
+    @ObservationIgnored let relay: Relay
+
+    init(relay: Relay = .shared) {
+        self.relay = relay
+        let d = UserDefaults.standard
+        if let raw = d.string(forKey: Self.pendingKey), let data = raw.data(using: .utf8),
+           let v = try? JSONDecoder().decode([String: PendingEdit].self, from: data) {
+            items = v
+        }
+        if let raw = d.string(forKey: Self.ackedKey), let data = raw.data(using: .utf8),
+           let v = try? JSONDecoder().decode([String: AckedEdit].self, from: data) {
+            acked = v
+        }
+    }
+
+    func savePending() {
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(String(decoding: data, as: UTF8.self), forKey: Self.pendingKey)
+        }
+    }
+
+    func saveAcked() {
+        if let data = try? JSONEncoder().encode(acked) {
+            UserDefaults.standard.set(String(decoding: data, as: UTF8.self), forKey: Self.ackedKey)
+        }
+    }
+
+    /// Records a change that was just sent (the save flow in view.js writes `pending[id] = {...}`).
+    func add(_ key: String, _ edit: PendingEdit) {
+        items[key] = edit
+        savePending()
+    }
+
+    /// pending.js sameVal(a, b): a multi-input object compares only the boxes that were sent;
+    /// arrays compare as sorted string lists; anything else as JS `String(x ?? "")`.
+    nonisolated static func sameVal(_ a: JSONValue?, _ b: JSONValue?) -> Bool {
+        func str(_ x: JSONValue?) -> String {
+            guard let x, !x.isNull else { return "" }
+            return x.jsString
+        }
+        func list(_ x: JSONValue?) -> [String] {
+            guard let x, !x.isNull else { return [] }
+            if let arr = x.array { return arr.map { $0.jsString } }
+            return [x.jsString]
+        }
+        if let bo = b?.object {
+            let ao = a?.object ?? [:]
+            return bo.allSatisfy { k, x in str(ao[k]) == str(x) }
+        }
+        if a?.array != nil || b?.array != nil {
+            return list(a).sorted() == list(b).sorted()
+        }
+        return str(a) == str(b)
+    }
+
+    /// `new Date(ts * 1000).toTimeString().slice(0, 5)`.
+    nonisolated static func hhmm(_ ts: Int) -> String { clockHHMM(ms: Double(ts) * 1000) }
+
+    // MARK: applyPending (state only)
+
+    /// The value the control should show: the sent value while the change waits, unless the user is
+    /// editing the field again (`key in edits`). nil = show the machine's value.
+    func shownValue(for key: String, editing: Bool = false) -> JSONValue? {
+        guard !editing, let p = items[key] else { return nil }
+        return p.to
+    }
+
+    /// The tag under a row, or nil. `editing` = the field has an unsaved edit (view.js `key in edits`).
+    func tag(for key: String, editing: Bool = false) -> PendingTag? {
+        if let p = items[key] {
+            if let mm = p.mismatchAt {
+                return .mismatch(text: "没生效 · 机器 \(Self.hhmm(mm)) 报的还是「\(valueLabel(p, liveVals[key]))」", key: key)
+            }
+            let old = (nowSec() - p.sentAt) > 10 * 3600
+            let fresh = relay.snapAt.map { Double(nowSec() - $0) < Live.freshMs / 1000 } ?? false
+            return .sent(text: "已寄出 \(Self.hhmm(p.resentAt ?? p.sentAt)) · \(fresh ? "几秒内回执" : "机器开机后生效")"
+                         + (old ? " · 超过 10 小时，机器开机时会自动重发" : ""))
+        }
+        if editing { return nil }
+        guard let a = acked[key], nowSec() - a.at <= 24 * 3600 else { return nil }
+        return .applied(text: "已应用 \(Self.hhmm(a.at))")
+    }
+
+    /// Drops 「已应用」 marks older than a day (applyPending does it while painting).
+    func pruneAcked() {
+        let stale = acked.filter { nowSec() - $0.value.at > 24 * 3600 }.map { $0.key }
+        guard !stale.isEmpty else { return }
+        for k in stale { acked[k] = nil }
+        saveAcked()
+    }
+
+    /// The #pendbar line; nil hides the bar.
+    var bar: PendingBar? {
+        let n = items.count
+        guard n > 0 else { return nil }
+        let bad = items.values.filter { $0.mismatchAt != nil }.count
+        let text = bad > 0
+            ? "\(bad) 项改动机器没接受（见红字）" + (n - bad > 0 ? "，另 \(n - bad) 项还在等回执" : "")
+            : "\(n) 项改动已寄出 · 机器开机后生效"
+        return PendingBar(text: text, hasMismatch: bad > 0)
+    }
+
+    /// 「不等了，清掉」.
+    func clearAll() {
+        items = [:]
+        savePending()
+    }
+
+    // MARK: reconcile / resend
+
+    /// The machine reported a state newer than the send: check each item against it.
+    func reconcile() {
+        guard let at = relay.snapAt, at != 0 else { return }
+        var changed = false
+        for (key, p) in items {
+            if at <= (p.resentAt ?? p.sentAt) { continue }
+            guard let live = liveVals[key] else { continue }   // this state does not carry the field; wait for the next
+            if Self.sameVal(live, p.to) {
+                items[key] = nil
+                changed = true
+                acked[key] = AckedEdit(at: at, label: p.label)
+                saveAcked()
+                relay.showToast("「\(p.label)」已生效：\(valueLabel(p, p.to))", ms: 5000)
+            } else if p.mismatchAt != at {
+                items[key]?.mismatchAt = at
+                changed = true
+            }
+        }
+        if changed { savePending() }
+    }
+
+    /// 「再发一次」.
+    func resend(_ key: String) async {
+        guard let p = items[key] else { return }
+        let body: JSONValue
+        if p.src == "relay" {
+            body = p.body ?? .null
+        } else if p.src == "master" {
+            body = .object(["action": .string("set_master"), "confirmed": .bool(true), "game": .string(p.owner),
+                            "path": .string(p.path), "value": p.to])
+        } else {
+            body = .object(["action": .string("set_config"), "confirmed": .bool(true), "script": .string(p.owner),
+                            "path": .string(p.path), "value": p.to])
+        }
+        do {
+            try await relay.send(body)
+            items[key]?.resentAt = nowSec()
+            items[key]?.mismatchAt = nil
+            savePending()
+            relay.showToast("「\(p.label)」又发了一次", ms: 4000)
+        } catch {
+            relay.showToast("发不出去：" + Live.why(error), ms: 6000)
+        }
+    }
+
+    /// The mailbox keeps messages 12 hours. When the machine comes up while the app is open, anything sent
+    /// more than 10 hours ago without a receipt is sent again (setting the same value twice is harmless).
+    func resendStale() {
+        for (key, p) in items {
+            let at = p.resentAt ?? p.sentAt
+            if p.mismatchAt == nil && nowSec() - at > 10 * 3600 {
+                Task { await self.resend(key) }
+            }
+        }
+    }
+
+    // MARK: value names (view.js valLabel / fmt)
+
+    /// view.js fmt(v).
+    nonisolated static func fmt(_ v: JSONValue?) -> String {
+        guard let v, !v.isNull else { return "（空）" }
+        if case .bool(let b) = v { return b ? "开" : "关" }
+        return v.jsString
+    }
+
+    /// view.js valLabel(e, v): internal value → what a person reads, in the same order the dropdown is named:
+    /// the machine's option list → valueZh → as is (2026-09-01: the confirm box showed a raw UUID).
+    func valueLabel(_ e: PendingEdit, _ v: JSONValue?) -> String {
+        if e.src == "relay" { return (v?.truthy ?? false) ? "开" : "关" }
+        let snap = relay.snap
+        let live: [(String, JSONValue)]
+        if let fixed = choices[e.path] {
+            live = fixed.map { ($0.label, $0.value) }
+        } else {
+            let opts = e.src == "master"
+                ? snap?["master"]?[e.owner]?["options"]?[e.path]
+                : snap?["options"]?[e.owner]?[e.path]
+            live = (opts?.array ?? []).compactMap { pair in
+                guard let lb = pair[0], let val = pair[1] else { return nil }
+                return (lb.string ?? lb.jsString, val)
+            }
+        }
+        func one(_ x: JSONValue) -> String {
+            if let hit = live.first(where: { $0.1.jsString == x.jsString }) {
+                return yieldLabel(e.path, hit.0, x)
+            }
+            return valueZh[e.path]?[x.jsString] ?? Self.fmt(x)
+        }
+        if let o = v?.object {   // multi-input: 格名 值, only the boxes in the edit
+            let bx = snap?["master"]?[e.owner]?["inputs"]?[e.path]?.array ?? []
+            let parts = o.keys.sorted().map { k -> String in
+                let x = o[k] ?? .null
+                let name = bx.first(where: { $0[1]?.string == k })?[0]?.string ?? k
+                return "\(name) \(x.string == "" ? "（空）" : x.jsString)"
+            }
+            return parts.isEmpty ? "（没改）" : parts.joined(separator: "、")
+        }
+        if let arr = v?.array {
+            return arr.isEmpty ? "（一个都没选）" : arr.map(one).joined(separator: "、")
+        }
+        return one(v ?? .null)
+    }
+}
