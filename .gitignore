@@ -1,0 +1,6 @@
+.build/
+.swiftpm/
+*.xcuserstate
+xcuserdata/
+Android/.gradle/
+Android/app/build/
