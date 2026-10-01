@@ -1,6 +1,6 @@
 import Foundation
 
-/// Placeholder data for the 方舟 (Arknights) tab, until the logic layer lands.
+/// Data for the 方舟 (Arknights) tab; filled from the relay snapshot by ArknightsBridge.
 ///
 /// Mirrors the web remote: the tab shows every section whose title starts with
 /// 明日方舟 (maa-automation/web/view.js:753). Field names follow the paths in
