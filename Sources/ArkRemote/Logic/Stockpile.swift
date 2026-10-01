@@ -236,7 +236,7 @@ enum StockpileEmptyAction: Sendable, Equatable {
             sections.append(StockSection(name: s.name, rows: sorted.map { row($0, &nf) }))
         }
         let box: JSONValue? = (g["box"]?["id"]?.truthy ?? false) ? g["box"] : nil
-        if let box, let own = rows.first(where: { $0["id"] == box["id"] }),
+        if let box, let own = rows.first(where: { $0["id"]?.jsString == box["id"]?.jsString }),
            let used = own["boxUsed"], !used.isNull, (own["have"]?.number ?? 0) > 0 {
             sections.append(StockSection(name: boxSection, rows: [boxRow(own, box, &nf)]))
         }
