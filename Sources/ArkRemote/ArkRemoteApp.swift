@@ -7,13 +7,13 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
 
 /// The shared top-level view for the app, loaded from the platform-specific App delegates below.
 ///
-/// The default implementation merely loads the `ContentView` for the app and logs a message.
+/// Loads the `ContentView` inside `AppShell`, which wires the logic modules and follows scenePhase (Logic/AppGlue.swift).
 /* SKIP @bridge */public struct ArkRemoteRootView : View {
     /* SKIP @bridge */public init() {
     }
 
     public var body: some View {
-        ContentView()
+        AppShell()
             .task {
                 logger.info("Skip app logs are viewable in the Xcode console for iOS; Android logs can be viewed in Studio or using adb logcat")
             }
