@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Launcher label: kept to 4 characters so it fits one line under the icon on 4- and 5-column home screens. -->
-    <string name="app_name">挂机遥控</string>
+    <!-- Launcher label (user 10-02 17:06 「名字改成遥控」). -->
+    <string name="app_name">遥控</string>
 </resources>
