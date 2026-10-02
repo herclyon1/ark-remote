@@ -49,3 +49,7 @@ Kotlin JUnit tests in the Robolectric Android simulation environment.
 
 Parity testing can be performed with `skip test`,
 which will output a table of the test results for both platforms.
+
+`python3 scripts/check-android-symbols.py` (after a build has fetched `.build/checkouts`) fails when
+`Sources/` names an SF Symbol that SkipUI has no Android icon for; such a symbol shows as a black warning
+triangle on Android. Use `symbol(_:android:)` in `Pages/Shell/SkipFixes.swift` for those.

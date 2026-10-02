@@ -20,7 +20,9 @@ struct StatusPage: View {
             notices
             actionTiles
             staminaSection
-            if let note = data.estopNote {
+            // top-level conditional sections go through listSection (Pages/Shell/SkipFixes.swift): a bare `if` leaves
+            // an empty grey section on Android
+            listSection("status-estop", ifLet: data.estopNote) { note in
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(note.title).foregroundStyle(.red)   // index.html:766 .estopnote .row label{color:var(--bad)}
@@ -28,7 +30,7 @@ struct StatusPage: View {
                     }
                 }
             }
-            if !data.queues.isEmpty {
+            listSection("status-shift", if: !data.queues.isEmpty) {
                 Section {
                     Picker("班次", selection: Binding(get: { data.currentQueue }, set: { actions.selectQueue($0) })) {
                         ForEach(data.queues) { q in
@@ -95,7 +97,7 @@ struct StatusPage: View {
     // MARK: notices
 
     @ViewBuilder private var notices: some View {
-        if data.configUnreadable {
+        listSection("status-config", if: data.configUnreadable) {
             Section {
                 Label(data.configIsStale ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的，改了也要等它开着才生效"
                                          : "读不到 AUTO-MAS 的配置（它没在运行？）",
@@ -103,7 +105,7 @@ struct StatusPage: View {
                     .foregroundStyle(.orange)
             }
         }
-        if !data.busy.isEmpty && data.online {
+        listSection("status-busy", if: !data.busy.isEmpty && data.online) {
             Section("现在在跑") {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(data.busy.joined(separator: "、"))
@@ -111,7 +113,7 @@ struct StatusPage: View {
                 }
             }
         }
-        if let ef = data.echoFarm {
+        listSection("status-echofarm", ifLet: data.echoFarm) { ef in
             Section("刷声骸") {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("正在刷「\(ef.name)」")
@@ -131,21 +133,30 @@ struct StatusPage: View {
             Button { actions.runNow() } label: {
                 tileLabel("现在跑一趟", data.currentQueue.isEmpty ? "" :
                           (data.nextAt.isEmpty ? data.currentQueue : "\(data.currentQueue) · 下一趟 \(data.nextAt)"),
-                          icon: "play.fill", tint: .blue)
+                          tint: .blue) { Image(systemName: "play.fill") }
             }
             Button { actions.refresh() } label: {
-                tileLabel("刷新", data.snapAt.map { ago($0) } ?? data.lastUpdate, icon: "arrow.clockwise", tint: .gray,
-                          spinning: data.refreshing)
+                tileLabel("刷新", data.snapAt.map { ago($0) } ?? data.lastUpdate, tint: .gray, spinning: data.refreshing) {
+                    symbol("arrow.clockwise", android: "Icons.Outlined.Refresh")
+                }
             }
             Button { actions.stopAll() } label: {
-                tileLabel("停止一切", "脚本和游戏", icon: "stop.fill", tint: .red)
+                tileLabel("停止一切", "脚本和游戏", tint: .red) {
+                    // no Material stop icon in skip-ui's table: the filled square drawn on Android
+                    #if os(Android)
+                    RoundedRectangle(cornerRadius: 2).fill(Color.red).frame(width: 14, height: 14)
+                    #else
+                    Image(systemName: "stop.fill")
+                    #endif
+                }
             }
         }
     }
 
-    private func tileLabel(_ title: String, _ sub: String, icon: String, tint: Color, spinning: Bool = false) -> some View {
+    private func tileLabel<Icon: View>(_ title: String, _ sub: String, tint: Color, spinning: Bool = false,
+                                       @ViewBuilder icon: () -> Icon) -> some View {
         HStack(spacing: 12) {
-            if spinning { ProgressView() } else { Image(systemName: icon).foregroundStyle(tint) }
+            if spinning { ProgressView() } else { icon().foregroundStyle(tint) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).foregroundStyle(title == "停止一切" ? Color.red : Color.primary)
                 if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(.secondary) }
@@ -159,7 +170,7 @@ struct StatusPage: View {
     /// resource's own icon (view.js:266 RES → Module.xcassets res-ak / res-ef / res-ww) and its colour; before the first
     /// reading the tiles show with placeholders and 「正在读取…」 under them (view.js:293-297).
     @ViewBuilder private var staminaSection: some View {
-        if let tiles = data.stamina {
+        listSection("status-stamina", ifLet: data.stamina) { tiles in
             let shown = tiles.isEmpty
                 ? [StatusStamina(label: "明日方舟 理智", value: nil, cap: nil, sub: ""),
                    StatusStamina(label: "终末地 理智", value: nil, cap: nil, sub: ""),
@@ -194,7 +205,7 @@ struct StatusPage: View {
         let colour = Self.staminaColour[t.label] ?? Color.blue
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
-                Image(icon, bundle: .module).resizable().scaledToFit().frame(width: 30, height: 30)
+                Image(icon, bundle: assetBundle).resizable().scaledToFit().frame(width: 30, height: 30)
                 Spacer()
                 if placeholder {
                     RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.2)).frame(width: 56, height: 22)
@@ -241,10 +252,12 @@ struct StatusPage: View {
                     if !b.tokyo.isEmpty { Text("东京 \(b.tokyo)").font(.footnote).foregroundStyle(.secondary) }
                 }
             }
-            ForEach(b.games) { g in
+            // ids carry the block: the same game sits in several blocks (这一趟 and 明日安排), and skip-ui keys a List's
+            // rows by ForEach id, so two equal ids crash its LazyColumn ("Key … was already used")
+            ForEach(b.games.map { StatusPlanGameRow(block: b.id, game: $0) }) { r in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(g.name)
-                    if !g.hints.isEmpty { Text(g.hints.joined(separator: "，")).font(.footnote).foregroundStyle(.secondary) }
+                    Text(r.game.name)
+                    if !r.game.hints.isEmpty { Text(r.game.hints.joined(separator: "，")).font(.footnote).foregroundStyle(.secondary) }
                 }
             }
         }
@@ -274,7 +287,7 @@ struct StatusPage: View {
 
     @ViewBuilder private var tomorrow: some View {
         let rest = data.plan.filter { $0.queueName == nil || $0.queueName != data.currentQueue }
-        if !rest.isEmpty {
+        listSection("status-tomorrow", if: !rest.isEmpty) {
             Section {
                 planRows(rest)
             } header: {
@@ -353,7 +366,7 @@ struct StatusPage: View {
     // MARK: receipts
 
     @ViewBuilder private var receiptsSection: some View {
-        if !data.receipts.isEmpty {
+        listSection("status-receipts", if: !data.receipts.isEmpty) {
             let note = [data.todayLast.isEmpty ? "" : "最近一趟 \(data.todayLast)",
                         data.todayFailed > 0 ? "失败 \(data.todayFailed) 趟" : ""].filter { !$0.isEmpty }.joined(separator: " · ")
             Section {
@@ -376,9 +389,30 @@ struct StatusPage: View {
     }
 }
 
+/// A game row of one plan block (planRows); see the ForEach there for why the id includes the block.
+private struct StatusPlanGameRow: Identifiable {
+    var block: String
+    var game: StatusPlanGame
+    var id: String { block + "/" + game.id }
+}
+
 func receiptRow(_ r: StatusReceipt, at: String) -> some View {
     HStack {
-        Image(systemName: r.ok ? "checkmark.circle.fill" : "xmark.circle.fill").foregroundStyle(r.ok ? Color.green : Color.red)
+        if r.ok {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.green)
+        } else {
+            // no Material cancel icon in skip-ui's table: a red disc with the mapped xmark on Android
+            #if os(Android)
+            // sized to the Material CheckCircle beside it: a 13 pt disc in a 16 pt box (measured on the emulator)
+            ZStack {
+                Circle().fill(Color.red).frame(width: 13, height: 13)
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(Color.white)
+            }
+            .frame(width: 16, height: 16)
+            #else
+            Image(systemName: "xmark.circle.fill").foregroundStyle(Color.red)
+            #endif
+        }
         Text(r.text)
         Spacer()
         Text(at).foregroundStyle(.secondary)

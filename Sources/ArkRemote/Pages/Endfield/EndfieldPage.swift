@@ -61,8 +61,9 @@ struct EndfieldPage: View {
             // view.js:446: a tree this read did not carry is drawn from the last good read.
             let tm = g.tree.map { m.roots[$0] == nil } == true ? (data.lastGoodMaster ?? m) : m
             let drawn = ewRows(g, tm, values: values)
-            // view.js:801-803, 826: a card with no rows this time is not drawn.
-            if !drawn.isEmpty {
+            // view.js:801-803, 826: a card with no rows this time is not drawn (listSection: a bare `if` leaves an empty
+            // grey section on Android, Pages/Shell/SkipFixes.swift).
+            listSection("endfield-\(g.title)", if: !drawn.isEmpty) {
                 Section {
                     let rows = notes.enumerated().map { EWRow(id: "warn-\(g.title)-\($0.offset)", kind: .warning, path: "", label: $0.element) }
                         + drawn

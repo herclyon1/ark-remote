@@ -77,19 +77,19 @@ struct ContentView: View {
 
     private var tabs: some View {
         // Tab images are view.js TAB_ICONS / TAB_IMAGES exported as-is (Resources/Module.xcassets): the game icons keep
-        // their colors; tab-status / tab-phone are template images. resizable() makes them fit the tab icon slot on Android.
+        // their colors; tab-status / tab-phone are template images. tabIconFrame() sizes them for the tab icon slot.
         TabView(selection: selection) {
             NavigationStack {
                 StatusTab()
             }
-            .tabItem { Label { Text("状态") } icon: { Image("tab-status", bundle: .module).resizable().scaledToFit() } }
+            .tabItem { Label { Text("状态") } icon: { Image("tab-status", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.status)
 
             if inShift("MAA") {
             NavigationStack {
                 ArknightsTab()
             }
-            .tabItem { Label { Text("方舟") } icon: { Image("tab-arknights", bundle: .module).resizable().scaledToFit() } }
+            .tabItem { Label { Text("方舟") } icon: { Image("tab-arknights", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.arknights)
             }
 
@@ -97,7 +97,7 @@ struct ContentView: View {
             NavigationStack {
                 EndfieldTab()
             }
-            .tabItem { Label { Text("终末地") } icon: { Image("tab-endfield", bundle: .module).resizable().scaledToFit() } }
+            .tabItem { Label { Text("终末地") } icon: { Image("tab-endfield", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.endfield)
             }
 
@@ -105,16 +105,29 @@ struct ContentView: View {
             NavigationStack {
                 WuwaTab()
             }
-            .tabItem { Label { Text("鸣潮") } icon: { Image("tab-wuwa", bundle: .module).resizable().scaledToFit() } }
+            .tabItem { Label { Text("鸣潮") } icon: { Image("tab-wuwa", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.wuwa)
             }
 
             NavigationStack {
                 PhoneTab()
             }
-            .tabItem { Label { Text("手机") } icon: { Image("tab-phone", bundle: .module).resizable().scaledToFit() } }
+            .tabItem { Label { Text("手机") } icon: { Image("tab-phone", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.phone)
         }
         .overlay { ToastLayer() }   // view.js toast(): one layer over all five tabs (Pages/Shell/ToastLayer.swift)
+    }
+}
+
+private extension Image {
+    /// resizable + scaledToFit, and on Android a fixed 24 pt box (the Material navigation bar icon size): skip-ui's
+    /// TabView icon slot (Containers/TabView.swift RenderImage) does not bound a resizable image's height, and an
+    /// unbounded one stretched the bar over the whole screen.
+    func tabIconFrame() -> some View {
+        #if os(Android)
+        resizable().scaledToFit().frame(width: 24, height: 24)
+        #else
+        resizable().scaledToFit()
+        #endif
     }
 }

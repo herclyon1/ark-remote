@@ -232,7 +232,7 @@ struct EWChoiceList: View {
                         if icons {
                             ForEach(c.label.components(separatedBy: " ＋ "), id: \.self) { name in
                                 if let asset = WuwaSchema.setIcons[name] {
-                                    Image(asset, bundle: .module, label: Text(name))
+                                    Image(asset, bundle: assetBundle, label: Text(name))
                                         .resizable()
                                         .frame(width: 28, height: 28)
                                         .clipShape(RoundedRectangle(cornerRadius: 6))
