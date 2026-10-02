@@ -1,15 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon layer, 108x108dp viewport (developer.android.com/develop/ui/views/launch/icon_design_adaptive:
-     "All layers must be sized to 108x108 dp"; logo "at least 48x48 dp" and "must not exceed 66x66 dp").
-     Gamepad outline from web/icon.svg, scaled about (54,54) so every point stays inside the 66dp safe circle.
-     Generated; the d-pad, A button and B ring are evenOdd holes. -->
+<!-- Adaptive icon monochrome (Android 13+ themed icons; the system tints it) layer, 108x108dp (developer.android.com/develop/ui/views/launch/icon_design_adaptive:
+     "Size all layers to 108x108 dp"; logo "at least 48x48 dp" and "must not exceed 66x66 dp").
+     Glyph: Material Symbols "sports_esports", Rounded, Fill 1 (Apache 2.0), path copied verbatim from
+     github.com/google/material-design-icons symbols/web/sports_esports/materialsymbolsrounded/sports_esports_fill1_24px.svg
+     (viewBox 0 -960 960 960). Scaled 0.065570 about the glyph centre (480,-480) to (54,54):
+     52.4 x 36.7dp, farthest point 29.5dp from centre, inside the 33dp safe-zone radius. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:fillType="evenOdd"
-        android:pathData="M42.47,31.66L65.53,31.66C72.26,31.66 77.06,36.46 78.03,42.71L82.83,63.37C84.27,70.58 78.99,76.34 72.74,75.38C67.45,74.42 64.09,70.1 61.69,65.29L58.32,57.6L49.68,57.6L46.31,65.29C43.91,70.1 40.55,74.42 35.26,75.38C29.01,76.34 23.73,70.58 25.17,63.37L29.98,42.71C30.94,36.46 35.74,31.66 42.47,31.66ZM39.22,42.59A2.28,2.28 0 0,1 43.79,42.59L43.79,44.75L45.95,44.75A2.28,2.28 0 0,1 45.95,49.32L43.79,49.32L43.79,51.48A2.28,2.28 0 0,1 39.22,51.48L39.22,49.32L37.06,49.32A2.28,2.28 0 0,1 37.06,44.75L39.22,44.75ZM59.29,43.67A3.84,3.84 0 1,1 66.97,43.67A3.84,3.84 0 1,1 59.29,43.67ZM64.87,50.4A4.99,4.99 0 1,1 74.84,50.4A4.99,4.99 0 1,1 64.87,50.4ZM67.15,50.4A2.7,2.7 0 1,1 72.56,50.4A2.7,2.7 0 1,1 67.15,50.4Z" />
+    <group
+        android:scaleX="0.065570"
+        android:scaleY="0.065570"
+        android:translateX="22.5263"
+        android:translateY="85.4737">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M182-200q-51 0-79-35.5T82-322l42-300q9-60 53.5-99T282-760h396q60 0 104.5 39t53.5 99l42 300q7 51-21 86.5T778-200q-21 0-39-7.5T706-230l-90-90H344l-90 90q-15 15-33 22.5t-39 7.5Zm498-240q17 0 28.5-11.5T720-480q0-17-11.5-28.5T680-520q-17 0-28.5 11.5T640-480q0 17 11.5 28.5T680-440Zm-80-120q17 0 28.5-11.5T640-600q0-17-11.5-28.5T600-640q-17 0-28.5 11.5T560-600q0 17 11.5 28.5T600-560Zm-290 50v40q0 13 8.5 21.5T340-440q13 0 21.5-8.5T370-470v-40h40q13 0 21.5-8.5T440-540q0-13-8.5-21.5T410-570h-40v-40q0-13-8.5-21.5T340-640q-13 0-21.5 8.5T310-610v40h-40q-13 0-21.5 8.5T240-540q0 13 8.5 21.5T270-510h40Z" />
+    </group>
 </vector>
