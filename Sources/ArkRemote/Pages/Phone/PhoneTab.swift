@@ -20,9 +20,10 @@ struct PhoneTab: View {
                     },
                     clearTokens: { stamina.clear() },
                     copyNoInputLink: {
-                        guard let link = PhoneLink.make() else { return false }
+                        guard let link = PhoneLink.make() else { return .noConfig }
                         PhoneLink.copy(link)
-                        return true
+                        // read back: navigator.clipboard.writeText can reject, UIPasteboard just does nothing
+                        return PhoneLink.pasted() == link ? .copied : .failed(link)
                     }))
     }
 }
@@ -47,6 +48,16 @@ enum PhoneLink {
         #elseif canImport(AppKit)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(s, forType: .string)
+        #endif
+    }
+
+    static func pasted() -> String? {
+        #if os(Android) || canImport(UIKit)
+        return UIPasteboard.general.string
+        #elseif canImport(AppKit)
+        return NSPasteboard.general.string(forType: .string)
+        #else
+        return nil
         #endif
     }
 
