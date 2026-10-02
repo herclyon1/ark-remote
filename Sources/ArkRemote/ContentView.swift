@@ -11,6 +11,15 @@ struct ContentView: View {
     @AppStorage("tab") var tab = ContentTab.status
 
     var body: some View {
+        // no mailbox yet: only 「第一次使用」, no tab bar (web/view.js boot → setupScreen)
+        if Relay.shared.config == nil {
+            SetupScreen()
+        } else {
+            main
+        }
+    }
+
+    @ViewBuilder private var main: some View {
         // in-app update banner above the tabs (Logic/AppUpdate.swift); Android only, iOS keeps the bare TabView
         #if os(Android)
         VStack(spacing: 0) {
