@@ -35,7 +35,7 @@ enum StatusCommands {
     static func actions(_ data: StatusData, ask: Binding<StatusAsk?>, storedQueue: Binding<String>,
                         edits: Binding<[String: EWEdit]>) -> StatusActions {
         let relay = Relay.shared
-        let queue = data.currentQueue
+        let queue = data.currentQueue.isEmpty ? "早班" : data.currentQueue   // view.js theQueue(): curQueue || "早班"
         var a = StatusActions()
         a.runNow = {
             // sending while a run is on makes AUTO-MAS and the manual run fight (view.js #runnow)
@@ -67,7 +67,7 @@ enum StatusCommands {
         }
         a.startEchoFarm = { boss, until in
             guard let t = statusTimeHHMM(until), boss > 0 else {
-                relay.showToast("先选 boss，再填结束时刻（08:30 这种）", ms: 4000)
+                relay.showToast("先选 boss 再填时刻")   // view.js:1228
                 return
             }
             let nm = statusBosses.first(where: { $0.index == boss })?.name ?? "第 \(boss) 个"
@@ -79,7 +79,7 @@ enum StatusCommands {
         }
         a.changeEchoFarmUntil = { until in
             guard let v = statusTimeHHMM(until) else {
-                relay.showToast("时刻要填 08:30 这种（时:分）", ms: 3000)
+                relay.showToast("时刻填成 08:30 这种")   // view.js:1239
                 return
             }
             ask.wrappedValue = StatusAsk(
@@ -93,6 +93,7 @@ enum StatusCommands {
         }
         a.setSkipShutdown = { on in relaySwitch(edits, StatusSwitchID.skipShutdown, on: on) }
         a.setDebugMode = { on in relaySwitch(edits, StatusSwitchID.debugMode, on: on) }
+        a.resend = { id in Task { await Pending.shared.resend(id) } }   // pending.js [data-again] → resend(key)
         return a
     }
 
@@ -124,7 +125,7 @@ enum StatusCommands {
             } else if let i = d.plan.firstIndex(where: { $0.queueName.map(StatusSwitchID.queue) == id }) {
                 d.plan[i].runsToday = on
             }
-            d.switchTags[id] = "待保存"
+            d.switchTags[id] = .unsaved("待保存")
         }
     }
 }

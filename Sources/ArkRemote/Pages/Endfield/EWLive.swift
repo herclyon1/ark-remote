@@ -225,17 +225,7 @@ struct EWSaveBar: ViewModifier {
             } message: {
                 Text(EWSave.summary(edits))
             }
-            .overlay(alignment: .bottom) {
-                if let t = Relay.shared.toast, nowMs() - t.at < Double(t.ms) {
-                    Text(t.text)
-                        .font(.footnote)
-                        .padding(.horizontal, 14).padding(.vertical, 10)
-                        .background(Color.black.opacity(0.8))
-                        .foregroundStyle(Color.white)
-                        .clipShape(Capsule())
-                        .padding(.bottom, 16)
-                }
-            }
+            // the toast is one layer over all tabs now (Pages/Shell/ToastLayer.swift)
     }
 }
 

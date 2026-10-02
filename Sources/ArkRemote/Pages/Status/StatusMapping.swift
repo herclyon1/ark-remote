@@ -61,6 +61,13 @@ extension StatusData {
         // config: AUTO-MAS not running → only _错误 in it
         let cfg = snap?["config"]?.object ?? [:]
         d.configUnreadable = snap != nil && (cfg["_错误"] != nil || cfg.isEmpty)
+        // view.js:323-328: a good config is kept (LS + "-config"); unreadable → the page falls back to it and says so
+        if d.configUnreadable {
+            d.configIsStale = statusLastGoodConfig() != nil
+        } else if let c = snap?["config"], let at = relay.snapAt, at != statusLastGoodAt {
+            statusLastGoodAt = at
+            UserDefaults.standard.set(c.encodedString(), forKey: statusLastGoodKey)
+        }
 
         // device card: setStatus text split at the first 「 · 」
         let st = relay.statusText.isEmpty ? "正在读取…" : relay.statusText
@@ -70,7 +77,8 @@ extension StatusData {
         } else {
             d.deviceStatus = st
         }
-        d.online = live.alive
+        d.online = relay.statusState == "on"   // view.js setStatus(text, state) → #dot2 class (live.js:65-66), not the heartbeat alone
+        d.refreshing = live.busy
 
         // notices
         d.busy = (snap?["run"]?["在跑的"]?.array ?? []).compactMap { $0.string }
@@ -90,8 +98,11 @@ extension StatusData {
 
         // plan text: 🕘 time rows, ▸ game rows with hint lines under them
         let planText = snap?["plan"]?.string ?? ""
-        let skipped = relayObj?["今天跳过"]?.jsString ?? ""
+        // view.js:232-233: 「今天跳过队列」 is a list (中继 09-30); older snapshots carry one name in 「今天跳过」
+        let skipList = relayObj?["今天跳过队列"]?.array
+        let skipped = skipList.map { $0.map { $0.jsString } } ?? ((relayObj?["今天跳过"]?.jsString).map { $0.isEmpty ? [] : [$0] } ?? [])
         var blocks: [StatusPlanBlock] = []
+        var foot: [String] = []
         for raw in planText.split(separator: "\n", omittingEmptySubsequences: false) {
             let l = raw.trimmingCharacters(in: .whitespaces)
             if l.isEmpty || l.hasPrefix("📅") { continue }
@@ -110,23 +121,25 @@ extension StatusData {
                 continue
             }
             if let b = blocks.indices.last, let g = blocks[b].games.indices.last { blocks[b].games[g].hints.append(l) }
+            else if blocks.isEmpty { foot.append(l) }   // view.js:229 `else if (!cur) foot.push(l)`
         }
         if d.nextAt.isEmpty, let first = blocks.first { d.nextAt = first.time }
         for i in blocks.indices {
             let owners = blocks[i].games.compactMap { statusOwnerOf[$0.name] }.sorted().joined(separator: "|")
             if let q = d.queues.first(where: { $0.scripts.sorted().joined(separator: "|") == owners }) {
                 let id = StatusSwitchID.queue(q.name)
-                let on = skipped != q.name
+                let on = !skipped.contains(q.name)
                 pending.liveVals[id] = .bool(on)
                 blocks[i].queueName = q.name
                 blocks[i].runsToday = pending.shownValue(for: id)?.truthy ?? on
-                if let t = tagText(pending.tag(for: id)) { d.switchTags[id] = t }
+                if let t = tag(pending, id) { d.switchTags[id] = t }
             }
         }
         d.plan = blocks
+        d.planFoot = foot
 
         // action tiles
-        if let at = relay.snapAt { d.lastUpdate = ago(at) }
+        if let at = relay.snapAt { d.lastUpdate = ago(at); d.snapAt = at }
 
         // stamina (numTiles): nil = phone not configured; [] = configured, no reading yet
         if let r = stamina.data {
@@ -159,12 +172,18 @@ extension StatusData {
 
         // 停止一切 note for 6 hours
         if estopAt > 0, nowSec() - estopAt < 6 * 3600 {
-            let since = Pending.hhmm(estopAt)
+            // view.js:379-383: this press's answer = an estop receipt stamped (Beijing "MM-DD HH:MM") at or after the press
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = TimeZone(identifier: "Asia/Shanghai")
+            f.dateFormat = "MM-dd HH:mm"
+            let pressed = f.string(from: Date(timeIntervalSince1970: TimeInterval(estopAt)))
             let rc = rcs.reversed().first { r in
-                let t = r["text"]?.jsString ?? ""
-                return t.contains("停") || t.lowercased().contains("estop") || (r["at"]?.jsString ?? "") >= since
+                r["action"]?.jsString == "estop" && (r["at"]?.jsString ?? "") >= pressed
             }
-            d.estopNote = StatusEstopNote(title: "已停止 · 下一趟\(d.nextAt.isEmpty ? "" : " " + d.nextAt) 照常",
+            let head = rc == nil ? "已下令停止 · 等机器回执"
+                : (rc?["ok"]?.truthy ?? false) ? "已停止 · 下一趟\(d.nextAt.isEmpty ? "" : " " + d.nextAt) 照常" : "没停干净 · 见下方回执"
+            d.estopNote = StatusEstopNote(title: head,
                                           receipt: rc.map { "回执 \($0["at"]?.jsString ?? "")：\($0["text"]?.jsString ?? "")" }
                                               ?? "等机器回执：停干净没有以回执为准")
         }
@@ -179,7 +198,7 @@ extension StatusData {
         let dbgShown = pending.shownValue(for: StatusSwitchID.debugMode)?.truthy ?? dbgLive
         d.debugModeUntil = dbgShown ? (dbgLive ? (dbg?.jsString ?? "") : "") : nil   // "" = on, until not reported yet
         for id in [StatusSwitchID.skipShutdown, StatusSwitchID.debugMode] {
-            if let t = tagText(pending.tag(for: id)) { d.switchTags[id] = t }
+            if let t = tag(pending, id) { d.switchTags[id] = t }
         }
 
         // 刷 4C 声骸 boss list
@@ -192,14 +211,28 @@ extension StatusData {
         return d
     }
 
-    private static func tagText(_ tag: PendingTag?) -> String? {
-        switch tag {
-        case .sent(let text): return text
-        case .mismatch(let text, _): return text
-        case .applied(let text): return text
+    /// pending.js:50-73: the small line under a row. Past 10 h without a receipt the line is 「没回执 · 已寄出 HH:MM」 with
+    /// 「再发一次」 (pending.js:58-59: resent only by a tap, never automatically).
+    @MainActor private static func tag(_ pending: Pending, _ id: String) -> StatusTag? {
+        if let p = pending.items[id], p.mismatchAt == nil {
+            let at = p.resentAt ?? p.sentAt
+            if nowSec() - at > 10 * 3600 { return .sent("没回执 · 已寄出 \(Pending.hhmm(at))", again: true) }
+        }
+        switch pending.tag(for: id) {
+        case .sent(let text): return .sent(text, again: false)
+        case .mismatch(let text, _): return .bad(text)
+        case .applied(let text): return .applied(text)
         case nil: return nil
         }
     }
+}
+
+/// view.js lastGoodConfig: the last readable AUTO-MAS config, localStorage LS + "-config".
+let statusLastGoodKey = "ark-remote-cfg-config"
+@MainActor var statusLastGoodAt: Int? = nil
+func statusLastGoodConfig() -> JSONValue? {
+    guard let raw = UserDefaults.standard.string(forKey: statusLastGoodKey), let v = try? JSONValue.parse(raw), !v.isNull else { return nil }
+    return v
 }
 
 /// schema.js BOSSES, from Logic/Schema.swift `bosses`.
