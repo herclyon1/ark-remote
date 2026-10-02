@@ -100,6 +100,12 @@ struct ContentView: View {
             .tabItem { Label { Text("手机") } icon: { Image("tab-phone", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.phone)
         }
+        #if os(Android)
+        // Apple's tab bar switches tabs at once; skip-ui's TabView cross-fades for 700 ms (Navigation 3 NavDisplay
+        // defaults via NavDisplayTransitionOptions.tabViewDefaults), and a swipe during that fade is lost.
+        // skip-ui README "tabViewTransitions": NavDisplayTransitionOptions(.none).
+        .tabViewTransitions { _ in .init(.none) }   // SkipUI.NavDisplayTransitionOptions; importing SkipUI here clashes with SwiftUI.View
+        #endif
         .overlay { ToastLayer() }   // view.js toast(): one layer over all five tabs (Pages/Shell/ToastLayer.swift)
     }
 }
