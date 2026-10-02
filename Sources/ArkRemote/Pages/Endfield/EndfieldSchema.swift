@@ -78,6 +78,17 @@ enum EndfieldSchema {
                     hint: "勾上的路线才会去采"),
     ])
 
+    /// The rows a card keeps on the 终末地 page itself: the task's switch and its current mode, most-changed first
+    /// (hig-kit/HIG-CHECKLIST.maa.md:55 progressive disclosure, :59 order by importance). Every other row of the card,
+    /// including the ones a mode opens (ProtocolSpaceTab → OperatorProgression …), is one level down under 「更多设置」.
+    /// Filters the rows ewRows draws, not `fields`: tree cards draw the machine's tree (EWModel.swift ewRows).
+    static let firstLevel: Set<String> = [
+        "AutoEssence/@enabled", "AutoEssence/AutoEssenceMenu",
+        "ProtocolSpace/@enabled", "ProtocolSpace/ProtocolSpaceSchedule", "ProtocolSpace/ProtocolSpaceMode",
+        "ProtocolSpace/ProtocolSpaceTab",
+        "AutoCollect/@enabled", "AutoCollect/AutoCollectMode",
+    ]
+
     /// Page order = schema.js order.
     static let groups: [EWGroupSpec] = [essence, protocolSpace, otherTasks]
 }

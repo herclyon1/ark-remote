@@ -18,13 +18,17 @@ struct EndfieldPage: View {
     var data: EndfieldPageData
     var onChange: (String, EWValue) -> Void
     var onResend: (String) -> Void
+    /// Reads the data afresh, for the 「更多设置」 pages (EndfieldTab.pageData); nil = they draw from `data`.
+    var live: (() -> EndfieldPageData)?
 
     @State var values: [String: EWValue]
 
     init(data: EndfieldPageData,
+         live: (() -> EndfieldPageData)? = nil,
          onChange: @escaping (String, EWValue) -> Void = { _, _ in },
          onResend: @escaping (String) -> Void = { _ in }) {
         self.data = data
+        self.live = live
         self.onChange = onChange
         self.onResend = onResend
         _values = State(initialValue: ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:])
@@ -53,20 +57,26 @@ struct EndfieldPage: View {
 
     @ViewBuilder
     private func card(_ g: EWGroupSpec) -> some View {
-        let (m, notes) = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster)
-        if let m {
-            // view.js:446: a tree this read did not carry is drawn from the last good read.
-            let tm = g.tree.map { m.roots[$0] == nil } == true ? (data.lastGoodMaster ?? m) : m
-            let drawn = ewRows(g, tm, values: values)
+        if let c = ewCard(g, data, values: values) {
+            let main = c.rows.filter { EndfieldSchema.firstLevel.contains($0.path) }
+            let more = c.rows.contains { !EndfieldSchema.firstLevel.contains($0.path) }
             // view.js:801-803, 826: a card with no rows this time is not drawn (listSection: a bare `if` leaves an empty
             // grey section on Android, Pages/Shell/SkipFixes.swift).
-            listSection("endfield-\(g.title)", if: !drawn.isEmpty) {
+            listSection("endfield-\(g.title)", if: !c.rows.isEmpty) {
                 Section {
-                    let rows = notes.enumerated().map { EWRow(id: "warn-\(g.title)-\($0.offset)", kind: .warning, path: "", label: $0.element) }
-                        + drawn
-                    ForEach(rows) { row in
-                        EWRowView(row: row, values: $values, readonly: m.readonly, onChange: onChange,
+                    ForEach(ewNoteRows(c.notes, "warn-\(g.title)") + main) { row in
+                        EWRowView(row: row, values: $values, readonly: c.master.readonly, onChange: onChange,
                                   tag: data.tags[row.path], onResend: onResend)
+                    }
+                    // The rest of the card one level down, as Settings does (HIG-CHECKLIST.maa.md:55). A plain NavigationLink,
+                    // not navigationDestination(isPresented:) - see the 库存 row above (7f89811).
+                    if more {
+                        NavigationLink {
+                            EndfieldMorePage(group: g, data: live ?? { [data] in data }, values: $values, onChange: onChange, onResend: onResend)
+                        } label: {
+                            Text("更多设置")
+                        }
+                        .listRowBackground(rowBackground(nil))   // same row shape as the EWRowView rows beside it (SkipFixes.swift)
                     }
                 } header: {
                     Text(g.title)
@@ -81,5 +91,55 @@ struct EndfieldPage: View {
                 Text(g.title)
             }
         }
+    }
+}
+
+/// What one card draws (view.js:409-512): the master its rows read from, the warnings above them, and every row in page
+/// order. nil = nothing readable and no earlier copy. Shared by the 终末地 page and its 「更多设置」 pages, so both draw
+/// the same rows from the same last-good fallback.
+func ewCard(_ g: EWGroupSpec, _ data: EndfieldPageData, values: [String: EWValue]) -> (master: EWMaster, notes: [String], rows: [EWRow])? {
+    let (m, notes) = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster)
+    guard let m else { return nil }
+    // view.js:446: a tree this read did not carry is drawn from the last good read.
+    let tm = g.tree.map { m.roots[$0] == nil } == true ? (data.lastGoodMaster ?? m) : m
+    return (m, notes, ewRows(g, tm, values: values))
+}
+
+/// The warnings as rows; `prefix` keeps their ids apart between pages.
+func ewNoteRows(_ notes: [String], _ prefix: String) -> [EWRow] {
+    notes.enumerated().map { EWRow(id: "\(prefix)-\($0.offset)", kind: .warning, path: "", label: $0.element) }
+}
+
+/// A card's rows past its first level (EndfieldSchema.firstLevel), titled by the task. The rows are worked out here from
+/// the live `values` binding, so a mode changed on either page shows the rows it opens; edits go through the same
+/// binding and `onChange` as the 终末地 page's own rows.
+struct EndfieldMorePage: View {
+    var group: EWGroupSpec
+    /// Read in `body`, not stored: on Android the pushed page is not redrawn with the 终末地 page's newer data.
+    var data: () -> EndfieldPageData
+    @Binding var values: [String: EWValue]
+    var onChange: (String, EWValue) -> Void
+    var onResend: (String) -> Void
+
+    /// 「终末地 · 基质刷取」 → 「基质刷取」.
+    private var name: String { group.title.components(separatedBy: " · ").last ?? group.title }
+
+    var body: some View {
+        let data = self.data()
+        let c = ewCard(group, data, values: values)
+        let rest = c?.rows.filter { !EndfieldSchema.firstLevel.contains($0.path) } ?? []
+        List {
+            // listSection: rows a mode opened can all go while this page is open (SkipFixes.swift)
+            listSection("endfield-more-\(group.title)", if: !rest.isEmpty) {
+                Section {
+                    ForEach(ewNoteRows(c?.notes ?? [], "more-warn-\(group.title)") + rest) { row in
+                        EWRowView(row: row, values: $values, readonly: c?.master.readonly ?? [:], onChange: onChange,
+                                  tag: data.tags[row.path], onResend: onResend)
+                    }
+                }
+            }
+        }
+        // the ✕ / ✓ of 「待保存」 here too, so a change made on this page is saved from it
+        .modifier(EWSaveBar(title: name))
     }
 }

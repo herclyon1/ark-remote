@@ -5,17 +5,11 @@ import SwiftUI
 struct EndfieldTab: View {
     static let game = "MaaEnd"
 
-    /// The unsaved changes of every tab (Logic/Edits.swift); this tab reads and writes its own keys.
-    private var edits: [String: EWEdit] { EWEdits.shared.items }
-
     var body: some View {
         let relay = Relay.shared
         let master = EWMaster.from(snap: relay.snap, game: Self.game)
         let lastGood = EWLastGood.load(Self.game)
-        let data = EndfieldPageData(master: ewShown(master, game: Self.game, edits: edits),
-                                    lastGoodMaster: lastGood.map { ewShown($0, game: Self.game, edits: edits) },
-                                    tags: ewTags(game: Self.game, master: master, edits: edits))
-        EndfieldPage(data: data, onChange: { path, v in
+        EndfieldPage(data: Self.pageData(), live: Self.pageData, onChange: { path, v in
             let machine = ewEffectiveMaster(master, lastGood: lastGood).0
             let label = ewLabel(EndfieldSchema.groups, machine ?? master, path)
             let (k, e) = EWSave.masterEdit(game: Self.game, path: path, label: label, to: v, machine: machine?.values[path])
@@ -25,6 +19,16 @@ struct EndfieldTab: View {
         .refreshable { await load() }
         .task { await load() }
         .onChange(of: relay.snapAt) { _, _ in sync() }
+    }
+
+    /// The page's data from the live snap and the unsaved changes. Also read by the 「更多设置」 pages as they draw: on
+    /// Android a pushed page keeps the data it was pushed with, so its 「待保存」 / 「已寄出」 lines would not appear.
+    static func pageData() -> EndfieldPageData {
+        let master = EWMaster.from(snap: Relay.shared.snap, game: game)
+        let edits = EWEdits.shared.items   // the unsaved changes of every tab (Logic/Edits.swift); this tab's own keys
+        return EndfieldPageData(master: ewShown(master, game: game, edits: edits),
+                                lastGoodMaster: EWLastGood.load(game).map { ewShown($0, game: game, edits: edits) },
+                                tags: ewTags(game: game, master: master, edits: edits))
     }
 
     private func load() async {
