@@ -436,14 +436,14 @@ private struct StatusPlanGameRow: Identifiable {
     var id: String { block + "/" + game.id }
 }
 
-/// As the web row (view.js:449-451): the text on one line with an ellipsis at the end (index.html:392 `.row > label`
-/// nowrap / ellipsis), the time never wrapping (:379 `.ro.short` nowrap); the icon and the time keep their width.
+/// A receipt shows its whole text, wrapping onto as many lines as it needs (user, 10-02 20:49: a cut-off receipt, with
+/// or without an ellipsis, hides the information). The web row is one line with an ellipsis (view.js:449-451,
+/// index.html:392); the App does not follow it here. The icon and the time keep their width (time never wraps, as
+/// :379 `.ro.short` nowrap); only the text gives way.
 func receiptRow(_ r: StatusReceipt, at: String) -> some View {
     HStack {
         receiptIcon(r).fixedSize(horizontal: true, vertical: false)
-        // iOS truncates the tail with 「…」 by default; skip-fuse-ui marks truncationMode unavailable (Text.swift:559) and
-        // skip-ui then clips a one-line Text without an ellipsis (Text.swift:497-510, no mode = TextOverflow.Clip)
-        Text(r.text).lineLimit(1)
+        Text(r.text)
         Spacer()
         Text(at).foregroundStyle(.secondary).lineLimit(1).fixedSize(horizontal: true, vertical: false)
     }
