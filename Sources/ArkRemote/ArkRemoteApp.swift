@@ -56,4 +56,10 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
     /* SKIP @bridge */public func onLowMemory() {
         logger.debug("onLowMemory")
     }
+
+    /// navigator.onLine / online / offline on Android: AndroidAppMain (Main.kt) forwards the system's
+    /// default-network callback here. Called on a ConnectivityManager thread; Live is main-actor state.
+    /* SKIP @bridge */public func onNetwork(online: Bool) {
+        Task { @MainActor in Live.shared.deviceOnline = online }
+    }
 }

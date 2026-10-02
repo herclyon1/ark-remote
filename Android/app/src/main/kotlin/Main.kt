@@ -7,6 +7,8 @@ import skip.ui.*
 
 import android.Manifest
 import android.app.Application
+import android.net.ConnectivityManager
+import android.net.Network
 import android.graphics.Color as AndroidColor
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -42,6 +44,25 @@ open class AndroidAppMain: Application {
         logger.info("starting app")
         ProcessInfo.launch(applicationContext)
         AppDelegate.shared.onInit()
+        watchNetwork()
+    }
+
+    /// navigator.onLine / online / offline: the system's default-network callback, event-driven (no timer,
+    /// no polling, no request). registerDefaultNetworkCallback reports nothing when there is no network at
+    /// registration, so the starting state is read once from activeNetwork. On a handover (Wi-Fi → mobile)
+    /// onLost for the old network can come while the new one is already the default, so onLost re-reads it.
+    private fun watchNetwork() {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return
+        AppDelegate.shared.onNetwork(cm.activeNetwork != null)
+        cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                AppDelegate.shared.onNetwork(true)
+            }
+
+            override fun onLost(network: Network) {
+                AppDelegate.shared.onNetwork(cm.activeNetwork != null)
+            }
+        })
     }
 
     companion object {

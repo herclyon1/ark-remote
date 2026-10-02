@@ -9,11 +9,15 @@
 //     `.inactive` (notification shade, app switcher) is ignored so the stream does not flap.
 //   · The web page boots after the setup screen has a mailbox; the app can come to the foreground before
 //     the topic / PIN are entered, so the live part also starts when the config first appears.
-//   · navigator.onLine → Live.deviceOnline stays true: skip-foundation has no network monitor
-//     (only URL.checkResourceIsReachable for files).
-//     TODO: feed Live.deviceOnline from Android ConnectivityManager / NWPathMonitor.
+//   · navigator.onLine / online / offline → Live.deviceOnline, fed by the system's own network events
+//     (no timer, no polling, no request): on Android ConnectivityManager.registerDefaultNetworkCallback in
+//     AndroidAppMain (Android/app/src/main/kotlin/Main.kt) → ArkRemoteAppDelegate.onNetwork; on iOS
+//     NWPathMonitor below. skip-foundation itself has no network monitor.
 
 import Foundation
+#if canImport(Network)
+import Network
+#endif
 import SkipFuse
 import SwiftUI
 
@@ -21,11 +25,23 @@ import SwiftUI
     private static var wired = false
     /// .task and the first scenePhase change can both report `.active` at launch; act once.
     private static var visible = false
+    #if canImport(Network)
+    /// navigator.onLine on iOS: NWPathMonitor reports each change of the system's network path.
+    private static let pathMonitor = NWPathMonitor()
+    #endif
 
     /// The hooks between the logic modules; once per process.
     static func wire() {
         guard !wired else { return }
         wired = true
+
+        #if canImport(Network)
+        pathMonitor.pathUpdateHandler = { @Sendable path in
+            let online = path.status == .satisfied
+            Task { @MainActor in Live.shared.deviceOnline = online }
+        }
+        pathMonitor.start(queue: .main)
+        #endif
 
         // stockpile.js: Inventory.refresh(force) → the {取自, games: [...]} object
         Stockpile.shared.loader = { force in
