@@ -110,6 +110,8 @@ final class DiagLog: @unchecked Sendable {
         guard let u = URL(string: urlString), let host = u.host else { return "?" }
         var parts = u.path.split(separator: "/").map(String.init)
         if urlString.hasPrefix(ntfyBase), !parts.isEmpty { parts[0] = "<信箱>" }
+        // the state object's name is as good as the topic for reading the state
+        if urlString.hasPrefix(cosBase), parts.first == "state", parts.count > 1 { parts[1] = "<状态>" }
         return host + "/" + parts.joined(separator: "/")
     }
 }

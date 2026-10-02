@@ -32,6 +32,8 @@
 //   · view.js render() is SwiftUI observation; `alive` replaces the 「现在在跑」 card's re-render.
 //   · why(err): URLError codes are mapped as well as the browser's message words.
 //   · window.__viewReady guard is gone: there is no script load order here.
+//   · Since 2026-10-02 a big state is on Tencent COS and the topic only says `state <ts> <bytes>` (Net.swift
+//     `cosBase`): read on open (becameVisible), on refresh (pingInner) and on that notice - no timer.
 
 import Foundation
 #if canImport(FoundationNetworking)
@@ -151,6 +153,8 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         let floor = Double(minAt ?? 0)
         var best = relay.snap
         pingLatest = nil
+        // the state on COS, once (a refresh is one of the three moments it is read: open, refresh, notice)
+        if let s = await relay.cosState(), let sAt = Self.atOf(s), best == nil || sAt > (Self.atOf(best) ?? 0) { best = s }
 
         // open the stream before sending, so the reply cannot beat the listener
         let es = NtfyStream(topics: cfg.topic, since: "30s") { [weak self] d in
@@ -187,6 +191,10 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
                    best == nil || sAt > (Self.atOf(best) ?? 0) {
                     best = s
                 }
+                // the reply's notice may have been missed by the stream: the object holds the same state
+                if let s = await relay.cosState(), let sAt = Self.atOf(s), best == nil || sAt > (Self.atOf(best) ?? 0) {
+                    best = s
+                }
             }
         }
 
@@ -212,6 +220,14 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     /// The ping stream's onmessage: keep the newest state whose PIN matches (chunked states are joined).
     private func onPingEvent(_ d: JSONValue, pin: String) {
         if let ev = d["event"]?.string, ev != "message" { return }
+        if Relay.isStateNotice(d["message"]?.string) {
+            // the reply is on COS: fetch it and keep it like a state that came in the message
+            Task { @MainActor [weak self] in
+                guard let self, let body = await self.relay.cosState(), let at = Self.atOf(body) else { return }
+                if self.pingLatest == nil || at > (Self.atOf(self.pingLatest) ?? 0) { self.pingLatest = body }
+            }
+            return
+        }
         guard let m = Relay.envelope(d), m["kind"]?.string == "state", m["pin"]?.jsString == pin else { return }
         let body: JSONValue?
         if m["gzp"] != nil { body = try? relay.joinChunks(m) } else { body = try? Relay.unwrap(m) }
@@ -327,6 +343,19 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             updateLive()
             return
         }
+        if Relay.isStateNotice(d["message"]?.string) {
+            // a new state is on COS; the notice is proof of life like a state
+            lastHb = max(lastHb, t)
+            sawHb(t)
+            updateLive()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.relay.readCosState()
+                self.pending.resendStale()
+                self.updateLive()
+            }
+            return
+        }
         guard let text = d["message"]?.string, let m = try? JSONValue.parse(text) else { return }
         guard m["kind"]?.string == "state", m["pin"]?.jsString == cfg.pin else { return }
         guard let body = try? Relay.unwrap(m) else { return }
@@ -341,6 +370,11 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     func becameVisible() async {
         guard relay.config != nil else { return }
         startLive()
+        // the newest state the machine stored, once per open (no timer)
+        let r = relay
+        Task { @MainActor in
+            if await r.readCosState() { self.updateLive() }
+        }
         await probeHb()
         updateLive()
         askWatch()

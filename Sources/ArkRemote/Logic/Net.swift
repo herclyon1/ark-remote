@@ -18,6 +18,12 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
 /// view.js: `const NTFY = "https://ntfy.sh"`.
 let ntfyBase = "https://ntfy.sh"
 
+/// The Tencent COS bucket the machine stores its whole state in (maa-automation relay/ark_relay/phone.py
+/// `state_cos`, COS_BUCKET / COS_REGION of the machine's .env). Since 2026-10-02 (the user, 22:22) a big state
+/// is no longer cut into ntfy pieces: the relay PUTs the envelope there, public-read, and posts only
+/// `state <ts> <bytes>` on the topic.
+let cosBase = "https://ark-evidence-1315873325.cos.ap-shanghai.myqcloud.com"
+
 /// net.js `now()`: whole seconds since the epoch.
 func nowSec() -> Int { Int(Date().timeIntervalSince1970) }
 /// JS `Date.now()`: milliseconds since the epoch.
@@ -370,6 +376,44 @@ struct PinScan: Sendable, Equatable {
         guard let bin = Data(base64Encoded: gz, options: .ignoreUnknownCharacters) else { throw AppError("base64 解不开") }
         let raw = try Gzip.inflate(bin)
         return try JSONValue.parse(raw)
+    }
+
+    // MARK: the state on COS
+
+    /// phone.py state_key(topic): `state/` + the first 32 hex digits of sha256(topic) + `.json`. The topic is
+    /// stored lower-cased and trimmed (saveConfig), the relay lower-cases too, so both name the same object.
+    nonisolated static func stateURL(topic: String) -> String {
+        let t = topic.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let h = Hash.hex(Hash.sha256(Array(t.utf8)))
+        return "\(cosBase)/state/\(String(h.prefix(32))).json"
+    }
+
+    /// The relay's notice that a new state is on COS: `state <ts> <bytes>` (not JSON, so older readers skip it).
+    nonisolated static func isStateNotice(_ text: String?) -> Bool {
+        guard let text else { return false }
+        return text.hasPrefix("state ")
+    }
+
+    /// One GET of the state object; the body is the same envelope a single ntfy state message carries
+    /// (`kind`, `pin`, `body` or `gz`), so it is decoded exactly like one. nil when there is none yet
+    /// (an older relay, a machine without COS), the PIN does not match, or the network fails.
+    func cosState() async -> JSONValue? {
+        guard let cfg = config, !cfg.topic.isEmpty else { return nil }
+        guard let (data, status) = try? await httpFetch(Self.stateURL(topic: cfg.topic)),
+              status == 200, let m = try? JSONValue.parse(data),
+              m["kind"]?.string == "state" else { return nil }
+        if m["pin"]?.jsString != cfg.pin {
+            pinScan = PinScan(seen: 1, matched: 0)
+            return nil
+        }
+        return try? Self.unwrap(m)
+    }
+
+    /// Reads the state object once and takes it when it is newer. Called on open, on refresh and on the
+    /// relay's notice only - never on a timer (the user, 15:27: 「又在轮询。」).
+    @discardableResult
+    func readCosState() async -> Bool {
+        adopt(await cosState())
     }
 
     /// net.js latestState(since): newest state whose PIN matches; counts pinScan on the way.
