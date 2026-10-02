@@ -34,6 +34,12 @@
 //   · window.__viewReady guard is gone: there is no script load order here.
 //   · Since 2026-10-02 a big state is on Tencent COS and the topic only says `state <ts> <bytes>` (Net.swift
 //     `cosBase`): read on open (becameVisible), on refresh (pingInner) and on that notice - no timer.
+//   · Since 2026-10-03 the heartbeat is on COS too (`state/<hash>.hb.json`, relay phone.py HB_COS_SEC): 10-02 19:19
+//     ntfy's 250 a day ran out, every beat after it was refused, and at 23:58 the App read 「关机 · 最后心跳 22:34」
+//     while the machine was running. It is read on open / back to the foreground (becameVisible), on refresh
+//     (pingInner), and after every `watch` (open, foreground, the 8-minute renewal) at 5, 10 and 15 s until it
+//     counts - the relay only rewrites it while someone watches, so the first read after an idle spell is stale. No
+//     timer of its own.
 
 import Foundation
 #if canImport(FoundationNetworking)
@@ -52,6 +58,15 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     static let hbFreshMs: Double = 90 * 1000
     static let watchRenewMs: Double = 8 * 60 * 1000
     static let confirmMs: Double = 8 * 1000
+    /// After a `watch`, read the COS heartbeat again at these moments (ms after the watch went out), stopping at the
+    /// first that counts. The relay rewrites it as soon as the watch arrives, but its PUT took 1.3-8.3 s from the
+    /// machine (2026-10-03 00:37, three in a row), and on ark37 the new object showed up 9-12 s after the App opened.
+    static let hbFollowUpMs: [Double] = [5000, 10000, 15000]
+    /// 「正在确认」 lasts this long instead of confirmMs while the machine keeps its heartbeat on COS, so the line
+    /// goes from that straight to 「开机中」 when the last follow-up read lands, with no 「关机」 in between.
+    static let confirmCosMs: Double = 16 * 1000
+    /// Did the last read find a heartbeat object on COS (a relay that writes one)?
+    @ObservationIgnored var cosHbSeen = false
     static let hbSeenKey = "ark-remote-hb"
 
     /// Seconds between beats, as the heartbeat message itself reports ("hb 30" / "hb 300"). At the daily
@@ -155,6 +170,8 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         pingLatest = nil
         // the state on COS, once (a refresh is one of the three moments it is read: open, refresh, notice)
         if let s = await relay.cosState(), let sAt = Self.atOf(s), best == nil || sAt > (Self.atOf(best) ?? 0) { best = s }
+        // and the heartbeat on COS, for the live line after the refresh (this one sets its own status)
+        await readCosHb(show: false)
 
         // open the stream before sending, so the reply cannot beat the listener
         let es = NtfyStream(topics: cfg.topic, since: "30s") { [weak self] d in
@@ -262,13 +279,26 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     /// 「我在看」: the machine beats at once on receipt. No answer within 8 s counts as off.
     func askWatch() {
         guard let cfg = relay.config, !cfg.topic.isEmpty, !cfg.pin.isEmpty else { return }
-        if !(lastHb > 0 && nowMs() - lastHb < hbWindowMs()) { pendingUntil = nowMs() + Self.confirmMs }
+        if !(lastHb > 0 && nowMs() - lastHb < hbWindowMs()) {
+            pendingUntil = nowMs() + (cosHbSeen ? Self.confirmCosMs : Self.confirmMs)
+        }
         updateLive()   // show 「正在确认…」 at once, so the old 「关机」 does not hang 5 more seconds
         let r = relay
         Task { [weak self] in
             do {
                 try await r.send(.object(["action": .string("watch")]))
                 self?.netOk = true
+                // the relay answers a watch on COS at once (even when ntfy's quota stopped its beats): read it until
+                // it counts, at most three times
+                let sent = nowMs()
+                for at in Self.hbFollowUpMs {
+                    guard let me = self, me.cosHbSeen else { break }
+                    let left = sent + at - nowMs()
+                    if left > 0 { try? await Task.sleep(nanoseconds: UInt64(left) * 1_000_000) }
+                    let before = me.lastHb
+                    await me.readCosHb()
+                    if me.lastHb > before { break }
+                }
             } catch {
                 self?.netOk = false
                 self?.updateLive()
@@ -294,12 +324,46 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
                     if let n = Self.hbPace(e["message"]) { hbEvery = n }
                 }
             }
-            lastHb = bye >= hb ? 0 : hb
+            // merge, not overwrite: a beat read from COS a moment earlier must survive a quiet ntfy topic
+            lastHb = bye >= hb && bye >= lastHb ? 0 : max(lastHb, hb)
             sawHb(max(hb, bye))
             netOk = true
         } catch {
             netOk = false
         }
+    }
+
+    /// The relay's heartbeat on COS, read once (never on a timer). It counts as a beat only while it is younger than
+    /// 2 × cos_every + 30 s (the relay rewrites it every cos_every s while watched), so a machine whose power was cut
+    /// does not read as on; once counted, `every` sets the window like "hb N" does. Its `at` always updates
+    /// 「最后心跳」. With `show` false the status line is left alone (refresh sets its own).
+    func readCosHb(show: Bool = true) async {
+        guard let b = await relay.cosHb(), let atS = b["at"]?.number, atS > 0 else { return }
+        cosHbSeen = true
+        let at = atS * 1000
+        sawHb(at)
+        if b["bye"]?.bool == true {
+            if at >= lastHb {
+                lastHb = 0
+                pendingUntil = 0
+            }
+        } else {
+            let cosEvery = b["cos_every"]?.number ?? 30
+            if nowMs() - at < cosEvery * 2000 + 30000 && at > lastHb {
+                lastHb = at
+                if let n = b["every"]?.number, n > 0 { hbEvery = Int(n) }
+                pending.resendStale()
+            }
+        }
+        if show { updateLive() }
+    }
+
+    /// A state the machine stored is proof of life too (like a state on the stream), by the same 90-s rule.
+    private func stateIsLife() {
+        guard let a = relay.snapAt else { return }
+        let at = Double(a) * 1000
+        if nowMs() - at < Self.hbFreshMs && at > lastHb { lastHb = at }
+        sawHb(at)
     }
 
     /// "hb 30" → 30; anything else → nil (keeps the current pace).
@@ -373,9 +437,13 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         // the newest state the machine stored, once per open (no timer)
         let r = relay
         Task { @MainActor in
-            if await r.readCosState() { self.updateLive() }
+            if await r.readCosState() {
+                self.stateIsLife()
+                self.updateLive()
+            }
         }
         await probeHb()
+        await readCosHb(show: false)   // after probeHb, which sets lastHb from ntfy's last 90 s
         updateLive()
         askWatch()
     }

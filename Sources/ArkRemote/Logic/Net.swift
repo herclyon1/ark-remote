@@ -388,6 +388,20 @@ struct PinScan: Sendable, Equatable {
         return "\(cosBase)/state/\(String(h.prefix(32))).json"
     }
 
+    /// phone.py hb_key(topic): the heartbeat object next to the state, `state/<same hash>.hb.json`.
+    nonisolated static func hbURL(topic: String) -> String {
+        String(stateURL(topic: topic).dropLast(".json".count)) + ".hb.json"
+    }
+
+    /// One GET of the relay's heartbeat on COS: {"at": s, "every": s, "cos_every": s} (+ "bye": true on a service
+    /// stop). nil when there is none (an older relay, a machine without COS) or the network fails.
+    func cosHb() async -> JSONValue? {
+        guard let cfg = config, !cfg.topic.isEmpty else { return nil }
+        guard let (data, status) = try? await httpFetch(Self.hbURL(topic: cfg.topic)),
+              status == 200, let m = try? JSONValue.parse(data), m["at"]?.number != nil else { return nil }
+        return m
+    }
+
     /// The relay's notice that a new state is on COS: `state <ts> <bytes>` (not JSON, so older readers skip it).
     nonisolated static func isStateNotice(_ text: String?) -> Bool {
         guard let text else { return false }
