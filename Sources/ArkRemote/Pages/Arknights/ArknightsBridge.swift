@@ -139,23 +139,58 @@ struct ArknightsEdit: Equatable {
 
 /// Builds the 方舟 tab's data from the relay snapshot and turns page edits back into commands.
 struct ArknightsBridge {
+    /// The relay snapshot with snap.master.MAA swapped for the last good copy when this one could not be read
+    /// (view.js:415-422 `cur` ← `last.values`); every field read below goes through it, as the web's `cur` does.
     let snap: JSONValue?
+    /// snap.master.MAA could not be read this time (view.js:415: no values and no readonly).
+    let masterUnreadable: Bool
+    /// …and the rows show the last good copy instead (view.js:421).
+    let masterStale: Bool
+    /// The picked shift (view.js curQueue, stored as "ark-remote-cfg-queue"; chosen on the 状态 tab).
+    let queue: String
 
-    /// view.js:317-327: the shown shift is the first queue (the web remembers a picked one; the app has no
-    /// shift picker yet); no queue or an empty script list means every game is in.
+    init(snap live: JSONValue?, queue: String = "", lastGoodMaster: JSONValue? = nil) {
+        self.queue = queue
+        let m = live?["master"]?["MAA"]
+        let unreadable = (m?["values"]?.object ?? [:]).isEmpty && (m?["readonly"]?.object ?? [:]).isEmpty
+        masterUnreadable = unreadable
+        // view.js:416-417: no earlier copy with values → the warning instead of the rows.
+        if unreadable, let last = lastGoodMaster, last["values"]?.object?.isEmpty == false,
+           case .object(var top)? = live {
+            var all = top["master"]?.object ?? [:]
+            all["MAA"] = last
+            top["master"] = .object(all)
+            snap = .object(top)
+            masterStale = true
+        } else {
+            snap = live
+            masterStale = false
+        }
+    }
+
+    /// The last readable snap.master.MAA, kept by EWLastGood.save under the web's key (view.js:423-426).
+    static func lastGoodMaster() -> JSONValue? {
+        guard let raw = UserDefaults.standard.string(forKey: EWLastGood.key),
+              let all = try? JSONValue.parse(raw), let v = all["MAA"], !v.isNull else { return nil }
+        return v
+    }
+
+    /// view.js:317-327: the shown shift is the picked one, else the first queue (view.js:321); no queue or an
+    /// empty script list means every game is in.
     var inShift: Bool {
-        guard let first = snap?["queues"]?.array?.first,
-              let scripts = first["脚本"]?.array, !scripts.isEmpty else { return true }
+        let qs = snap?["queues"]?.array ?? []
+        guard let q = qs.first(where: { $0["名"]?.string == queue }) ?? qs.first,
+              let scripts = q["脚本"]?.array, !scripts.isEmpty else { return true }
         return scripts.contains { $0.string == "MAA" }
     }
 
-    var master: JSONValue? { snap?["master"]?["MAA"] }
-
-    /// view.js:412: no values and no readonly → the master copy could not be read.
-    /// TODO: the web falls back to the last good master copy (lastGoodMaster, view.js:413-414); the app keeps none yet.
-    var masterUnreadable: Bool {
-        (master?["values"]?.object ?? [:]).isEmpty && (master?["readonly"]?.object ?? [:]).isEmpty
+    /// The shift names for the note when MAA is not in the picked shift.
+    var shiftName: String {
+        let qs = snap?["queues"]?.array ?? []
+        return (qs.first(where: { $0["名"]?.string == queue }) ?? qs.first)?["名"]?.string ?? ""
     }
+
+    var master: JSONValue? { snap?["master"]?["MAA"] }
 
     /// Raw option values by their string form, for writing the machine's own value back (view.js:1202).
     var droneOptionValues: [String: JSONValue] {
@@ -177,10 +212,17 @@ struct ArknightsBridge {
 
     /// The machine's values (`withPending` = false) or what the page should show: the machine's values with
     /// sent-but-unconfirmed changes on top (pending.js applyPending; Pending.shownValue).
-    @MainActor func pageData(withPending: Bool) -> ArknightsPageData {
+    /// `editing` = ids with an unsaved edit (view.js `key in edits`), for the row tags.
+    @MainActor func pageData(withPending: Bool, editing: Set<String> = []) -> ArknightsPageData {
         var data = ArknightsPageData()
-        guard snap != nil, inShift else { return data }
-        data.masterUnreadable = masterUnreadable
+        guard snap != nil else { return data }
+        data.shiftName = shiftName
+        guard inShift else {
+            data.notInShift = true
+            return data
+        }
+        data.masterUnreadable = masterUnreadable && !masterStale
+        data.masterStale = masterStale
         data.usesOfDronesOptions = droneOptions
         for f in ArknightsField.allCases {
             guard let ref = f.ref else { continue }
@@ -188,13 +230,22 @@ struct ArknightsBridge {
             // view.js:459: a field the machine did not report is not drawn.
             guard let raw = ref.rawValue(in: snap) else { continue }
             f.apply((withPending ? Pending.shared.shownValue(for: ref.id) : nil) ?? raw, to: &data)
+            // pending.js:47-67: 「已寄出 HH:MM · …」 / 「没生效 · …」 / 「已应用 HH:MM」 under the row.
+            if withPending, let tag = Pending.shared.tag(for: ref.id, editing: editing.contains(ref.id)) {
+                switch tag {
+                case .sent(let text): data.tags[f.path] = ArknightsRowTag(text: text)
+                case .mismatch(let text, let key): data.tags[f.path] = ArknightsRowTag(text: text, resendKey: key)
+                case .applied(let text): data.tags[f.path] = ArknightsRowTag(text: text)
+                }
+            }
         }
         // view.js:510-523
         data.annihilationDoneThisWeek = snap?["relay"]?["周常"]?["剿灭"]?["本周已完成"]?.truthy ?? false
         return data
     }
 
-    /// The machine's value of every 方舟 field, for Pending.reconcile (the web's render fills liveVals).
+    /// The machine's value of every 方舟 field, for Pending.reconcile (the web's render fills liveVals,
+    /// from the last good copy too when that is what it draws: view.js:435 then :460).
     var liveVals: [String: JSONValue] {
         var out: [String: JSONValue] = [:]
         for f in ArknightsField.allCases {
