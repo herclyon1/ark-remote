@@ -17,18 +17,15 @@ struct EndfieldPageData {
 struct EndfieldPage: View {
     var data: EndfieldPageData
     var onChange: (String, EWValue) -> Void
-    var onOpenStockpile: () -> Void
     var onResend: (String) -> Void
 
     @State var values: [String: EWValue]
 
     init(data: EndfieldPageData,
          onChange: @escaping (String, EWValue) -> Void = { _, _ in },
-         onOpenStockpile: @escaping () -> Void = {},
          onResend: @escaping (String) -> Void = { _ in }) {
         self.data = data
         self.onChange = onChange
-        self.onOpenStockpile = onOpenStockpile
         self.onResend = onResend
         _values = State(initialValue: ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:])
     }
@@ -37,12 +34,12 @@ struct EndfieldPage: View {
         List {
             // 库存: a single-row card with no header, first on the page (D72, inventory-plan.md §2).
             Section {
-                Button(action: onOpenStockpile) {
-                    HStack {
-                        Text("库存")
-                        Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
-                    }
+                // A plain NavigationLink, not navigationDestination(isPresented:): the user (10-03 01:11) could not get
+                // back in after returning once - a Bool that the pop did not reset leaves the next tap with nothing to change.
+                NavigationLink {
+                    EndfieldStockpilePage()
+                } label: {
+                    Text("库存")
                 }
             }
             card(EndfieldSchema.essence)

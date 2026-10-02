@@ -1,13 +1,12 @@
 import SwiftUI
 
 /// The 终末地 tab: EndfieldPage fed from snap.master["MaaEnd"]; edits wait in 「待保存」 and go out as set_master
-/// after one review (view.js #go, 2402-2440). The 库存 row opens the stockpile page.
+/// after one review (view.js #go, 2402-2440). The 库存 row is a NavigationLink inside EndfieldPage.
 struct EndfieldTab: View {
     static let game = "MaaEnd"
 
     /// The unsaved changes of every tab (Logic/Edits.swift); this tab reads and writes its own keys.
     private var edits: [String: EWEdit] { EWEdits.shared.items }
-    @State var showStockpile = false
 
     var body: some View {
         let relay = Relay.shared
@@ -21,9 +20,7 @@ struct EndfieldTab: View {
             let label = ewLabel(EndfieldSchema.groups, machine ?? master, path)
             let (k, e) = EWSave.masterEdit(game: Self.game, path: path, label: label, to: v, machine: machine?.values[path])
             EWEdits.shared.items[k] = e
-        }, onOpenStockpile: { showStockpile = true },
-           onResend: { k in Task { await Pending.shared.resend(k) } })
-        .navigationDestination(isPresented: $showStockpile) { EndfieldStockpilePage() }
+        }, onResend: { k in Task { await Pending.shared.resend(k) } })
         .modifier(EWSaveBar(title: "游戏机遥控"))   // view.js:1283 one title for every page
         .refreshable { await load() }
         .task { await load() }
