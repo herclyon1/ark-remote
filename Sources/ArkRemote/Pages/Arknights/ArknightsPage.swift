@@ -24,7 +24,7 @@ struct ArknightsPage: View {
             awardSection
             weeklySection
         }
-        .navigationTitle("游戏机遥控")   // index.html:840
+        // the title (「游戏机遥控」, or 「待保存 N 项」 while changes wait, view.js:1554) is set by ArknightsTab's EWSaveBar
     }
 
     // MARK: 明日方舟 (schema.js:116-127)

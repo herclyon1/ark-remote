@@ -7,7 +7,8 @@ struct WuwaTab: View {
     static let tacetKey = "relay|tacet_shots"
     static let bossKey = "wb|OK-WW|第几个周本"
 
-    @State var edits: [String: EWEdit] = [:]
+    /// The unsaved changes of every tab (Logic/Edits.swift); this tab reads and writes its own keys.
+    private var edits: [String: EWEdit] { EWEdits.shared.items }
 
     /// snap.relay, the weekly block and the switch as the web page reads them (view.js:303, 514-517; schema.js:254).
     private struct RelayBits {
@@ -45,18 +46,18 @@ struct WuwaTab: View {
             let machine = ewEffectiveMaster(master, lastGood: lastGood).0
             let label = ewLabel([WuwaSchema.group], machine ?? master, path)
             let (k, e) = EWSave.masterEdit(game: Self.game, path: path, label: label, to: v, machine: machine?.values[path])
-            edits[k] = e
+            EWEdits.shared.items[k] = e
         }, onRelaySwitch: { id, on in
             // RELAY_SWITCHES tacet_shots (schema.js:254-256); a flip back to the machine's state drops the edit (view.js:1009)
             guard id == Self.tacetKey else { return }
-            edits[id] = on == bits.tacetShots ? nil
+            EWEdits.shared.items[id] = on == bits.tacetShots ? nil
                 : EWEdit(label: "无音区结算截图", src: "relay", from: .bool(bits.tacetShots), to: .bool(on),
                          body: .object(["action": .string("tacet_shots"), "on": .bool(on)]))
         }, onWeeklyBossIndex: { n in
-            edits[Self.bossKey] = n == bits.bossIndex ? nil
+            EWEdits.shared.items[Self.bossKey] = n == bits.bossIndex ? nil
                 : EWEdit(label: "周本 · 打第几个", src: "wb", from: .int(bits.bossIndex), to: .int(n))   // view.js:1088
         }, onResend: { k in Task { await Pending.shared.resend(k) } })
-        .modifier(EWSaveBar(edits: $edits, title: "游戏机遥控"))   // view.js:1283 one title for every page
+        .modifier(EWSaveBar(title: "游戏机遥控"))   // view.js:1283 one title for every page
         .refreshable { await load() }
         .task { await load() }
         .onChange(of: relay.snapAt) { _, _ in sync() }

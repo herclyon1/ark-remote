@@ -116,7 +116,9 @@ enum StatusCommands {
 
     /// The switches show the unsaved edits on top of the machine's / sent values.
     static func applyEdits(_ edits: [String: EWEdit], to d: inout StatusData) {
-        for (id, e) in edits {
+        // the pool holds every tab's changes (Logic/Edits.swift); only this tab's switches are drawn here
+        for (id, e) in edits where id == StatusSwitchID.skipShutdown || id == StatusSwitchID.debugMode
+            || id.hasPrefix(StatusSwitchID.queue("")) {
             let on = e.to.truthy
             if id == StatusSwitchID.skipShutdown {
                 d.skipShutdown = on

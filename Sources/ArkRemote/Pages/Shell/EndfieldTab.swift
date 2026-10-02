@@ -5,7 +5,8 @@ import SwiftUI
 struct EndfieldTab: View {
     static let game = "MaaEnd"
 
-    @State var edits: [String: EWEdit] = [:]
+    /// The unsaved changes of every tab (Logic/Edits.swift); this tab reads and writes its own keys.
+    private var edits: [String: EWEdit] { EWEdits.shared.items }
     @State var showStockpile = false
 
     var body: some View {
@@ -19,11 +20,11 @@ struct EndfieldTab: View {
             let machine = ewEffectiveMaster(master, lastGood: lastGood).0
             let label = ewLabel(EndfieldSchema.groups, machine ?? master, path)
             let (k, e) = EWSave.masterEdit(game: Self.game, path: path, label: label, to: v, machine: machine?.values[path])
-            edits[k] = e
+            EWEdits.shared.items[k] = e
         }, onOpenStockpile: { showStockpile = true },
            onResend: { k in Task { await Pending.shared.resend(k) } })
         .navigationDestination(isPresented: $showStockpile) { EndfieldStockpilePage() }
-        .modifier(EWSaveBar(edits: $edits, title: "游戏机遥控"))   // view.js:1283 one title for every page
+        .modifier(EWSaveBar(title: "游戏机遥控"))   // view.js:1283 one title for every page
         .refreshable { await load() }
         .task { await load() }
         .onChange(of: relay.snapAt) { _, _ in sync() }

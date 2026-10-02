@@ -8,15 +8,18 @@ struct StatusTab: View {
     @AppStorage("ark-remote-cfg-queue") var storedQueue = ""
     @AppStorage("ark-remote-estop") var estopAt = 0
     @State var ask: StatusAsk? = nil
-    /// Switch flips not yet sent (view.js `edits`); 保存 in the toolbar sends them after one review.
-    @State var edits: [String: EWEdit] = [:]
+    /// Switch flips not yet sent: the one pool of every tab (view.js `edits`, Logic/Edits.swift); ✓ in the toolbar sends them
+    /// with the other tabs' changes after one review.
+    private var edits: Binding<[String: EWEdit]> {
+        Binding(get: { EWEdits.shared.items }, set: { EWEdits.shared.items = $0 })
+    }
 
     var body: some View {
         let relay = Relay.shared
         var data = StatusData.from(relay: relay, live: Live.shared, stamina: StaminaStore.shared, pending: Pending.shared,
                                    currentQueue: storedQueue, estopAt: estopAt)
-        let _ = StatusCommands.applyEdits(edits, to: &data)
-        StatusPage(data: data, actions: StatusCommands.actions(data, ask: $ask, storedQueue: $storedQueue, edits: $edits))
+        let _ = StatusCommands.applyEdits(edits.wrappedValue, to: &data)
+        StatusPage(data: data, actions: StatusCommands.actions(data, ask: $ask, storedQueue: $storedQueue, edits: edits))
             .refreshable { await Live.shared.ping() }
             .task {
                 // first open (view.js boot :2928-2946): say what the cached state is, then ask the mailbox; a failure is said
@@ -49,6 +52,6 @@ struct StatusTab: View {
             } message: {
                 Text(ask?.message ?? "")
             }
-            .modifier(EWSaveBar(edits: $edits))   // 「保存（N）」 / 「放弃」, shared with the 终末地 / 鸣潮 tabs
+            .modifier(EWSaveBar(title: "游戏机遥控"))   // ✕ / 「待保存 N 项」 / ✓ over every tab's changes (view.js:1551-1555)
     }
 }

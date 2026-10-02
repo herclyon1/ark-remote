@@ -171,14 +171,27 @@ enum EWSave {
         return (key, EWEdit(label: label, src: "master", owner: game, path: path, from: machine?.json, to: v.json))
     }
 
-    /// The review text: one line per change, values by their option names (view.js doSave / valLabel).
+    /// A 状态 shift switch: skip_today / unskip_today (view.js:1606 isSkipEdit).
+    static func isSkip(_ e: EWEdit) -> Bool {
+        guard e.src == "relay", let a = e.body?["action"]?.string else { return false }
+        return a == "skip_today" || a == "unskip_today"
+    }
+
+    /// The review text (view.js doSave, 1609-1616): the shift skips first, in plain words (skipLine, view.js:1608:
+    /// 「今天不跑：早班（09:00）」); then one change per line, 「卡名 · 行名」 with old → new by their option names (valLabel).
     static func summary(_ edits: [String: EWEdit]) -> String {
-        edits.values.sorted { $0.label < $1.label }
-            .map { e in
-                let p = PendingEdit(label: e.label, src: e.src, owner: e.owner, path: e.path, from: e.from, to: e.to, sentAt: 0)
-                return "\(e.label)：\(Pending.shared.valueLabel(p, e.from)) → \(Pending.shared.valueLabel(p, e.to))"
-            }
-            .joined(separator: "\n")
+        let all = edits.values.sorted { $0.label < $1.label }
+        let skips = all.filter(isSkip).map { e -> String in
+            let parts = e.label.components(separatedBy: " · ")
+            let verb = e.body?["action"]?.string == "skip_today" ? "今天不跑" : "今天照常跑"
+            return "\(verb)：\(parts[0])\(parts.count > 1 ? "（\(parts[1])）" : "")"
+        }
+        let rest = all.filter { !isSkip($0) }.map { e -> String in
+            let p = PendingEdit(label: e.label, src: e.src, owner: e.owner, path: e.path, from: e.from, to: e.to, sentAt: 0,
+                                body: e.body)
+            return "\(e.label)\n\(Pending.shared.valueLabel(p, e.from)) → \(Pending.shared.valueLabel(p, e.to))"
+        }
+        return (skips + rest).joined(separator: "\n\n")
     }
 
     /// view.js #go: send each change; the sent ones leave 「待保存」, the failed ones stay. Returns the keys still unsent.
@@ -187,14 +200,19 @@ enum EWSave {
         var left = edits
         var sent = 0
         var failed: Error? = nil
-        for (k, e) in edits.sorted(by: { $0.key < $1.key }) where e.src == "master" {
-            let body: JSONValue = .object(["action": .string("set_master"), "confirmed": .bool(true), "game": .string(e.owner),
-                                           "path": .string(e.path), "value": e.to])
+        // view.js:2964-2973: everything that is not a switch or 周本 is a config field — set_master for a master copy
+        // (终末地 / 鸣潮 / 方舟 基建 and 奖励), set_config for AUTO-MAS (方舟 「明日方舟」, src "mas").
+        for (k, e) in edits.sorted(by: { $0.key < $1.key }) where e.src == "master" || e.src == "mas" {
+            let body: JSONValue = e.src == "master"
+                ? .object(["action": .string("set_master"), "confirmed": .bool(true), "game": .string(e.owner),
+                           "path": .string(e.path), "value": e.to])
+                : .object(["action": .string("set_config"), "confirmed": .bool(true), "script": .string(e.owner),
+                           "path": .string(e.path), "value": e.to])
             do {
                 try await relay.send(body)
                 sent += 1
                 left[k] = nil
-                Pending.shared.add(k, PendingEdit(label: e.label, src: "master", owner: e.owner, path: e.path,
+                Pending.shared.add(k, PendingEdit(label: e.label, src: e.src, owner: e.owner, path: e.path,
                                                   from: e.from, to: e.to, sentAt: nowSec()))
             } catch { failed = error; break }
         }
@@ -237,40 +255,46 @@ enum EWSave {
     }
 }
 
-/// The edit bar and its review alert, shared by both tabs (view.js updateBar / #confirm).
-/// `title`: the page title when nothing waits; while editing the title is 「待保存 N 项」 (view.js:1283 swaps the same span).
+/// The edit bar and its review alert, on every tab (view.js updateBar / #confirm), over the one pool of unsaved
+/// changes (Logic/Edits.swift): the count, ✕ and ✓ cover the changes of all tabs, as the web page's one top bar does.
+/// `title`: the page title when nothing waits; while editing the title is 「待保存 N 项」 (view.js:1554 swaps the same span).
 struct EWSaveBar: ViewModifier {
-    @Binding var edits: [String: EWEdit]
     var title: String? = nil
     @State var reviewing = false
     @State var saving = false
+
+    private var edits: [String: EWEdit] { EWEdits.shared.items }
 
     func body(content: Content) -> some View {
         titled(content)
             .toolbar {
                 if !edits.isEmpty {
+                    // index.html:921 #discard (aria-label 放弃, xmark) / #save (aria-label 完成, checkmark)
                     ToolbarItem(placement: .cancellationAction) {
-                        Button { edits = [:] } label: { Image(systemName: "xmark") }
+                        Button { EWEdits.shared.items = [:] } label: { Image(systemName: "xmark") }   // view.js:2950
+                            .accessibilityLabel("放弃")
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button { reviewing = true } label: { Image(systemName: "checkmark") }
+                            .accessibilityLabel("完成")
                             .disabled(saving)
                     }
                 }
             }
-            // index.html:849-857
+            // index.html:933-939; doSave (view.js:1617) names the button by how many orders go out: 「寄出 N 项」
             .alert("确认这次修改", isPresented: $reviewing) {
-                Button("确认修改") {
+                Button("寄出 \(edits.count) 项") {
                     guard !saving else { return }   // 2026-09-01: three taps sent three times
                     saving = true
                     Task {
-                        edits = await EWSave.send(edits)
+                        let left = await EWSave.send(EWEdits.shared.items)
+                        EWEdits.shared.items = left   // view.js:3003: the sent ones go, the unsent stay on the page
                         saving = false
                     }
                 }
                 Button("再想想", role: .cancel) {}
             } message: {
-                Text(EWSave.summary(edits))
+                Text(verbatim: EWSave.summary(edits))
             }
             // the toast is one layer over all tabs now (Pages/Shell/ToastLayer.swift)
     }

@@ -127,20 +127,10 @@ struct ArknightsEdit: Equatable {
 
     static func == (a: ArknightsEdit, b: ArknightsEdit) -> Bool { a.ref.id == b.ref.id && a.to == b.to }
 
-    /// view.js:2415-2417.
-    var body: JSONValue {
-        if ref.section.src == "master" {
-            return .object(["action": .string("set_master"), "confirmed": .bool(true), "game": .string(ref.owner),
-                            "path": .string(ref.field.path), "value": to])
-        }
-        return .object(["action": .string("set_config"), "confirmed": .bool(true), "script": .string(ref.owner),
-                        "path": .string(ref.field.path), "value": to])
-    }
-
-    /// view.js:2420-2421.
-    var pending: PendingEdit {
-        PendingEdit(label: label, src: ref.section.src, owner: ref.owner, path: ref.field.path,
-                    from: from, to: to, sentAt: nowSec())
+    /// The entry in the page's pool of unsaved changes (view.js:1290 `edits[id] = {label, src, owner, path, from, to}`);
+    /// EWSave.send turns it into set_config / set_master (view.js:2964-2966) and its Pending entry.
+    var poolEdit: EWEdit {
+        EWEdit(label: label, src: ref.section.src, owner: ref.owner, path: ref.field.path, from: from, to: to)
     }
 }
 
@@ -305,7 +295,10 @@ struct ArknightsBridge {
             let raw = ref.rawValue(in: snap)
             guard let to = f.outgoing(shown, machine: raw, options: options),
                   to != f.outgoing(base, machine: raw, options: options) else { continue }
-            out.append(ArknightsEdit(field: f, ref: ref, label: ref.editLabel(in: snap), from: raw, to: to))
+            // view.js:1284 base(id, machine): the value before this change is the sent one while it waits, else the machine's
+            // — what the row showed, so the review's 「旧 → 新」 reads as what the user saw change.
+            out.append(ArknightsEdit(field: f, ref: ref, label: ref.editLabel(in: snap),
+                                     from: f.outgoing(base, machine: raw, options: options) ?? raw, to: to))
         }
         return out
     }
