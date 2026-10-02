@@ -36,8 +36,7 @@ struct PhonePage: View {
         List {
             Section {
                 PhoneValueRow(title: "页面版本", hint: "App 的版本号", value: data.pageVersion)
-                // TODO: 诊断记录 switch and 运行自检 are not carried over. On the web the switch rewrites the URL to ?diag=1 and
-                // injects the browser recorder (seg-frames-logger.js), and 自检 runs web/accept.js in the page; neither exists in the app.
+                PhoneDiagRows(appVersion: data.pageVersion)
                 Button("复制免输入链接") {
                     if actions.copyNoInputLink() {
                         copiedText = "已复制。把这条链接存成书签或加到主屏幕，以后打开就直接是控制台"
