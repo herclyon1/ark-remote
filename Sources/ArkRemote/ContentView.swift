@@ -46,33 +46,18 @@ struct ContentView: View {
     @ViewBuilder private var gate: some View {
         // no mailbox yet: only 「第一次使用」, no tab bar (web/view.js boot → setupScreen)
         if Relay.shared.config == nil {
-            // the update banner shows here too: someone stuck on setup still gets a fixed version in one tap
-            #if os(Android)
-            VStack(spacing: 0) {
-                if AppUpdate.shared.showsBanner { UpdateBanner() }
-                SetupScreen()
-            }
-            #else
+            // the update notice shows here too (someone stuck on setup still gets a fixed version in one tap); on
+            // Android it is inside SetupScreen, under its top bar (topNotices, Logic/AppUpdate.swift)
             SetupScreen()
-            #endif
         } else {
             main
         }
     }
 
     @ViewBuilder private var main: some View {
-        // in-app update banner above the tabs (Logic/AppUpdate.swift); Android only, iOS keeps the bare TabView
-        #if os(Android)
-        VStack(spacing: 0) {
-            if AppUpdate.shared.showsBanner {
-                UpdateBanner()
-            }
-            if let bar = Pending.shared.bar { PendingBarView(bar: bar) }   // web/pending.js #pendbar, on every tab
-            tabs
-        }
-        #else
+        // Android: the update notice and the #pendbar line (web/pending.js) sit in each tab under its top bar
+        // (noticed() below → topNotices, Logic/AppUpdate.swift); iOS keeps the bare TabView
         tabs
-        #endif
     }
 
     private var tabs: some View {
@@ -80,14 +65,14 @@ struct ContentView: View {
         // their colors; tab-status / tab-phone are template images. tabIconFrame() sizes them for the tab icon slot.
         TabView(selection: selection) {
             NavigationStack {
-                StatusTab()
+                StatusTab().noticed()
             }
             .tabItem { Label { Text("状态") } icon: { Image("tab-status", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.status)
 
             if inShift("MAA") {
             NavigationStack {
-                ArknightsTab()
+                ArknightsTab().noticed()
             }
             .tabItem { Label { Text("方舟") } icon: { Image("tab-arknights", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.arknights)
@@ -95,7 +80,7 @@ struct ContentView: View {
 
             if inShift("MaaEnd") {
             NavigationStack {
-                EndfieldTab()
+                EndfieldTab().noticed()
             }
             .tabItem { Label { Text("终末地") } icon: { Image("tab-endfield", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.endfield)
@@ -103,19 +88,30 @@ struct ContentView: View {
 
             if inShift("OK-WW") {
             NavigationStack {
-                WuwaTab()
+                WuwaTab().noticed()
             }
             .tabItem { Label { Text("鸣潮") } icon: { Image("tab-wuwa", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.wuwa)
             }
 
             NavigationStack {
-                PhoneTab()
+                PhoneTab().noticed()
             }
             .tabItem { Label { Text("手机") } icon: { Image("tab-phone", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.phone)
         }
         .overlay { ToastLayer() }   // view.js toast(): one layer over all five tabs (Pages/Shell/ToastLayer.swift)
+    }
+}
+
+private extension View {
+    /// Android: the update notice and the pending-receipt line above the tab's content (topNotices); iOS: unchanged.
+    @ViewBuilder func noticed() -> some View {
+        #if os(Android)
+        topNotices()
+        #else
+        self
+        #endif
     }
 }
 

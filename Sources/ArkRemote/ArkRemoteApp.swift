@@ -71,9 +71,25 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
         AppUpdate.hooks = AppUpdate.Hooks(check: check, install: install)
     }
 
-    /// The latest release is newer than this build and carries an .apk asset. Called on a worker thread.
-    /* SKIP @bridge */public func onUpdateAvailable(version: String) {
-        Task { @MainActor in AppUpdate.shared.found(version: version) }
+    /// The latest release is newer than this build and carries an .apk asset; `canInstall` = 「安装未知应用」 is on
+    /// for this app. Called on a worker thread.
+    /* SKIP @bridge */public func onUpdateAvailable(version: String, canInstall: Bool) {
+        Task { @MainActor in AppUpdate.shared.found(version: version, canInstall: canInstall) }
+    }
+
+    /// 「更新」 found 「安装未知应用」 off; AppUpdater opened that setting.
+    /* SKIP @bridge */public func onUpdateNeedsPermission() {
+        Task { @MainActor in AppUpdate.shared.needsPermission() }
+    }
+
+    /// The system's install confirmation is up (STATUS_PENDING_USER_ACTION).
+    /* SKIP @bridge */public func onUpdateConfirming() {
+        Task { @MainActor in AppUpdate.shared.confirming() }
+    }
+
+    /// STATUS_SUCCESS: the new version is installed.
+    /* SKIP @bridge */public func onUpdateInstalled() {
+        Task { @MainActor in AppUpdate.shared.installed() }
     }
 
     /// Download progress in bytes; `total` is 0 or less when the server sent no Content-Length.
@@ -86,7 +102,7 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
         Task { @MainActor in AppUpdate.shared.installing(message: message) }
     }
 
-    /// Download or install failed (or the install permission is missing); `message` is shown as is.
+    /// Download or install failed; `message` is shown as is.
     /* SKIP @bridge */public func onUpdateError(message: String) {
         Task { @MainActor in AppUpdate.shared.failed(message: message) }
     }

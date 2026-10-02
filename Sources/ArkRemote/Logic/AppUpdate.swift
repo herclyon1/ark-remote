@@ -25,7 +25,18 @@ import SwiftUI
     nonisolated(unsafe) static var hooks: Hooks?
 
     enum Phase: Equatable {
-        case idle, available, downloading, installing, failed
+        /// nothing newer, or the update went in
+        case idle
+        /// 「有新版本」 with 「以后」 / 「更新」
+        case available
+        /// 「安装未知应用」 is off for this app; 「去设置」 opens it (AppUpdater.install)
+        case needsPermission
+        case downloading
+        /// the APK goes into the PackageInstaller session
+        case installing
+        /// the system's confirm sheet is up (STATUS_PENDING_USER_ACTION); 「继续安装」 brings it back from the kept file
+        case confirming
+        case failed
     }
 
     private(set) var phase: Phase = .idle
@@ -34,6 +45,7 @@ import SwiftUI
     /// 0...1 while downloading with a known size; nil when the size is unknown.
     private(set) var fraction: Double?
     private(set) var downloadedBytes = 0
+    private(set) var totalBytes = 0
     private(set) var message: String?
     /// 「以后」 hides the banner until the next open.
     private(set) var dismissed = false
@@ -51,7 +63,7 @@ import SwiftUI
         #endif
     }
 
-    /// 「更新」.
+    /// 「更新」 / 「去设置」 / 「继续安装」 / 「重试」.
     func install() {
         #if os(Android)
         guard phase != .downloading && phase != .installing, version != nil else { return }
@@ -64,21 +76,47 @@ import SwiftUI
 
     // MARK: from Kotlin
 
-    func found(version: String) {
+    /// One check's answer. A banner left from the last open (a failure, the permission note) starts over as
+    /// 「有新版本」, or as the permission note while 「安装未知应用」 is still off; a running step keeps its state.
+    func found(version: String, canInstall: Bool) {
         self.version = version
-        if phase == .idle { phase = .available }
+        switch phase {
+        case .idle, .available, .needsPermission, .failed:
+            phase = canInstall || phase != .needsPermission ? .available : .needsPermission
+            message = nil
+            fraction = nil
+        case .downloading, .installing, .confirming:
+            break
+        }
+    }
+
+    func needsPermission() {
+        phase = .needsPermission
+        message = nil
     }
 
     func progress(done: Int, total: Int) {
         phase = .downloading
         message = nil
         downloadedBytes = done
+        totalBytes = total
         fraction = total > 0 ? min(1, Double(done) / Double(total)) : nil
     }
 
     func installing(message: String) {
         phase = .installing
         self.message = message
+    }
+
+    func confirming() {
+        phase = .confirming
+        message = nil
+    }
+
+    /// The new version is in. The system normally stops this process first; if it did not, there is nothing left to show.
+    func installed() {
+        phase = .idle
+        message = nil
     }
 
     func failed(message: String) {
@@ -88,55 +126,119 @@ import SwiftUI
     }
 }
 
-/// The banner above the tabs: 「有新版本 0.x.y」 with 「更新」, then the download progress, then errors.
+#if os(Android)
+/// Android only (iOS updates come from the App Store; AppUpdate never checks there). The update notice and the
+/// pending-receipt line go under the tab's top app bar, above its content — where Material puts a banner ("Banners
+/// appear at the top of the screen, below a top app bar", https://m2.material.io/components/banners). Placed above
+/// the whole TabView they doubled the status-bar inset: SkipUI's top app bar adds the status bar's window insets
+/// whenever the top system bar is there (Navigation.swift hasAbsoluteTopSystemBar → TopAppBarDefaults.windowInsets),
+/// so a strip of empty space opened under the banner.
+extension View {
+    func topNotices() -> some View { TopNotices(content: self) }
+}
+
+/// A view of its own so its body is what reads AppUpdate / Pending: the tab roots are built inside TabView's
+/// content, which SkipUI composes outside ContentView's body, so a read there did not redraw on a change (the
+/// banner stayed hidden after the check found 0.3.3, emulator 10-02 19:29).
+struct TopNotices<Content: View>: View {
+    let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if AppUpdate.shared.showsBanner { UpdateBanner() }
+            if let bar = Pending.shared.bar { PendingBarView(bar: bar) }
+            content
+        }
+    }
+}
+
+/// The update notice: plain SwiftUI that SkipUI draws with Material 3 components — Text in the theme's type, a
+/// LinearProgressIndicator for the download (determinate once the size is known: Play's flexible-update flow shows
+/// "a download progress bar", https://developer.android.com/guide/playcore/in-app-updates/kotlin-java), a TextButton
+/// and a FilledButton on their own row at the end (so a long message never squeezes them), and a divider under it.
+/// No colours of its own: it sits on the screen's surface like the rest of the app.
 struct UpdateBanner: View {
     let update = AppUpdate.shared
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.headline)
+            if let detail {
+                Text(detail)
                     .font(.subheadline)
-                    .bold()
-                if update.phase == .downloading {
-                    if let f = update.fraction {
-                        ProgressView(value: f)
-                    } else {
-                        ProgressView()
-                    }
-                }
-                if let m = update.message {
-                    Text(m)
-                        .font(.caption)
-                        .foregroundStyle(update.phase == .failed ? Color.red : Color.secondary)
-                }
+                    .foregroundStyle(update.phase == .failed ? Color.red : Color.secondary)
             }
-            Spacer(minLength: 8)
-            if update.phase == .available || update.phase == .failed {
-                Button("以后") { update.dismiss() }
-                    .buttonStyle(.borderless)
-                Button("更新") { update.install() }
-                    .buttonStyle(.borderedProminent)
+            switch update.phase {
+            case .downloading:
+                if let f = update.fraction { ProgressView(value: f) } else { ProgressView().progressViewStyle(.linear) }
+            case .installing:
+                ProgressView().progressViewStyle(.linear)
+            default:
+                EmptyView()
+            }
+            if let action {
+                HStack(spacing: 8) {
+                    Spacer()
+                    if update.phase != .confirming {
+                        Button("以后") { update.dismiss() }
+                    }
+                    Button(action) { update.install() }
+                        .buttonStyle(.borderedProminent)
+                }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(Color.accentColor.opacity(0.12))
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        Divider()
     }
 
+    private var v: String { update.version ?? "" }
+
     private var title: String {
-        let v = update.version ?? ""
         switch update.phase {
+        case .downloading: return "正在下载 \(v)"
+        case .installing, .confirming: return "正在安装 \(v)"
+        case .failed: return "没能更新到 \(v)"
+        default: return "有新版本 \(v)"
+        }
+    }
+
+    private var detail: String? {
+        switch update.phase {
+        case .available:
+            return "下载后交给系统安装。"
+        case .needsPermission:
+            return "先在设置里打开本应用的「安装未知应用」，回来再点「更新」。"
         case .downloading:
+            let done = megabytes(update.downloadedBytes)
             if let f = update.fraction {
-                return "正在下载 \(v) · \(Int((f * 100).rounded(.down)))%"
+                return "\(done) / \(megabytes(update.totalBytes)) MB · \(Int((f * 100).rounded(.down)))%"
             }
-            return "正在下载 \(v) · \(megabytes(update.downloadedBytes)) MB"
+            return "\(done) MB"
         case .installing:
-            return "正在安装 \(v)"
-        default:
-            return "有新版本 \(v)"
+            return update.message
+        case .confirming:
+            return "在系统弹出的界面里点「安装」。关掉了的话，点「继续安装」再打开，不用重新下载。"
+        case .failed:
+            // AppUpdater keeps the file through every failure (cachedApk): a cut-off download resumes, a refused or
+            // cancelled install reuses the whole file
+            return update.message.map {
+                $0 + ($0.hasPrefix("下载没完成") ? "。下好的部分留着，重试会接着下。" : "。安装包留着，重试不用重新下载。")
+            }
+        case .idle:
+            return nil
+        }
+    }
+
+    /// The filled button's label; nil while a step runs on its own.
+    private var action: String? {
+        switch update.phase {
+        case .available: return "更新"
+        case .needsPermission: return "去设置"
+        case .confirming: return "继续安装"
+        case .failed: return "重试"
+        case .idle, .downloading, .installing: return nil
         }
     }
 
@@ -145,3 +247,4 @@ struct UpdateBanner: View {
         return "\(tenths / 10).\(tenths % 10)"
     }
 }
+#endif

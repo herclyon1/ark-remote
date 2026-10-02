@@ -22,9 +22,14 @@ import kotlin.concurrent.thread
 ///
 /// check(): one GET of the latest release; when its tag is newer than BuildConfig.VERSION_NAME and it carries an
 /// .apk asset, Swift shows 「有新版本 x.y.z」 (Sources/ArkRemote/Logic/AppUpdate.swift).
-/// install(): download the APK into cacheDir, then hand it to the system with a PackageInstaller session
-/// (https://developer.android.com/reference/android/content/pm/PackageInstaller). The result comes back to
-/// UpdateStatusReceiver through the commit PendingIntent.
+/// install(): the APK in cacheDir/update/ark-remote-<version>.apk, downloaded once (cachedApk), then handed to the
+/// system with a PackageInstaller session (https://developer.android.com/reference/android/content/pm/PackageInstaller).
+/// The result comes back to UpdateStatusReceiver through the commit PendingIntent.
+///
+/// One download per version (user 10-02 19:06: it had to download twice before it installed): the file is kept
+/// through every failure, cancel and retry and is only checked against the release asset's `size`; a cut-off
+/// download stays as `.part` and resumes with a Range request. Files of versions this build already is (or is
+/// past), and of versions that are no longer the latest, are deleted.
 ///
 /// Swift calls these through the closures registered in start(); results go back through the bridged
 /// ArkRemoteAppDelegate.onUpdate* methods. Nothing here runs on a timer.
@@ -37,6 +42,10 @@ object AppUpdater {
     internal val installing = AtomicBoolean(false)
     @Volatile private var apkURL: String? = null
     @Volatile private var latestVersion: String? = null
+    /// The release asset's `size` in bytes (0 when GitHub gave none).
+    @Volatile private var apkSize: Long = 0
+    /// The session waiting on the system's confirm sheet; abandoned when 「继续安装」 commits a new one.
+    @Volatile internal var waitingSession: Int = -1
 
     private val delegate: ArkRemoteAppDelegate
         get() = ArkRemoteAppDelegate.shared
@@ -45,6 +54,7 @@ object AppUpdater {
     fun start(context: Context) {
         app = context.applicationContext
         delegate.registerUpdater(check = { check() }, install = { install() })
+        thread(name = "ark-update-clean") { prune(keep = null) }
     }
 
     /// One request; a failed check is only logged (no banner for a missed check).
@@ -71,11 +81,13 @@ object AppUpdater {
                 val version = tag.trim().removePrefix("v").removePrefix("V")
                 val assets = release.optJSONArray("assets")
                 var url: String? = null
+                var size = 0L
                 if (assets != null) {
                     for (i in 0 until assets.length()) {
                         val a = assets.getJSONObject(i)
                         if (a.optString("name").endsWith(".apk", ignoreCase = true)) {
                             url = a.optString("browser_download_url").takeIf { it.startsWith("https://") }
+                            size = a.optLong("size", 0L)
                             if (url != null) break
                         }
                     }
@@ -85,7 +97,11 @@ object AppUpdater {
                 if (url != null && isNewer(version, current)) {
                     apkURL = url
                     latestVersion = version
-                    delegate.onUpdateAvailable(version = version)
+                    apkSize = size
+                    prune(keep = version)
+                    delegate.onUpdateAvailable(version = version, canInstall = app.packageManager.canRequestPackageInstalls())
+                } else {
+                    prune(keep = null)
                 }
             } catch (e: Exception) {
                 logger.warning("update check failed: ${e}")
@@ -99,7 +115,7 @@ object AppUpdater {
     private fun install() {
         val url = apkURL ?: return
         if (!app.packageManager.canRequestPackageInstalls()) {
-            delegate.onUpdateError(message = "请在设置里允许本应用「安装未知应用」，然后回来再点「更新」")
+            delegate.onUpdateNeedsPermission()
             try {
                 val settings = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${app.packageName}"))
                 settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -111,13 +127,14 @@ object AppUpdater {
         }
         if (!installing.compareAndSet(false, true)) return
         val version = latestVersion ?: ""
+        val size = apkSize
         thread(name = "ark-update-install") {
             val file = try {
-                download(url)
+                cachedApk(url, version, size)
             } catch (e: Exception) {
                 logger.error("update download failed: ${e}")
                 installing.set(false)
-                delegate.onUpdateError(message = "下载失败：" + downloadError(e))
+                delegate.onUpdateError(message = "下载没完成：" + downloadError(e))
                 return@thread
             }
             try {
@@ -126,7 +143,7 @@ object AppUpdater {
             } catch (e: Exception) {
                 logger.error("update install session failed: ${e}")
                 installing.set(false)
-                delegate.onUpdateError(message = "安装失败：无法建立安装会话")
+                delegate.onUpdateError(message = "系统没接下安装（无法建立安装会话）")
             }
         }
     }
@@ -143,26 +160,71 @@ object AppUpdater {
         else -> "未知错误"
     }
 
-    /// GitHub's browser_download_url redirects (https → https) to its object storage; HttpURLConnection follows it.
-    private fun download(url: String): File {
-        val dir = File(app.cacheDir, "update")
-        dir.deleteRecursively()
-        dir.mkdirs()
-        val file = File(dir, "ark-remote.apk")
+    private fun updateDir(): File = File(app.cacheDir, "update").also { it.mkdirs() }
+    private fun apkFile(version: String) = File(updateDir(), "ark-remote-${version}.apk")
+
+    /// Deletes the kept files that can no longer be installed: versions this build is at or past, every version but
+    /// `keep` (the latest release) once that is known, and the old single "ark-remote.apk" of 0.3.0–0.3.3.
+    private fun prune(keep: String?) {
+        try {
+            val current = BuildConfig.VERSION_NAME
+            for (f in updateDir().listFiles() ?: emptyArray()) {
+                val v = Regex("^ark-remote-(.+?)\\.apk(\\.part)?$").find(f.name)?.groupValues?.get(1)
+                val stale = v == null || !isNewer(v, current) || (keep != null && v != keep)
+                if (stale && f.delete()) logger.info("update cache: deleted ${f.name}")
+            }
+        } catch (e: Exception) {
+            logger.warning("update cache prune failed: ${e}")
+        }
+    }
+
+    /// The APK of `version`: the kept file when it is complete (its length is the release asset's `size`), otherwise
+    /// downloaded — resuming a cut-off `.part` with a Range request when there is one. Nothing here deletes a file
+    /// on failure: a failed, cancelled or refused install leaves it for the next tap.
+    private fun cachedApk(url: String, version: String, size: Long): File {
+        val file = apkFile(version)
+        if (file.exists()) {
+            if (size <= 0 || file.length() == size) {
+                logger.info("update: reusing ${file.name} (${file.length()} bytes)")
+                delegate.onUpdateProgress(done = file.length().toInt(), total = file.length().toInt())
+                return file
+            }
+            logger.warning("update: ${file.name} is ${file.length()} bytes, release says ${size}; downloading again")
+            file.delete()
+        }
+        val part = File(updateDir(), file.name + ".part")
+        download(url, part, size)
+        if (size > 0 && part.length() != size) throw ShortDownload()
+        if (!part.renameTo(file)) throw IOException("rename ${part.name}")
+        return file
+    }
+
+    /// GitHub's browser_download_url redirects (https → https) to its object storage; HttpURLConnection follows it
+    /// and sends the Range header there too. 206 = resumed, 200 = the server sent the whole file (start over).
+    private fun download(url: String, part: File, size: Long) {
+        var start = if (part.exists()) part.length() else 0L
+        if (size > 0 && start >= size) { part.delete(); start = 0L }
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = 15_000
         conn.readTimeout = 30_000
         conn.setRequestProperty("User-Agent", "ark-remote/${BuildConfig.VERSION_NAME}")
+        if (start > 0) conn.setRequestProperty("Range", "bytes=${start}-")
         try {
             val code = conn.responseCode
-            if (code != 200) throw HttpStatus(code)
-            val total = conn.contentLengthLong
-            var done = 0L
+            val append = when (code) {
+                206 -> true
+                200 -> false
+                else -> throw HttpStatus(code)
+            }
+            if (!append) start = 0L
+            val total = if (size > 0) size else (if (conn.contentLengthLong > 0) start + conn.contentLengthLong else 0L)
+            var done = start
             var lastPercent = -1L
-            var lastBytes = 0L
-            delegate.onUpdateProgress(done = 0, total = total.toInt())
+            var lastBytes = start
+            logger.info("update download: ${if (append) "resuming at ${start}" else "from 0"} of ${total}")
+            delegate.onUpdateProgress(done = done.toInt(), total = total.toInt())
             conn.inputStream.use { input ->
-                file.outputStream().use { out ->
+                java.io.FileOutputStream(part, append).use { out ->
                     val buf = ByteArray(64 * 1024)
                     while (true) {
                         val n = input.read(buf)
@@ -186,7 +248,6 @@ object AppUpdater {
         } finally {
             conn.disconnect()
         }
-        return file
     }
 
     /// PackageInstaller session: SessionParams(MODE_FULL_INSTALL); on API 31+ setRequireUserAction(USER_ACTION_NOT_REQUIRED)
@@ -195,6 +256,12 @@ object AppUpdater {
     /// system adds EXTRA_STATUS to it; it is explicit (our own receiver).
     private fun commit(file: File, version: String) {
         val installer = app.packageManager.packageInstaller
+        // 「继续安装」 while the last session still waits on its confirm sheet: drop that one, this one replaces it
+        val old = waitingSession
+        if (old >= 0) {
+            waitingSession = -1
+            try { installer.abandonSession(old) } catch (e: Exception) { logger.warning("abandon session ${old}: ${e}") }
+        }
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         params.setAppPackageName(app.packageName)
         params.setSize(file.length())
@@ -253,40 +320,45 @@ class UpdateStatusReceiver : BroadcastReceiver() {
                     @Suppress("DEPRECATION")
                     intent.getParcelableExtra(Intent.EXTRA_INTENT)
                 }
+                // the session now waits on the user; the lock goes so 「继续安装」 can bring the sheet back (a new session
+                // from the kept file) if it was closed without an answer
+                AppUpdater.installing.set(false)
+                AppUpdater.waitingSession = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
                 if (confirm == null) {
-                    AppUpdater.installing.set(false)
-                    delegate.onUpdateError(message = "安装失败：系统没有给出确认界面")
+                    delegate.onUpdateError(message = "系统没有给出安装确认界面")
                     return
                 }
                 confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 try {
                     context.startActivity(confirm)
-                    delegate.onUpdateInstalling(message = "请在系统弹出的界面里确认安装")
+                    delegate.onUpdateConfirming()
                 } catch (e: Exception) {
                     logger.error("start install confirmation failed: ${e}")
-                    AppUpdater.installing.set(false)
-                    delegate.onUpdateError(message = "安装失败：打不开系统的确认界面")
+                    delegate.onUpdateError(message = "打不开系统的安装确认界面")
                 }
             }
             PackageInstaller.STATUS_SUCCESS -> {
-                // the system usually stops this process to replace the app before this arrives
+                // the system stops the old process to replace the app; this arrives in the new one (logcat 10-02 19:17:30,
+                // a new pid), where there is nothing to say — the old 「安装完成，请重新打开」 was never true there
                 AppUpdater.installing.set(false)
-                delegate.onUpdateInstalling(message = "安装完成，请重新打开")
+                AppUpdater.waitingSession = -1
+                delegate.onUpdateInstalled()
             }
             else -> {
                 AppUpdater.installing.set(false)
+                AppUpdater.waitingSession = -1
                 delegate.onUpdateError(message = installError(status))
             }
         }
     }
 
     private fun installError(status: Int): String = when (status) {
-        PackageInstaller.STATUS_FAILURE_ABORTED -> "已取消安装"
-        PackageInstaller.STATUS_FAILURE_BLOCKED -> "安装失败：被系统拦下"
-        PackageInstaller.STATUS_FAILURE_CONFLICT -> "安装失败：与已装的版本冲突（签名不同？）"
-        PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> "安装失败：与本机不兼容"
-        PackageInstaller.STATUS_FAILURE_INVALID -> "安装失败：安装包无效"
-        PackageInstaller.STATUS_FAILURE_STORAGE -> "安装失败：存储空间不足"
-        else -> "安装失败"
+        PackageInstaller.STATUS_FAILURE_ABORTED -> "安装被取消了"
+        PackageInstaller.STATUS_FAILURE_BLOCKED -> "系统拦下了这次安装"
+        PackageInstaller.STATUS_FAILURE_CONFLICT -> "和已装的版本冲突（签名不同？）"
+        PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> "和这台手机不兼容"
+        PackageInstaller.STATUS_FAILURE_INVALID -> "安装包无效"
+        PackageInstaller.STATUS_FAILURE_STORAGE -> "手机存储空间不够"
+        else -> "系统没装上"
     }
 }

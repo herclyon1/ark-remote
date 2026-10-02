@@ -47,6 +47,9 @@ struct SetupScreen: View {
                     Text("用免输入链接进网页的：在网页「手机」页复制免输入链接（或从书签复制那条链接），回来点这里。")
                 }
             }
+            #if os(Android)
+            .topNotices()   // the update notice under the top bar (Logic/AppUpdate.swift); iOS never shows it
+            #endif
             .navigationTitle("第一次使用")
             .alert("两样都要填", isPresented: $missingShown) {
                 Button("好") {}
