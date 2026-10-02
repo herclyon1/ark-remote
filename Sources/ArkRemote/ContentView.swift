@@ -26,6 +26,7 @@ struct ContentView: View {
             if AppUpdate.shared.showsBanner {
                 UpdateBanner()
             }
+            if let bar = Pending.shared.bar { PendingBarView(bar: bar) }   // web/pending.js #pendbar, on every tab
             tabs
         }
         #else
