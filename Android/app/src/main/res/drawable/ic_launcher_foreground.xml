@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon layer, 108x108dp viewport (developer.android.com/develop/ui/views/launch/icon_design_adaptive:
+     "All layers must be sized to 108x108 dp"; logo "at least 48x48 dp" and "must not exceed 66x66 dp").
+     Gamepad outline from web/icon.svg, scaled about (54,54) so every point stays inside the 66dp safe circle.
+     Generated; the d-pad, A button and B ring are evenOdd holes. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M43.14,32.96L64.86,32.96C71.19,32.96 75.72,37.48 76.62,43.37L81.15,62.82C82.51,69.61 77.53,75.04 71.65,74.13C66.67,73.23 63.5,69.16 61.24,64.63L58.07,57.39L49.93,57.39L46.76,64.63C44.5,69.16 41.33,73.23 36.35,74.13C30.47,75.04 25.49,69.61 26.85,62.82L31.38,43.37C32.28,37.48 36.81,32.96 43.14,32.96ZM40.09,43.25A2.15,2.15 0 0,1 44.39,43.25L44.39,45.29L46.42,45.29A2.15,2.15 0 0,1 46.42,49.59L44.39,49.59L44.39,51.62A2.15,2.15 0 0,1 40.09,51.62L40.09,49.59L38.05,49.59A2.15,2.15 0 0,1 38.05,45.29L40.09,45.29ZM58.98,44.27A3.62,3.62 0 1,1 66.22,44.27A3.62,3.62 0 1,1 58.98,44.27ZM64.24,50.61A4.69,4.69 0 1,1 73.63,50.61A4.69,4.69 0 1,1 64.24,50.61ZM66.39,50.61A2.55,2.55 0 1,1 71.48,50.61A2.55,2.55 0 1,1 66.39,50.61Z" />
+</vector>
