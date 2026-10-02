@@ -32,6 +32,8 @@ for path in sorted((ROOT / "Sources").rglob("*.swift")):
             cond = s[4:].replace(" ", "")
             stack.append({"os(Android)": True, "!os(Android)": False}.get(cond, None))
             continue
+        if s.startswith("#elseif"):
+            continue  # treated as part of the open #if; no #elseif os(Android) in Sources
         if s.startswith("#else") and stack:
             if stack[-1] is not None:
                 stack[-1] = not stack[-1]
