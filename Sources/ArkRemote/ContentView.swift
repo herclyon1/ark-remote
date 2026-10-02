@@ -38,6 +38,12 @@ struct ContentView: View {
     }
 
     var body: some View {
+        // the no-input link opening the app: mailbox + PIN (#k=) and game tokens (&t=), view.js fromLink / Stamina.fromLink.
+        // On the whole body, so a link opened while still on 「第一次使用」 gets in (it was only on the tabs before).
+        Group { gate }.onOpenURL { url in PhoneLink.open(url) }
+    }
+
+    @ViewBuilder private var gate: some View {
         // no mailbox yet: only 「第一次使用」, no tab bar (web/view.js boot → setupScreen)
         if Relay.shared.config == nil {
             // the update banner shows here too: someone stuck on setup still gets a fixed version in one tap
@@ -109,8 +115,6 @@ struct ContentView: View {
             .tabItem { Label { Text("手机") } icon: { Image("tab-phone", bundle: .module).resizable().scaledToFit() } }
             .tag(ContentTab.phone)
         }
-        // the no-input link opening the app: mailbox + PIN (#k=) and game tokens (&t=), view.js fromLink / Stamina.fromLink
-        .onOpenURL { url in PhoneLink.open(url) }
         .overlay { ToastLayer() }   // view.js toast(): one layer over all five tabs (Pages/Shell/ToastLayer.swift)
     }
 }
