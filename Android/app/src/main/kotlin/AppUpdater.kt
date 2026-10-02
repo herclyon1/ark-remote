@@ -46,6 +46,14 @@ object AppUpdater {
     @Volatile private var apkSize: Long = 0
     /// The session waiting on the system's confirm sheet; abandoned when 「继续安装」 commits a new one.
     @Volatile internal var waitingSession: Int = -1
+    /// The session committed without the confirm sheet (setRequireUserAction NOT_REQUIRED), and the ones we abandoned.
+    /// Xiaomi HyperOS refuses silent self-updates from installers it hasn't allowlisted and aborts the session
+    /// (INSTALL_FAILED_ABORTED: Permission denied — https://github.com/sofianeelhor/PKForge/issues/25), which showed as
+    /// 「安装被取消了」 on the user's Redmi (10-02 23:2x 「每次都会弹出来这个，我都不知道为什么」). An abort of the
+    /// silent session is answered by committing again with the sheet; an abort of an abandoned one is ours, not news.
+    @Volatile internal var silentSession: Int = -1
+    @Volatile private var silentRefused = false
+    internal val abandoned: MutableSet<Int> = java.util.Collections.synchronizedSet(mutableSetOf())
 
     private val delegate: ArkRemoteAppDelegate
         get() = ArkRemoteAppDelegate.shared
@@ -254,21 +262,25 @@ object AppUpdater {
     /// (the app updating itself and holding UPDATE_PACKAGES_WITHOUT_USER_ACTION may then skip the confirm sheet;
     /// otherwise the receiver gets STATUS_PENDING_USER_ACTION). The commit PendingIntent is mutable because the
     /// system adds EXTRA_STATUS to it; it is explicit (our own receiver).
-    private fun commit(file: File, version: String) {
+    private fun commit(file: File, version: String, silent: Boolean = !silentRefused) {
         val installer = app.packageManager.packageInstaller
         // 「继续安装」 while the last session still waits on its confirm sheet: drop that one, this one replaces it
         val old = waitingSession
         if (old >= 0) {
             waitingSession = -1
+            abandoned.add(old)
             try { installer.abandonSession(old) } catch (e: Exception) { logger.warning("abandon session ${old}: ${e}") }
         }
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         params.setAppPackageName(app.packageName)
         params.setSize(file.length())
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (silent && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED)
         }
         val sessionId = installer.createSession(params)
+        silentSession = if (silent && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) sessionId else -1
         try {
             installer.openSession(sessionId).use { session ->
                 session.openWrite("ark-remote-${version}.apk", 0, file.length()).use { out ->
@@ -281,11 +293,31 @@ object AppUpdater {
                 val pending = PendingIntent.getBroadcast(app, sessionId, intent, flags)
                 session.commit(pending.intentSender)
             }
-            logger.info("update session ${sessionId} committed")
+            logger.info("update session ${sessionId} committed (silent ${silent})")
         } catch (e: Exception) {
             installer.abandonSession(sessionId)
             throw e
         }
+    }
+
+    /// The silent session was aborted by the system: same file, again, with the confirm sheet. False when there is
+    /// nothing to retry (no kept file), so the receiver reports the failure instead.
+    internal fun retryWithConfirm(): Boolean {
+        silentRefused = true
+        silentSession = -1
+        val version = latestVersion ?: return false
+        val file = apkFile(version)
+        if (!file.isFile) return false
+        thread(name = "ark-update-confirm") {
+            try {
+                commit(file, version, silent = false)
+            } catch (e: Exception) {
+                logger.error("update install session (confirm) failed: ${e}")
+                installing.set(false)
+                delegate.onUpdateError(message = "系统没接下安装（无法建立安装会话）")
+            }
+        }
+        return true
     }
 
     /// "0.10.0" > "0.9.1"; a suffix after "-" or "+" is ignored.
@@ -310,8 +342,14 @@ class UpdateStatusReceiver : BroadcastReceiver() {
         if (intent.action != AppUpdater.ACTION_STATUS) return
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val detail = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
-        logger.info("update session status ${status}: ${detail}")
+        val session = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+        logger.info("update session ${session} status ${status}: ${detail}")
         val delegate = ArkRemoteAppDelegate.shared
+        if (session >= 0 && AppUpdater.abandoned.remove(session)) return   // we dropped it for a newer one
+        if (status == PackageInstaller.STATUS_FAILURE_ABORTED && session >= 0 && session == AppUpdater.silentSession) {
+            logger.info("silent update refused by the system; committing again with the confirm sheet")
+            if (AppUpdater.retryWithConfirm()) return
+        }
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 val confirm: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
