@@ -49,6 +49,6 @@ struct StatusTab: View {
             } message: {
                 Text(ask?.message ?? "")
             }
-            .modifier(EWSaveBar(edits: $edits))   // 「保存（N）」 / 「放弃」 and the toast, shared with the 终末地 / 鸣潮 tabs
+            .modifier(EWSaveBar(edits: $edits))   // 「保存（N）」 / 「放弃」, shared with the 终末地 / 鸣潮 tabs
     }
 }

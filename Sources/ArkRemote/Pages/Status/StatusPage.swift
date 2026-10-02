@@ -83,7 +83,7 @@ struct StatusPage: View {
     private var deviceCard: some View {
         Section {
             HStack(spacing: 12) {
-                Circle().fill(data.online ? Color.green : Color.gray.opacity(0.5)).frame(width: 10, height: 10)
+                Circle().fill(data.dotOn ? Color.green : Color.gray.opacity(0.5)).frame(width: 10, height: 10)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(data.deviceHead.isEmpty ? data.deviceName : "\(data.deviceName) · \(data.deviceHead)")
                     Text(data.deviceStatus).font(.footnote).foregroundStyle(.secondary)

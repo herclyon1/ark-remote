@@ -81,7 +81,8 @@ struct StatusData {
     var deviceName = "游戏机"
     var deviceHead = ""
     var deviceStatus = "正在读取…"
-    var online = false                        // the card's dot: setStatus state "on" (index.html .devcard .dot.on green, else tertiary)
+    var online = false                        // heartbeat verdict (Live.alive): gates 现在在跑 (view.js:356-357)
+    var dotOn = false                         // the card's dot: setStatus state "on" (index.html .devcard .dot.on green, else tertiary)
     // Notices.
     var busy: [String] = []                   // run.在跑的 (only shown while online)
     var echoFarm: StatusEchoFarm?             // relay.刷声骸 when 到 is set

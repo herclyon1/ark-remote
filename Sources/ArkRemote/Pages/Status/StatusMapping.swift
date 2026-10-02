@@ -77,7 +77,8 @@ extension StatusData {
         } else {
             d.deviceStatus = st
         }
-        d.online = relay.statusState == "on"   // view.js setStatus(text, state) → #dot2 class (live.js:65-66), not the heartbeat alone
+        d.online = live.alive
+        d.dotOn = relay.statusState == "on"   // view.js setStatus(text, state) → #dot2 class (live.js:65-66), not the heartbeat alone
         d.refreshing = live.busy
 
         // notices
