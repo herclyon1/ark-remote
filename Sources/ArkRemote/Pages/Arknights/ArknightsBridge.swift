@@ -18,17 +18,21 @@ struct ArknightsFieldRef {
         return snap?["config"]?[section.sec ?? ""]?[field.key ?? ""]
     }
 
-    /// view.js labelOf(g, f) (view.js:134-140), prefixed with the section title as the edits list does (view.js:1041).
-    func editLabel(in snap: JSONValue?) -> String {
+    /// view.js labelOf(g, f) (view.js:134-140): our own name, else the machine's, else the schema's.
+    func rowLabel(in snap: JSONValue?) -> String {
         let own: String?
         if section.src == "master" {
             own = snap?["master"]?[owner]?["labels"]?[field.path]?.string
         } else {
             own = snap?["options"]?["_labels"]?["\(section.script ?? "")|\(field.path)"]?.string
         }
-        let name = field.name ?? (own?.isEmpty == false ? own : nil) ?? field.label ?? field.key
+        return field.name ?? (own?.isEmpty == false ? own : nil) ?? field.label ?? field.key
             ?? String(field.path.split(separator: "/").last ?? "")
-        return "\(section.title) · \(name)"
+    }
+
+    /// labelOf prefixed with the section title, as the edits list does (view.js:1041).
+    func editLabel(in snap: JSONValue?) -> String {
+        "\(section.title) · \(rowLabel(in: snap))"
     }
 }
 
@@ -73,8 +77,10 @@ enum ArknightsField: CaseIterable {
     /// The page's value as the JSON the web would send, typed after the machine's current value
     /// (view.js:1094-1101: numbers go back as strings when the machine stores a string).
     func outgoing(_ data: ArknightsPageData, machine raw: JSONValue?, options: [String: JSONValue]) -> JSONValue? {
-        func number(_ n: Int?) -> JSONValue? {
-            guard let n else { return nil }
+        // view.js:1097: an empty box goes out as null.
+        func number(_ text: String?) -> JSONValue? {
+            guard let text else { return nil }
+            guard let n = Int(text) else { return .null }
             if case .string = raw { return .string(String(n)) }
             return .int(n)
         }
@@ -94,13 +100,14 @@ enum ArknightsField: CaseIterable {
 
     /// Puts a JSON value (machine or pending) into the page's typed field.
     func apply(_ v: JSONValue, to data: inout ArknightsPageData) {
-        let n = v.number.map { Int($0) }
+        // view.js:503: null shows as an empty box.
+        let n = v.isNull ? "" : (v.number.map { String(Int($0)) } ?? v.jsString)
         switch self {
         case .stage: data.stage = v.isNull ? "" : v.jsString
-        case .medicineNumb: data.medicineNumb = n ?? 0
+        case .medicineNumb: data.medicineNumb = n
         case .ifFight: data.ifFight = v.truthy
         case .ifActivityFirst: data.ifActivityFirst = v.truthy
-        case .activityStageIndex: data.activityStageIndex = n ?? 0
+        case .activityStageIndex: data.activityStageIndex = n
         case .usesOfDrones: data.usesOfDrones = v.isNull ? "" : v.jsString
         case .awardMail: data.awardMail = v.truthy
         case .awardOrundum: data.awardOrundum = v.truthy
@@ -146,11 +153,27 @@ struct ArknightsBridge {
     let masterUnreadable: Bool
     /// …and the rows show the last good copy instead (view.js:421).
     let masterStale: Bool
+    /// AUTO-MAS could not be read (view.js:309: config._错误 or no config at all).
+    let configUnreadable: Bool
+    /// …and snap.config is the last one read (view.js:310-311).
+    let configStale: Bool
     /// The picked shift (view.js curQueue, stored as "ark-remote-cfg-queue"; chosen on the 状态 tab).
     let queue: String
 
-    init(snap live: JSONValue?, queue: String = "", lastGoodMaster: JSONValue? = nil) {
+    init(snap given: JSONValue?, queue: String = "", lastGoodMaster: JSONValue? = nil, lastGoodConfig: JSONValue? = nil) {
         self.queue = queue
+        // view.js:308-315: AUTO-MAS not running → the config falls back to the last one read.
+        var live = given
+        let cfg = given?["config"]?.object ?? [:]
+        let cfgBad = given != nil && (cfg["_错误"] != nil || cfg.isEmpty)
+        configUnreadable = cfgBad
+        if cfgBad, let last = lastGoodConfig, last.object?.isEmpty == false, case .object(var top)? = given {
+            top["config"] = last
+            live = .object(top)
+            configStale = true
+        } else {
+            configStale = false
+        }
         let m = live?["master"]?["MAA"]
         let unreadable = (m?["values"]?.object ?? [:]).isEmpty && (m?["readonly"]?.object ?? [:]).isEmpty
         masterUnreadable = unreadable
@@ -166,6 +189,22 @@ struct ArknightsBridge {
             snap = live
             masterStale = false
         }
+    }
+
+    /// The web's key for the last readable config (view.js:7 LS + "-config", view.js:127, 314).
+    static let configKey = "ark-remote-cfg-config"
+
+    /// The last readable snap.config (view.js:127).
+    static func lastGoodConfig() -> JSONValue? {
+        guard let raw = UserDefaults.standard.string(forKey: configKey),
+              let v = try? JSONValue.parse(raw), v.object?.isEmpty == false else { return nil }
+        return v
+    }
+
+    /// view.js:312-314: keep a readable config for the next time AUTO-MAS is off.
+    static func saveConfig(snap: JSONValue?) {
+        guard let c = snap?["config"], let o = c.object, !o.isEmpty, o["_错误"] == nil else { return }
+        UserDefaults.standard.set(c.encodedString(), forKey: configKey)
     }
 
     /// The last readable snap.master.MAA, kept by EWLastGood.save under the web's key (view.js:423-426).
@@ -221,6 +260,8 @@ struct ArknightsBridge {
             data.notInShift = true
             return data
         }
+        data.configUnreadable = configUnreadable
+        data.configStale = configStale
         data.masterUnreadable = masterUnreadable && !masterStale
         data.masterStale = masterStale
         data.usesOfDronesOptions = droneOptions
@@ -229,6 +270,7 @@ struct ArknightsBridge {
             if ref.section.src == "master" && data.masterUnreadable { continue }
             // view.js:459: a field the machine did not report is not drawn.
             guard let raw = ref.rawValue(in: snap) else { continue }
+            data.labels[f.path] = ref.rowLabel(in: snap)
             f.apply((withPending ? Pending.shared.shownValue(for: ref.id) : nil) ?? raw, to: &data)
             // pending.js:47-67: 「已寄出 HH:MM · …」 / 「没生效 · …」 / 「已应用 HH:MM」 under the row.
             if withPending, let tag = Pending.shared.tag(for: ref.id, editing: editing.contains(ref.id)) {

@@ -9,11 +9,14 @@ struct ArknightsTab: View {
     /// The same without the unsaved edits; the difference is what 保存 sends.
     @State var base = ArknightsPageData()
     @State var saving = false
+    /// The 「确认这次修改」 box is up (view.js doSave, view.js:1328-1336).
+    @State var reviewing = false
     /// The shift picked on the 状态 tab (view.js curQueue, localStorage "ark-remote-cfg-queue").
     @AppStorage("ark-remote-cfg-queue") var storedQueue = ""
 
     private var bridge: ArknightsBridge {
-        ArknightsBridge(snap: Relay.shared.snap, queue: storedQueue, lastGoodMaster: ArknightsBridge.lastGoodMaster())
+        ArknightsBridge(snap: Relay.shared.snap, queue: storedQueue, lastGoodMaster: ArknightsBridge.lastGoodMaster(),
+                        lastGoodConfig: ArknightsBridge.lastGoodConfig())
     }
     private var edits: [ArknightsEdit] { bridge.edits(from: base, to: shown) }
 
@@ -23,22 +26,27 @@ struct ArknightsTab: View {
                 await Pending.shared.resend(key)
                 refresh()
             }
-        })
+        }, edited: Set(edits.map { $0.field.path }))
             .toolbar {
                 if !edits.isEmpty {
                     Button("放弃") { shown = base }
                         .disabled(saving)
-                    Button("保存（\(edits.count)）") { Task { await save() } }
+                    Button("保存（\(edits.count)）") { reviewing = true }
                         .disabled(saving)
                 }
             }
-            .task {
-                refresh()
-                if let s = try? await Relay.shared.latestState() {
-                    Relay.shared.adopt(s)
-                }
-                refresh()
+            // index.html:849-857, view.js:1331-1335: each change as 「名字 旧值 → 新值」 before anything is sent.
+            .alert("确认这次修改", isPresented: $reviewing) {
+                Button("再想想", role: .cancel) {}
+                Button("确认修改") { Task { await save() } }
+            } message: {
+                Text(verbatim: edits.map {
+                    "\($0.label)\n\(Pending.shared.valueLabel($0.pending, $0.from)) → \(Pending.shared.valueLabel($0.pending, $0.to))"
+                }.joined(separator: "\n\n"))
             }
+            .task { await reload() }
+            // Pull to refresh, as the other tabs have: one read of the latest state.
+            .refreshable { await reload() }
             .onChange(of: Relay.shared.snapAt) {
                 refresh()
             }
@@ -48,11 +56,21 @@ struct ArknightsTab: View {
             }
     }
 
+    private func reload() async {
+        refresh()
+        if let s = try? await Relay.shared.latestState() {
+            Relay.shared.adopt(s)
+        }
+        refresh()
+    }
+
     /// Re-reads the snapshot and keeps the unsaved edits on top (view.js: `const keep = { ...edits }; render(); edits = keep`).
     private func refresh() {
         let kept = edits
         // view.js:423-426: keep the last readable master copy for the next time it can't be read.
         EWLastGood.save(snap: Relay.shared.snap, game: "MAA")
+        // view.js:312-314: and the last readable AUTO-MAS config.
+        ArknightsBridge.saveConfig(snap: Relay.shared.snap)
         let b = bridge
         // The web's render fills liveVals for every field on the page, then reconciles the sent changes.
         Pending.shared.liveVals.merge(b.liveVals) { _, new in new }

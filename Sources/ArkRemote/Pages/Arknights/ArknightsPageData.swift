@@ -11,14 +11,15 @@ struct ArknightsPageData: Equatable {
     // Section 明日方舟 — src "mas", script "MAA", sec "MAA" (schema.js:116-127)
     /// Info.Stage — stage code, e.g. 1-7, CE-6, AT-4
     var stage: String?
-    /// Info.MedicineNumb — sanity potions per run; 0 = none, 999 = unlimited
-    var medicineNumb: Int?
+    /// Info.MedicineNumb — sanity potions per run; 0 = none, 999 = unlimited.
+    /// Kept as the text in the box, like the web's <input>: "" = the machine has null / the box was cleared (view.js:503, 1097).
+    var medicineNumb: String?
     /// Task.IfFight
     var ifFight: Bool?
     /// Task.IfActivityFirst
     var ifActivityFirst: Bool?
-    /// Task.ActivityStageIndex — 1-based position in the event stage list
-    var activityStageIndex: Int?
+    /// Task.ActivityStageIndex — 1-based position in the event stage list; text as for medicineNumb
+    var activityStageIndex: String?
 
     // Section 明日方舟 · 基建 — src "master", game "MAA" (schema.js:128-131)
     /// Infrast/UsesOfDrones — the selected option value
@@ -43,6 +44,13 @@ struct ArknightsPageData: Equatable {
     // Section 明日方舟 · 周常 — relay["周常"]["剿灭"]["本周已完成"] (view.js:510-523)
     /// This week's Annihilation is maxed out. nil = MAA not in this shift, section hidden.
     var annihilationDoneThisWeek: Bool?
+
+    /// AUTO-MAS could not be read (config._错误 or empty, view.js:309).
+    var configUnreadable: Bool = false
+    /// …and the 明日方舟 rows show the last config read (view.js:310-311).
+    var configStale: Bool = false
+    /// The machine's name for each row, keyed by the field's path (view.js labelOf, view.js:134-140).
+    var labels: [String: String] = [:]
 
     /// The master copy could not be read this time and the rows show the last one read (view.js:421).
     var masterStale: Bool = false
@@ -72,10 +80,10 @@ extension ArknightsPageData {
     /// mas fields use the stage example from schema.js:118.
     static let sample = ArknightsPageData(
         stage: "1-7",
-        medicineNumb: 0,
+        medicineNumb: "0",
         ifFight: true,
         ifActivityFirst: false,
-        activityStageIndex: 1,
+        activityStageIndex: "1",
         usesOfDrones: "Money",
         usesOfDronesOptions: [
             ArknightsOption(label: "贸易站 · 龙门币", value: "Money"),
