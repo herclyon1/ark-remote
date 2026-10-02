@@ -154,7 +154,8 @@ struct StatusPage: View {
     private func tileLabel<Icon: View>(_ title: String, _ sub: String, tint: Color, spinning: Bool = false,
                                        @ViewBuilder icon: () -> Icon) -> some View {
         HStack(spacing: 12) {
-            if spinning { ProgressView() } else { icon().foregroundStyle(tint) }
+            // the title beside names the action: the icon is decorative (HIG VoiceOver: "Exclude purely decorative images")
+            if spinning { ProgressView() } else { icon().foregroundStyle(tint).accessibilityHidden(true) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).foregroundStyle(title == "停止一切" ? Color.red : Color.primary)
                 if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(.secondary) }
@@ -203,7 +204,7 @@ struct StatusPage: View {
         let colour = Self.staminaColour[t.label] ?? Color.blue
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
-                Image(icon, bundle: assetBundle).resizable().scaledToFit().frame(width: 30, height: 30)
+                decorativeImage(icon).resizable().scaledToFit().frame(width: 30, height: 30)   // t.label names it
                 Spacer()
                 if placeholder {
                     RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.2)).frame(width: 56, height: 22)
@@ -390,9 +391,8 @@ struct StatusPage: View {
             // view.js:322-325 cfgNote, placed right after the 机器 section (view.js:402): a bare footnote line in --warn
             // (systemOrange, index.html:102/477), no card; AUTO-MAS unreadable, and whether a last good config stands in
             if data.configUnreadable {
-                Label(data.configIsStale ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的，改了也要等它开着才生效"
-                                         : "读不到 AUTO-MAS 的配置（它没在运行？）",
-                      systemImage: "exclamationmark.triangle.fill")
+                warningLabel(data.configIsStale ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的，改了也要等它开着才生效"
+                                                : "读不到 AUTO-MAS 的配置（它没在运行？）")
                     .font(.footnote)
                     .foregroundStyle(.orange)
             }
@@ -454,7 +454,9 @@ func receiptRow(_ r: StatusReceipt, at: String) -> some View {
 
 @ViewBuilder private func receiptIcon(_ r: StatusReceipt) -> some View {
     if r.ok {
-        Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.green)
+        // the receipt text does not say whether it went through: the icon carries it, so it is named (accessibilityLabel docs:
+        // "a view that doesn't display text, like an icon")
+        Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.green).accessibilityLabel("成功")
     } else {
         // no Material cancel icon in skip-ui's table: a red disc with the mapped xmark on Android
         #if os(Android)
@@ -462,10 +464,12 @@ func receiptRow(_ r: StatusReceipt, at: String) -> some View {
         ZStack {
             Circle().fill(Color.red).frame(width: 13, height: 13)
             Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(Color.white)
+                .accessibilityHidden(true)
         }
         .frame(width: 16, height: 16)
+        .accessibilityLabel("失败")
         #else
-        Image(systemName: "xmark.circle.fill").foregroundStyle(Color.red)
+        Image(systemName: "xmark.circle.fill").foregroundStyle(Color.red).accessibilityLabel("失败")
         #endif
     }
 }

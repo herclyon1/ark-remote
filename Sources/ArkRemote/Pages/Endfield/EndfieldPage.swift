@@ -41,7 +41,7 @@ struct EndfieldPage: View {
                     HStack {
                         Text("库存")
                         Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
                     }
                 }
             }
@@ -78,7 +78,7 @@ struct EndfieldPage: View {
         } else {
             Section {
                 // Nothing readable and no earlier copy: say so instead of an empty card (view.js:414).
-                Label("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改", systemImage: "exclamationmark.triangle.fill")
+                warningLabel("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改")
                     .foregroundStyle(.orange)
             } header: {
                 Text(g.title)

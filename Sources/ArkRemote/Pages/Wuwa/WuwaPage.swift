@@ -130,7 +130,7 @@ struct WuwaPage: View {
                               tag: data.tags[row.path], onResend: onResend)
                 }
             } else {
-                Label("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改", systemImage: "exclamationmark.triangle.fill")
+                warningLabel("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改")
                     .foregroundStyle(.orange)
             }
             // The relay's own switch for OK-WW (schema.js RELAY_SWITCHES tab "OK-WW"); not part of any config file.

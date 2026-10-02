@@ -57,7 +57,7 @@ struct EWRowView: View {
     private var control: some View {
         switch row.kind {
         case .warning:
-            Label(row.label, systemImage: "exclamationmark.triangle.fill")
+            warningLabel(row.label)
                 .foregroundStyle(.orange)
         case .readOnly:
             HStack {
@@ -232,7 +232,7 @@ struct EWChoiceList: View {
                         if icons {
                             ForEach(c.label.components(separatedBy: " ＋ "), id: \.self) { name in
                                 if let asset = WuwaSchema.setIcons[name] {
-                                    Image(asset, bundle: assetBundle, label: Text(name))
+                                    decorativeImage(asset)   // c.label beside says the names
                                         .resizable()
                                         .frame(width: 28, height: 28)
                                         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -242,16 +242,20 @@ struct EWChoiceList: View {
                         Text(c.label)
                         Spacer()
                         if draft.contains(c.value) {
-                            Image(systemName: "checkmark")
+                            Image(systemName: "checkmark").accessibilityHidden(true)
                         }
                     }
                 }
+                // the checkmark is said as the row's selected state, as a native selection list does
+                // (AccessibilityTraits.isSelected: "The accessibility element is currently selected.")
+                .accessibilityAddTraits(draft.contains(c.value) ? .isSelected : [])
             }
         }
         .navigationTitle(title)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button { done() } label: { Image(systemName: "checkmark") }
+                    .accessibilityLabel("完成")   // icon-only: named as EWLive's ✓ (index.html:921 aria-label 完成)
             }
         }
     }
