@@ -8,6 +8,8 @@ import SwiftUI
 struct EndfieldPageData {
     var master: EWMaster
     var lastGoodMaster: EWMaster? = nil
+    /// path -> the small lines under that row (EWRowTag).
+    var tags: [String: EWRowTag] = [:]
 
     static let sample = EndfieldPageData(master: .endfieldSample)
 }
@@ -16,15 +18,18 @@ struct EndfieldPage: View {
     var data: EndfieldPageData
     var onChange: (String, EWValue) -> Void
     var onOpenStockpile: () -> Void
+    var onResend: (String) -> Void
 
     @State var values: [String: EWValue]
 
     init(data: EndfieldPageData,
          onChange: @escaping (String, EWValue) -> Void = { _, _ in },
-         onOpenStockpile: @escaping () -> Void = {}) {
+         onOpenStockpile: @escaping () -> Void = {},
+         onResend: @escaping (String) -> Void = { _ in }) {
         self.data = data
         self.onChange = onChange
         self.onOpenStockpile = onOpenStockpile
+        self.onResend = onResend
         _values = State(initialValue: ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:])
     }
 
@@ -52,20 +57,31 @@ struct EndfieldPage: View {
     @ViewBuilder
     private func card(_ g: EWGroupSpec) -> some View {
         let (m, notes) = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster)
-        Section {
-            if let m {
-                let rows = notes.enumerated().map { EWRow(id: "warn-\(g.title)-\($0.offset)", kind: .warning, path: "", label: $0.element) }
-                    + ewRows(g, m, values: values)
-                ForEach(rows) { row in
-                    EWRowView(row: row, values: $values, readonly: m.readonly, onChange: onChange)
+        if let m {
+            // view.js:446: a tree this read did not carry is drawn from the last good read.
+            let tm = g.tree.map { m.roots[$0] == nil } == true ? (data.lastGoodMaster ?? m) : m
+            let drawn = ewRows(g, tm, values: values)
+            // view.js:801-803, 826: a card with no rows this time is not drawn.
+            if !drawn.isEmpty {
+                Section {
+                    let rows = notes.enumerated().map { EWRow(id: "warn-\(g.title)-\($0.offset)", kind: .warning, path: "", label: $0.element) }
+                        + drawn
+                    ForEach(rows) { row in
+                        EWRowView(row: row, values: $values, readonly: m.readonly, onChange: onChange,
+                                  tag: data.tags[row.path], onResend: onResend)
+                    }
+                } header: {
+                    Text(g.title)
                 }
-            } else {
+            }
+        } else {
+            Section {
                 // Nothing readable and no earlier copy: say so instead of an empty card (view.js:414).
                 Label("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
+            } header: {
+                Text(g.title)
             }
-        } header: {
-            Text(g.title)
         }
     }
 }

@@ -65,6 +65,8 @@ struct WuwaPageData {
     var weeklyBossDone = false
     /// relay["周常"]["周本"]["第几个周本"]
     var weeklyBossIndex = 1
+    /// path (or "relay|tacet_shots", "wb|OK-WW|第几个周本") -> the small lines under that row.
+    var tags: [String: EWRowTag] = [:]
 
     static let sample = WuwaPageData(master: .wuwaSample)
 }
@@ -75,6 +77,7 @@ struct WuwaPage: View {
     /// (switch id as the web page names it, new state): "relay|tacet_shots"
     var onRelaySwitch: (String, Bool) -> Void
     var onWeeklyBossIndex: (Int) -> Void
+    var onResend: (String) -> Void
 
     @State var values: [String: EWValue]
     @State var tacetShots: Bool
@@ -83,11 +86,13 @@ struct WuwaPage: View {
     init(data: WuwaPageData,
          onChange: @escaping (String, EWValue) -> Void = { _, _ in },
          onRelaySwitch: @escaping (String, Bool) -> Void = { _, _ in },
-         onWeeklyBossIndex: @escaping (Int) -> Void = { _ in }) {
+         onWeeklyBossIndex: @escaping (Int) -> Void = { _ in },
+         onResend: @escaping (String) -> Void = { _ in }) {
         self.data = data
         self.onChange = onChange
         self.onRelaySwitch = onRelaySwitch
         self.onWeeklyBossIndex = onWeeklyBossIndex
+        self.onResend = onResend
         _values = State(initialValue: ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:])
         _tacetShots = State(initialValue: data.tacetShots)
         _bossIndex = State(initialValue: String(data.weeklyBossIndex))
@@ -121,15 +126,18 @@ struct WuwaPage: View {
                 let rows = notes.enumerated().map { EWRow(id: "warn-\(WuwaSchema.group.title)-\($0.offset)", kind: .warning, path: "", label: $0.element) }
                     + ewRows(WuwaSchema.group, m, values: values, hidden: hidden(m))
                 ForEach(rows) { row in
-                    EWRowView(row: row, values: $values, readonly: m.readonly, onChange: onChange)
+                    EWRowView(row: row, values: $values, readonly: m.readonly, onChange: onChange,
+                              tag: data.tags[row.path], onResend: onResend)
                 }
             } else {
                 Label("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
             }
             // The relay's own switch for OK-WW (schema.js RELAY_SWITCHES tab "OK-WW"); not part of any config file.
-            Toggle(isOn: Binding(get: { tacetShots }, set: { tacetShots = $0; onRelaySwitch("relay|tacet_shots", $0) })) {
-                EWRowTitle(label: "无音区结算截图", hint: "开着：日报后面带上无音区打完的两张结算图")
+            tagged("relay|tacet_shots") {
+                Toggle(isOn: Binding(get: { tacetShots }, set: { tacetShots = $0; onRelaySwitch("relay|tacet_shots", $0) })) {
+                    EWRowTitle(label: "无音区结算截图", hint: "开着：日报后面带上无音区打完的两张结算图")
+                }
             }
         } header: {
             Text(WuwaSchema.group.title)
@@ -149,12 +157,14 @@ struct WuwaPage: View {
                 Spacer()
                 Text(data.weeklyBossDone ? "本周已领满" : "本周还没领满").foregroundStyle(.secondary)
             }
+            tagged("wb|OK-WW|第几个周本") {
             HStack {
                 EWRowTitle(label: "周本打第几个", hint: "游戏里按 F2 打开周本列表，从上往下数，第一个填 1。新 Boss 上线顺序会变，换本时记得来改")
                 Spacer()
                 TextField("1", text: Binding(get: { bossIndex }, set: { v in
                     bossIndex = v
-                    if let n = Int(v) { onWeeklyBossIndex(n) }
+                    let n = Int(v) ?? 0   // view.js:1083 `Number(el.value) || 1`: emptied or 0 is 1
+                    onWeeklyBossIndex(n == 0 ? 1 : n)
                 }))
                 .multilineTextAlignment(.trailing)
                 .frame(maxWidth: 60)
@@ -162,8 +172,22 @@ struct WuwaPage: View {
                 .keyboardType(.numberPad)
                 #endif
             }
+            }
         } header: {
             Text("鸣潮 · 周常")
+        }
+    }
+
+    /// A row with its small lines under it, same as the config rows (EWRowView).
+    @ViewBuilder private func tagged<Row: View>(_ key: String, @ViewBuilder _ row: () -> Row) -> some View {
+        if let tag = data.tags[key] {
+            VStack(alignment: .leading, spacing: 4) {
+                row()
+                EWTagLine(tag: tag, onResend: onResend)
+            }
+            .listRowBackground(tag.unsaved ? Color.accentColor.opacity(0.08) : tag.posted ? Color.green.opacity(0.08) : nil)
+        } else {
+            row()
         }
     }
 }
