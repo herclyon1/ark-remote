@@ -109,9 +109,16 @@ extension StatusData {
             if l.isEmpty || l.hasPrefix("📅") { continue }
             if l.hasPrefix("🕘") {
                 let rest = l.replacingOccurrences(of: "🕘", with: "").trimmingCharacters(in: .whitespaces)
-                let pair = rest.components(separatedBy: " 东京 ")
-                blocks.append(StatusPlanBlock(time: pair[0].trimmingCharacters(in: .whitespaces),
-                                              tokyo: pair.count > 1 ? pair[1].trimmingCharacters(in: .whitespaces) : "",
+                // view.js:225 split(/\s+东京\s+/): JS \s takes the ideographic space (U+3000) the plan text puts before 东京
+                // ("09:00　东京 10:00"); splitting on " 东京 " alone left it all in the time
+                var time = rest, tokyo = ""
+                if let r = rest.range(of: "东京"), r.lowerBound > rest.startIndex,
+                   rest[rest.index(before: r.lowerBound)].isWhitespace {
+                    time = String(rest[..<r.lowerBound])
+                    tokyo = String(rest[r.upperBound...])
+                }
+                blocks.append(StatusPlanBlock(time: time.trimmingCharacters(in: .whitespaces),
+                                              tokyo: tokyo.trimmingCharacters(in: .whitespaces),
                                               queueName: nil, runsToday: true, games: []))
                 continue
             }

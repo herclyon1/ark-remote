@@ -46,7 +46,7 @@ struct StatusPage: View {
             tomorrow
             receiptsSection
         }
-        .navigationTitle("游戏机遥控")   // web index.html <title> / top bar 「游戏机遥控」 (view.js:1554 with nothing to save)
+        // the title (「游戏机遥控」, or 「待保存 N 项」 while changes wait, view.js:1554) is set by StatusTab's EWSaveBar
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
@@ -97,14 +97,6 @@ struct StatusPage: View {
     // MARK: notices
 
     @ViewBuilder private var notices: some View {
-        listSection("status-config", if: data.configUnreadable) {
-            Section {
-                Label(data.configIsStale ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的，改了也要等它开着才生效"
-                                         : "读不到 AUTO-MAS 的配置（它没在运行？）",
-                      systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-            }
-        }
         listSection("status-busy", if: !data.busy.isEmpty && data.online) {
             Section("现在在跑") {
                 VStack(alignment: .leading, spacing: 4) {
@@ -303,13 +295,16 @@ struct StatusPage: View {
     private var echoFarmSection: some View {
         Section("刷 4C 声骸") {
             if let ef = data.echoFarm {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("改成刷到几点")
-                    Text("提前或延后都行，填 21:00 这种。已经过了的时刻＝立刻收工").font(.footnote).foregroundStyle(.secondary)
+                // view.js:396-398: the field sits beside its title, the explanation under the title (web .row: label + .hint left,
+                // input.short right, index.html:488 72–120 px wide)
+                HStack(spacing: 12) {
+                    rowTitle("改成刷到几点", "提前或延后都行，填 21:00 这种。已经过了的时刻＝立刻收工")
                     // view.js:398 #efnew value = the current 到; :1235 data-time: a bad entry rolls back with a toast when it is left
                     TextField(ef.until, text: $echoNewUntil)
                         .onAppear { if echoNewUntil.isEmpty { echoNewUntil = ef.until } }
                         .onSubmit { echoNewUntil = Self.checkedTime(echoNewUntil, else: ef.until) }
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: Self.timeFieldWidth)
                 }
             } else {
                 Picker(selection: $bossIndex) {
@@ -321,16 +316,31 @@ struct StatusPage: View {
                     }
                 }
                 .pickerStyle(.menu)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("刷到几点（机器时间）")
-                    Text("填 08:30 这种，已过就算明天。到点自动收工、配置还原").font(.footnote).foregroundStyle(.secondary)
+                // view.js:174-176 echoFarmBlock: title + explanation left, the time field right of them
+                HStack(spacing: 12) {
+                    rowTitle("刷到几点（机器时间）", "填 08:30 这种，已过就算明天。到点自动收工、配置还原")
                     TextField("08:30", text: $echoUntil)
                         .onSubmit { echoUntil = Self.checkedTime(echoUntil, else: "08:30") }
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: Self.timeFieldWidth)
                 }
                 Button("开始刷") { actions.startEchoFarm(bossIndex, echoUntil) }
             }
         }
     }
+
+    /// A row's title with its grey explanation under it (web `<label>title<span class="hint">…</span></label>`), taking
+    /// the room left of the row's control.
+    private func rowTitle(_ title: String, _ hint: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            Text(hint).font(.footnote).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// index.html:488 input.short: 72–120 px; a fixed width in that range holds 「08:30」 with the platform field's padding.
+    private static let timeFieldWidth: CGFloat = 104
 
     /// view.js:1235 input[data-time] onchange: 「8:30」 → 「08:30」; anything else rolls back with 「时刻填成 08:30 这种」.
     @MainActor static func checkedTime(_ v: String, else last: String) -> String {
@@ -342,7 +352,7 @@ struct StatusPage: View {
     // MARK: 机器 (schema.js RELAY_SWITCHES, tab 状态)
 
     private var machineSection: some View {
-        Section("机器") {
+        Section {
             Toggle(isOn: Binding(get: { data.skipShutdown }, set: { actions.setSkipShutdown($0) })) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("下次跑完不关机")
@@ -360,6 +370,18 @@ struct StatusPage: View {
                 }
             }
             .listRowBackground(rowGround(StatusSwitchID.debugMode))
+        } header: {
+            Text("机器")
+        } footer: {
+            // view.js:322-325 cfgNote, placed right after the 机器 section (view.js:402): a bare footnote line in --warn
+            // (systemOrange, index.html:102/477), no card; AUTO-MAS unreadable, and whether a last good config stands in
+            if data.configUnreadable {
+                Label(data.configIsStale ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的，改了也要等它开着才生效"
+                                         : "读不到 AUTO-MAS 的配置（它没在运行？）",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 
@@ -383,7 +405,14 @@ struct StatusPage: View {
                     }
                 }
             } header: {
-                Text(note.isEmpty ? "机器最近的回执" : "机器最近的回执  \(note)")
+                // view.js:449 `<h2>机器最近的回执 <small>…</small></h2>`; index.html:232 h2 small = footnote size, weight 400, dim
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("机器最近的回执")
+                    if !note.isEmpty {
+                        Text(note).font(.footnote).fontWeight(.regular).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)   // Android centred the bare HStack in the header slot
             }
         }
     }
