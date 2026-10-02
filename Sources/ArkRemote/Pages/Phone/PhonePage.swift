@@ -72,7 +72,7 @@ struct PhonePage: View {
             } header: {
                 Text("游戏账号")
             } footer: {
-                Text("免输入链接会把这里存着的密钥一起带上，换手机开一次那条链接就全有。森空岛的会话由机器交过来；库街区的：打开电脑上 scripts/mac/phone-link.py 打出来的链接，或把 ~/.config/ark/.env 里 KUROBBS_TOKEN 和 KUROBBS_DID 那两行粘贴进来")
+                Text("免输入链接会把这里存着的密钥一起带上，换手机开一次那条链接就全有。森空岛的会话由机器交过来；库街区的：点「粘贴密钥串」，粘贴网页「手机」页复制的免输入链接、电脑上 scripts/mac/phone-link.py 打出来的链接，或 ~/.config/ark/.env 里 KUROBBS_TOKEN 和 KUROBBS_DID 那两行")
             }
         }
         .navigationTitle("游戏机遥控")   // every page of the web console is titled so (view.js:1283)
@@ -86,7 +86,7 @@ struct PhonePage: View {
                             .frame(minHeight: 120)
                             .setupPlainInput()
                     } footer: {
-                        Text("把 KUROBBS_TOKEN=… 和 KUROBBS_DID=… 两行粘贴到这里：")
+                        Text("把免输入链接，或 KUROBBS_TOKEN=… 和 KUROBBS_DID=… 两行粘贴到这里：")
                     }
                 }
                 .navigationTitle("粘贴密钥串")

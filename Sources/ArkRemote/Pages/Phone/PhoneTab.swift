@@ -13,6 +13,13 @@ struct PhoneTab: View {
         PhonePage(data: PhonePageData(pageVersion: PhoneLink.appVersion, staminaStatus: status),
                   actions: PhonePageActions(
                     pasteTokens: { s in
+                        // A 免输入链接 (…#k=…&t=…) pasted here goes the way an opened link goes: on Android a tapped link
+                        // opens the browser, not the app (no assetlinks.json), so pasting is the only way in once set up.
+                        let str = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if str.contains("#"), let u = URL(string: str), PhoneLink.open(u) {
+                            Relay.shared.showToast("密钥已存到这台手机")
+                            return
+                        }
                         // view.js #tokpaste: fromPaste, then toast and a forced refresh
                         try stamina.fromPaste(s)
                         Relay.shared.showToast("密钥已存到这台手机")
@@ -80,7 +87,9 @@ enum PhoneLink {
 
     /// An opened link (.onOpenURL): view.js fromLink() for `#k=` and Stamina.fromLink() for `&t=`.
     /// The web then wipes the hash from the address bar; an app has no address bar to wipe.
-    @MainActor static func open(_ url: URL) {
+    /// True when the link carried something this phone took.
+    @discardableResult
+    @MainActor static func open(_ url: URL) -> Bool {
         var took = false
         if let frag = url.fragment, let re = try? Regex("[#&]?k=([A-Za-z0-9_-]+)"),
            let m = frag.firstMatch(of: re), m.output.count > 1, let sub = m.output[1].substring,
@@ -89,7 +98,13 @@ enum PhoneLink {
             Relay.shared.saveConfig(topic: t, pin: p)
             took = true
         }
-        if StaminaStore.shared.fromLink(url) { took = true }
+        if StaminaStore.shared.fromLink(url) {
+            took = true
+            // fromLink replaces the stored tokens; view.js render() puts the machine's 森空岛 session back on its next
+            // pass (Stamina.fromSnapshot(snap) on every render), so take it again from the state already here.
+            if let snap = Relay.shared.snap { StaminaStore.shared.fromSnapshot(snap) }
+        }
         if took { Task { await StaminaStore.shared.refresh(force: true) } }
+        return took
     }
 }

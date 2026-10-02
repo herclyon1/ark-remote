@@ -63,7 +63,14 @@ import SwiftUI
             Pending.shared.reconcile()
         }
         // the cached state the app starts with counts too (the 状态 switches compare against liveVals)
-        if Relay.shared.snap != nil { fillLiveVals() }
+        if let snap = Relay.shared.snap {
+            // view.js render() at boot: Stamina.fromSnapshot(snap) on the cached state as well, so a 森空岛 session the
+            // machine handed over is there even while the machine is off
+            if StaminaStore.shared.fromSnapshot(snap) {
+                Task { _ = await StaminaStore.shared.refresh(force: true) }
+            }
+            fillLiveVals()
+        }
     }
 
     /// render() fills liveVals before reconcile; StatusData.from does the same field mapping, so build it
