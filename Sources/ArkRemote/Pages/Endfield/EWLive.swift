@@ -181,6 +181,14 @@ enum EWSave {
         } else {
             relay.showToast("已寄出 \(sent) 项（机器开着就是马上，关着就是下次开机）")
         }
+        // view.js:2455-2457: ask the machine once, 2 s later, for a state reported after the send. One request, no loop.
+        if sent > 0 {
+            let after = nowSec()
+            Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await Live.shared.ping(minAt: after)
+            }
+        }
         return left
     }
 }
