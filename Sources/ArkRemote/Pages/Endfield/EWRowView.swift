@@ -70,17 +70,17 @@ struct EWRowView: View {
                 EWRowTitle(label: row.label, hint: row.hint)
             }
         case .select:
-            Picker(selection: Binding(get: { value == .null ? "" : value.key }, set: { setChoice($0) })) {
+            // menuPicker (SkipFixes.swift): inside this row's VStack a bare Picker loses its title on Android
+            menuPicker(selection: Binding(get: { value == .null ? "" : value.key }, set: { setChoice($0) })) {
                 if value == .null {
                     Text("未设").tag("")
                 }
                 ForEach(row.choices, id: \.value) { c in
                     Text(c.label).tag(c.value)
                 }
-            } label: {
+            } title: {
                 EWRowTitle(label: row.label, hint: row.hint)
             }
-            .pickerStyle(.menu)
         case .icons:
             NavigationLink {
                 EWChoiceList(title: row.label, choices: row.choices, multi: false, icons: true,

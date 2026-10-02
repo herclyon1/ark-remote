@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Three places where the same SwiftUI code draws differently through Skip on Android, with the way around each.
+// Places where the same SwiftUI code draws differently through Skip on Android, with the way around each.
 // scripts/check-android-symbols.py guards the symbol names.
 
 /// The bundle for `Image("name", bundle: assetBundle)` (Resources/Module.xcassets).
@@ -35,6 +35,31 @@ func rowBackground(_ tint: Color?) -> Color? {
     tint ?? Color(.systemBackground)
     #else
     tint
+    #endif
+}
+
+/// A menu Picker with its title, for a row that is not the Picker alone (a VStack with the 「待保存」 line under it).
+///
+/// skip-ui draws a Picker's label only when the Picker is itself the list row (Picker.swift RenderListItem, :223-233);
+/// one inside a VStack goes through Render, which shows only the picked value and drops the label "outside of a Form"
+/// (Picker.swift:98-99), so on Android the row lost its name and hint. There the title sits on the left and the
+/// label-less menu on the right, as iOS lays out a menu picker row.
+@ViewBuilder
+func menuPicker<Selection: Hashable, Content: View, Title: View>(selection: Binding<Selection>,
+                                                                 @ViewBuilder content: @escaping () -> Content,
+                                                                 @ViewBuilder title: @escaping () -> Title) -> some View {
+    #if os(Android)
+    HStack(spacing: 12) {
+        title().frame(maxWidth: .infinity, alignment: .leading)
+        // at most ~40 % of the row: a long choice (干员养成（作战记录、协议圆盘、…）) took the whole row and squeezed the title
+        // to one character a line (the title's maxWidth .infinity is laid out after the picker); the choice wraps instead
+        Picker(selection: selection, content: content, label: { EmptyView() })
+            .pickerStyle(.menu)
+            .frame(maxWidth: 150, alignment: .trailing)
+    }
+    #else
+    Picker(selection: selection, content: content, label: title)
+        .pickerStyle(.menu)
     #endif
 }
 

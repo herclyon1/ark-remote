@@ -293,14 +293,15 @@ struct ArknightsPickerRow: View {
     var body: some View {
         // view.js:499 puts a hidden 未设 option first, which the select shows as the first item of the list;
         // so does this picker. The page's value stays "" until another item is picked.
-        Picker(selection: Binding(
+        // menuPicker (SkipFixes.swift): inside tagged()'s VStack a bare Picker loses its title on Android
+        menuPicker(selection: Binding(
             get: { selection.isEmpty ? (options.first?.value ?? "") : selection },
             set: { selection = $0 }
         )) {
             ForEach(options) { option in
                 Text(verbatim: option.label).tag(option.value)
             }
-        } label: {
+        } title: {
             ArknightsLabel(label: label, hint: hint)
         }
     }
