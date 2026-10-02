@@ -9,11 +9,13 @@ struct PendingBarView: View {
     var body: some View {
         HStack(spacing: 6) {
             if bar.hasMismatch {
+                // the text beside says it (「机器没接受」): the cross is hidden from screen readers (HIG VoiceOver:
+                // "Exclude purely decorative images from VoiceOver.")
                 // skip-ui maps "xmark" but not "xmark.circle.fill" to a Material icon (Image.swift symbol table)
                 #if os(Android)
-                Image(systemName: "xmark").foregroundStyle(Color.red)
+                Image(systemName: "xmark").foregroundStyle(Color.red).accessibilityHidden(true)
                 #else
-                Image(systemName: "xmark.circle.fill").foregroundStyle(Color.red)
+                Image(systemName: "xmark.circle.fill").foregroundStyle(Color.red).accessibilityHidden(true)
                 #endif
             }
             Text(bar.text)

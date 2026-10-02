@@ -379,6 +379,7 @@ struct EndfieldStockpilePage: View {
                                     Color.clear
                                 }
                                 .frame(width: 28, height: 28)
+                                .accessibilityHidden(true)   // r.name beside names it (HIG VoiceOver: decorative)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(r.name)
                                     Text(r.subtitle + (r.origin ?? "")).font(.caption).foregroundStyle(.secondary)
