@@ -32,7 +32,8 @@ enum StatusCommands {
         }
     }
 
-    static func actions(_ data: StatusData, ask: Binding<StatusAsk?>, storedQueue: Binding<String>) -> StatusActions {
+    static func actions(_ data: StatusData, ask: Binding<StatusAsk?>, storedQueue: Binding<String>,
+                        edits: Binding<[String: EWEdit]>) -> StatusActions {
         let relay = Relay.shared
         let queue = data.currentQueue
         var a = StatusActions()
@@ -62,12 +63,7 @@ enum StatusCommands {
             let body: JSONValue = on
                 ? .object(["action": .string("unskip_today"), "queue": .string(name)])
                 : .object(["action": .string("skip_today"), "queue": .string(name), "day": .string(statusBeijingToday())])
-            // TODO: the web page collects switch flips in its 保存修改 bar (view.js edits / updateBar) and sends them
-            // together after one review; that bar is not ported yet, so each flip asks on its own here.
-            ask.wrappedValue = StatusAsk(
-                title: "保存修改？", message: "\(label)：\(on ? "开 → 今天照常" : "关 → 今天跳过，明天照常")", ok: "寄出",
-                body: body, okText: "已寄出「\(label)」", pendingKey: StatusSwitchID.queue(name),
-                pendingEdit: PendingEdit(label: label, src: "relay", from: .bool(!on), to: .bool(on), sentAt: 0, body: body))
+            note(edits, StatusSwitchID.queue(name), label: label, on: on, body: body)
         }
         a.startEchoFarm = { boss, until in
             guard let t = statusTimeHHMM(until), boss > 0 else {
@@ -95,18 +91,40 @@ enum StatusCommands {
                 title: "现在收工？", message: "会关掉脚本和游戏，配置还原成你原来那份。", ok: "收工", destructive: true,
                 body: .object(["action": .string("echo_farm_stop")]), okText: "已收工，脚本和游戏都关了，配置还原")
         }
-        a.setSkipShutdown = { on in ask.wrappedValue = relaySwitch(StatusSwitchID.skipShutdown, on: on) }
-        a.setDebugMode = { on in ask.wrappedValue = relaySwitch(StatusSwitchID.debugMode, on: on) }
+        a.setSkipShutdown = { on in relaySwitch(edits, StatusSwitchID.skipShutdown, on: on) }
+        a.setDebugMode = { on in relaySwitch(edits, StatusSwitchID.debugMode, on: on) }
         return a
     }
 
-    /// A schema.js RELAY_SWITCHES row flipped: confirm, then send sw.on / sw.off and track it in Pending.
-    static func relaySwitch(_ id: String, on: Bool) -> StatusAsk? {
-        guard let sw = relaySwitches.first(where: { $0.id == id }) else { return nil }
-        let body = on ? sw.on : sw.off
-        // TODO: same as setRunsToday — the web 保存修改 bar (one review for several flips) is not ported yet.
-        return StatusAsk(title: "保存修改？", message: "\(sw.label)：\(on ? "关 → 开" : "开 → 关")", ok: "寄出",
-                         body: body, okText: "已寄出「\(sw.label)」", pendingKey: id,
-                         pendingEdit: PendingEdit(label: sw.label, src: "relay", from: .bool(!on), to: .bool(on), sentAt: 0, body: body))
+    /// A schema.js RELAY_SWITCHES row flipped: the change waits in 「待保存」 (sw.on / sw.off is what 保存 sends).
+    static func relaySwitch(_ edits: Binding<[String: EWEdit]>, _ id: String, on: Bool) {
+        guard let sw = relaySwitches.first(where: { $0.id == id }) else { return }
+        note(edits, id, label: sw.label, on: on, body: on ? sw.on : sw.off)
+    }
+
+    /// view.js [data-relay] onchange: a flip back to the machine's value drops the edit, otherwise it waits in
+    /// 「待保存」 until the tab's 保存 sends all of them after one review (EWSaveBar, as on the 终末地 / 鸣潮 tabs).
+    static func note(_ edits: Binding<[String: EWEdit]>, _ id: String, label: String, on: Bool, body: JSONValue) {
+        let from = Pending.shared.liveVals[id]?.truthy ?? false
+        if on == from {
+            edits.wrappedValue[id] = nil
+        } else {
+            edits.wrappedValue[id] = EWEdit(label: label, src: "relay", from: .bool(from), to: .bool(on), body: body)
+        }
+    }
+
+    /// The switches show the unsaved edits on top of the machine's / sent values.
+    static func applyEdits(_ edits: [String: EWEdit], to d: inout StatusData) {
+        for (id, e) in edits {
+            let on = e.to.truthy
+            if id == StatusSwitchID.skipShutdown {
+                d.skipShutdown = on
+            } else if id == StatusSwitchID.debugMode {
+                d.debugModeUntil = on ? (d.debugModeUntil ?? "") : nil
+            } else if let i = d.plan.firstIndex(where: { $0.queueName.map(StatusSwitchID.queue) == id }) {
+                d.plan[i].runsToday = on
+            }
+            d.switchTags[id] = "待保存"
+        }
     }
 }

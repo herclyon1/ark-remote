@@ -2,17 +2,21 @@ import SwiftUI
 
 /// The 状态 tab: StatusPage fed from Relay / Live / StaminaStore / Pending; buttons send what the web page's
 /// buttons send (maa-automation/web/view.js wire(): #runnow, #refresh, #estop, #echofarm, #echofarmuntil,
-/// #echofarmstop, [data-relay] switches). The mapping and the confirm / send code live in Pages/Status/.
+/// #echofarmstop); [data-relay] switch flips wait in 「待保存」 like the web page's edits. The mapping and the confirm /
+/// send code live in Pages/Status/.
 struct StatusTab: View {
     @AppStorage("ark-remote-cfg-queue") var storedQueue = ""
     @AppStorage("ark-remote-estop") var estopAt = 0
     @State var ask: StatusAsk? = nil
+    /// Switch flips not yet sent (view.js `edits`); 保存 in the toolbar sends them after one review.
+    @State var edits: [String: EWEdit] = [:]
 
     var body: some View {
         let relay = Relay.shared
-        let data = StatusData.from(relay: relay, live: Live.shared, stamina: StaminaStore.shared, pending: Pending.shared,
+        var data = StatusData.from(relay: relay, live: Live.shared, stamina: StaminaStore.shared, pending: Pending.shared,
                                    currentQueue: storedQueue, estopAt: estopAt)
-        StatusPage(data: data, actions: StatusCommands.actions(data, ask: $ask, storedQueue: $storedQueue))
+        let _ = StatusCommands.applyEdits(edits, to: &data)
+        StatusPage(data: data, actions: StatusCommands.actions(data, ask: $ask, storedQueue: $storedQueue, edits: $edits))
             .refreshable { await Live.shared.ping() }
             .task {
                 // first open: newest state from the mailbox, and the stamina numbers
@@ -33,16 +37,6 @@ struct StatusTab: View {
             } message: {
                 Text(ask?.message ?? "")
             }
-            .overlay(alignment: .bottom) {
-                if let t = relay.toast, nowMs() - t.at < Double(t.ms) {
-                    Text(t.text)
-                        .font(.footnote)
-                        .padding(.horizontal, 14).padding(.vertical, 10)
-                        .background(Color.black.opacity(0.8))
-                        .foregroundStyle(Color.white)
-                        .clipShape(Capsule())
-                        .padding(.bottom, 16)
-                }
-            }
+            .modifier(EWSaveBar(edits: $edits))   // 「保存（N）」 / 「放弃」 and the toast, shared with the 终末地 / 鸣潮 tabs
     }
 }
