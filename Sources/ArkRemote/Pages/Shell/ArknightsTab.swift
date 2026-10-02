@@ -72,8 +72,6 @@ struct ArknightsTab: View {
         saving = true
         var sent = 0
         var failed: Error?
-        // view.js:2456: only a state reported after this moment counts.
-        let after = nowSec()
         for e in edits {
             do {
                 try await Relay.shared.send(e.body)
@@ -95,6 +93,7 @@ struct ArknightsTab: View {
         }
         // view.js:2455-2457: ask the machine once, 2 s later, for a state reported after the send. One request, no loop.
         if sent > 0 {
+            let after = nowSec()   // view.js:2456: taken after the sends, only a state reported after this counts
             Task {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 await Live.shared.ping(minAt: after)

@@ -32,6 +32,11 @@ android {
             // compress JNI .so files: a smaller APK for Skip Fuse apps, at some cost at install time
             useLegacyPackaging = true
         }
+        // compress the dex files too: with minSdk >= 28 AGP stores them uncompressed (DexPackaging.kt); ~14.5 MB of dex
+        // gzips to ~4.9 MB, so the APK download shrinks ~9.5 MB at the cost of that much more space after install
+        dex {
+            useLegacyPackaging = true
+        }
     }
 
     defaultConfig {
