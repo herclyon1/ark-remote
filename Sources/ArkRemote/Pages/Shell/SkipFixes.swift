@@ -55,3 +55,64 @@ func listSection<Value, Content: View>(_ id: String, ifLet value: Value?, @ViewB
         if let value { content(value) }
     }
 }
+
+extension View {
+    /// Text fields under this view lose focus, as a web input blurs, when the user taps outside them or hides the keyboard
+    /// with the system back gesture. No-op on iOS.
+    ///
+    /// On Android neither takes the focus away: a tap on a plain row or blank list space lands on no focusable control,
+    /// and back with the keyboard up only hides the keyboard (the Compose field keeps focus). Setting the `@FocusState`
+    /// to false from SwiftUI does not help: skip-ui's `focused` only ever requests Compose focus (System/Focus.swift:13-31)
+    /// and never clears it, so the field kept its keyboard and later edits went unchecked. So this clears the Compose
+    /// focus itself (skip-ui README "composeModifier", Skip Fuse: a ContentModifier from a `#if SKIP` block), which ends
+    /// in the field's `onFocusChanged` and so in its `@FocusState` going false. Taps that a control consumes (a button, a
+    /// switch, the field itself) do not reach this; IME Done already clears focus (skip-ui TextField.swift:88, 470-487).
+    func clearsFocusOnOutsideTap() -> some View {
+        #if os(Android)
+        composeModifier { ClearFocusOutsideFields() }
+        #else
+        self
+        #endif
+    }
+}
+
+#if SKIP
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import kotlinx.coroutines.flow.distinctUntilChanged
+
+/// See `clearsFocusOnOutsideTap()`. `composed` because composeModifier's block is not composable
+/// (skip-ui ComposeView.swift:55) and the focus manager and IME insets are read from the composition.
+struct ClearFocusOutsideFields: ContentModifier {
+    func modify(view: any View) -> any View {
+        view.composeModifier { modifier in
+            modifier.composed {
+                let focusManager = LocalFocusManager.current
+                let ime = WindowInsets.ime
+                let density = LocalDensity.current
+                // only on the shown -> hidden change: the keyboard comes up a few frames after the field takes focus
+                LaunchedEffect(true) {
+                    var shown = false
+                    snapshotFlow { ime.getBottom(density) > 0 }
+                    .distinctUntilChanged()
+                    .collect { now in
+                        if shown && !now { focusManager.clearFocus() }
+                        shown = now
+                    }
+                }
+                return Modifier.pointerInput(true) {
+                    detectTapGestures(onTap: { _ in focusManager.clearFocus() })
+                }
+            }
+        }
+    }
+}
+#endif

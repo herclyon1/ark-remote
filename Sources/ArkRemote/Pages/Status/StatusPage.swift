@@ -49,6 +49,9 @@ struct StatusPage: View {
             tomorrow
             receiptsSection
         }
+        // Android: a tap outside the time fields or back with the keyboard up checks them, as the web input's blur
+        // (view.js:1235); without this the check waited for a tab switch
+        .clearsFocusOnOutsideTap()
         // the title (「游戏机遥控」, or 「待保存 N 项」 while changes wait, view.js:1554) is set by StatusTab's EWSaveBar
         .task {
             while !Task.isCancelled {
