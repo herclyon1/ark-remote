@@ -173,7 +173,9 @@ struct StatusPage: View {
                     }
                     if shown.count > 2 { staminaTile(shown[2], placeholder: tiles.isEmpty) }
                 }
-                .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))
+                #if !os(Android)
+                .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))   // skip-ui: unavailable on Android
+                #endif
             } footer: {
                 if tiles.isEmpty { Text("正在读取…") }
                 else if !data.staminaSource.isEmpty { Text("\(data.staminaSource) 读取，下拉刷新会重新读") }
