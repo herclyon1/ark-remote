@@ -40,7 +40,15 @@ struct ContentView: View {
     var body: some View {
         // no mailbox yet: only 「第一次使用」, no tab bar (web/view.js boot → setupScreen)
         if Relay.shared.config == nil {
+            // the update banner shows here too: someone stuck on setup still gets a fixed version in one tap
+            #if os(Android)
+            VStack(spacing: 0) {
+                if AppUpdate.shared.showsBanner { UpdateBanner() }
+                SetupScreen()
+            }
+            #else
             SetupScreen()
+            #endif
         } else {
             main
         }

@@ -7,6 +7,7 @@ struct SetupScreen: View {
     @State var topic = ""
     @State var pin = ""
     @State var missingShown = false
+    @State var noLinkShown = false
 
     var body: some View {
         NavigationStack {
@@ -33,17 +34,39 @@ struct SetupScreen: View {
                         // config appearing, and AppShell starts Live on that change (Logic/AppGlue.swift).
                         Relay.shared.saveConfig(topic: t, pin: p)
                     }
-                } header: {
-                    Text("第一次使用")
                 } footer: {
                     Text("填一次就好，之后不再问。这两样只存在这台手机里。")
+                }
+                // The web page is entered with the 免输入链接 (#k=…); on Android that link opens the browser, not the app
+                // (no assetlinks.json on herclyon1.github.io), so the app takes the same link from the clipboard instead.
+                Section {
+                    Button("粘贴免输入链接") {
+                        if !takeLink() { noLinkShown = true }
+                    }
+                } footer: {
+                    Text("用免输入链接进网页的：在网页「手机」页复制免输入链接（或从书签复制那条链接），回来点这里。")
                 }
             }
             .navigationTitle("第一次使用")
             .alert("两样都要填", isPresented: $missingShown) {
-                Button("好", role: .cancel) {}
+                Button("好") {}
             }
+            .alert("剪贴板里没有免输入链接", isPresented: $noLinkShown) {
+                Button("好") {}
+            }
+            // a link already copied: take it on open, no tap needed
+            .onAppear { _ = takeLink() }
         }
+    }
+}
+
+extension SetupScreen {
+    /// A 免输入链接 (…#k=…) on the clipboard → PhoneLink.open, the same path as an opened link. True when it took.
+    @MainActor func takeLink() -> Bool {
+        guard let s = PhoneLink.pasted()?.trimmingCharacters(in: .whitespacesAndNewlines), s.contains("#k="),
+              let u = URL(string: s) else { return false }
+        PhoneLink.open(u)
+        return Relay.shared.config != nil
     }
 }
 
