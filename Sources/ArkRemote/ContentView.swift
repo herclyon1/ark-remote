@@ -11,35 +11,37 @@ struct ContentView: View {
     @AppStorage("tab") var tab = ContentTab.status
 
     var body: some View {
+        // Tab images are view.js TAB_ICONS / TAB_IMAGES exported as-is (Resources/Module.xcassets): the game icons keep
+        // their colors; tab-status / tab-phone are template images. resizable() makes them fit the tab icon slot on Android.
         TabView(selection: $tab) {
             NavigationStack {
                 StatusTab()
             }
-            .tabItem { Label("状态", systemImage: "chart.bar.xaxis") }
+            .tabItem { Label { Text("状态") } icon: { Image("tab-status", bundle: .module).resizable().scaledToFit() } }
             .tag(ContentTab.status)
 
             NavigationStack {
                 ArknightsTab()
             }
-            .tabItem { Label("方舟", systemImage: "bookmark.fill") }
+            .tabItem { Label { Text("方舟") } icon: { Image("tab-arknights", bundle: .module).resizable().scaledToFit() } }
             .tag(ContentTab.arknights)
 
             NavigationStack {
                 EndfieldTab()
             }
-            .tabItem { Label("终末地", systemImage: "wrench.fill") }
+            .tabItem { Label { Text("终末地") } icon: { Image("tab-endfield", bundle: .module).resizable().scaledToFit() } }
             .tag(ContentTab.endfield)
 
             NavigationStack {
                 WuwaTab()
             }
-            .tabItem { Label("鸣潮", systemImage: "star.fill") }
+            .tabItem { Label { Text("鸣潮") } icon: { Image("tab-wuwa", bundle: .module).resizable().scaledToFit() } }
             .tag(ContentTab.wuwa)
 
             NavigationStack {
                 PhoneTab()
             }
-            .tabItem { Label("手机", systemImage: "phone.fill") }
+            .tabItem { Label { Text("手机") } icon: { Image("tab-phone", bundle: .module).resizable().scaledToFit() } }
             .tag(ContentTab.phone)
         }
         // the no-input link opening the app: mailbox + PIN (#k=) and game tokens (&t=), view.js fromLink / Stamina.fromLink
