@@ -205,7 +205,7 @@ struct ArknightsPage: View {
                 }
             }
         }
-        .listRowBackground(unsaved ? Color.accentColor.opacity(0.08) : nil)
+        .listRowBackground(rowBackground(unsaved ? Color.accentColor.opacity(0.08) : nil))   // never nil on Android (SkipFixes.swift)
     }
 
     /// A binding to an optional field that the row only draws when the field is non-nil.

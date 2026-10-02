@@ -50,7 +50,7 @@ struct EWRowView: View {
             }
         }
         // index.html:689-690: unsaved rows tinted accent 8 %, sent rows ok-green 8 % (近似: replaces the card colour, not mixed into it)
-        .listRowBackground(row.kind == .box ? nil : EWTagLine.tint(tag))
+        .listRowBackground(rowBackground(row.kind == .box ? nil : EWTagLine.tint(tag)))   // never nil on Android: a nil → tint swap drops the keyboard (SkipFixes.swift)
     }
 
     @ViewBuilder

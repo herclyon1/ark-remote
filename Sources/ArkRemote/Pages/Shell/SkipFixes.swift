@@ -26,6 +26,18 @@ func symbol(_ ios: String, android: String) -> Image {
     #endif
 }
 
+/// The row background for `.listRowBackground`, never nil on Android: skip-ui composes a row with a background inside an
+/// extra layout and one without it directly (List.swift:692-722), so a row whose tint comes and goes (「待保存」 on the first
+/// keystroke) is rebuilt and its text field loses the keyboard. With no tint the row gets the colour skip-ui would have
+/// drawn itself (Color(.systemBackground) = MaterialTheme surface, List.swift:693 / Color.swift:202-207).
+func rowBackground(_ tint: Color?) -> Color? {
+    #if os(Android)
+    tint ?? Color(.systemBackground)
+    #else
+    tint
+    #endif
+}
+
 /// `if shown { Section … }` for the top level of a List.
 ///
 /// A false `if` reaches SkipUI as an EmptyView, and its List takes that for a row: an item after a section footer
