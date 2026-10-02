@@ -60,12 +60,49 @@ func ewShown(_ m: EWMaster, game: String, edits: [String: EWEdit]) -> EWMaster {
     return out
 }
 
-/// The row's name for the review list: the first row drawn for the path, else the path.
+/// The row's name for the review list, 「卡名 · 行名」 (view.js:1041 `${g.title} · ${labelOf(g, f)}`).
 func ewLabel(_ groups: [EWGroupSpec], _ m: EWMaster, _ path: String) -> String {
     for g in groups {
-        if let r = ewRows(g, m, values: m.values).first(where: { $0.path == path && $0.kind != .box }) { return r.label }
+        if let r = ewRows(g, m, values: m.values).first(where: { $0.path == path && $0.kind != .box }) { return "\(g.title) · \(r.label)" }
     }
     return path
+}
+
+/// The small lines under a row (pending.js:47-70, view.js:1268-1275): 「待保存」 while unsaved, then the receipt tag.
+struct EWRowTag: Equatable {
+    var unsaved = false
+    var text: String? = nil
+    /// 「没生效」: red, with 「再发一次」 for this Pending key.
+    var resendKey: String? = nil
+    /// sent and waiting (`.posted`, view.js:60).
+    var posted = false
+}
+
+/// The tag for one Pending key; nil when the row has nothing under it.
+@MainActor
+func ewTag(_ key: String, edits: [String: EWEdit]) -> EWRowTag? {
+    let unsaved = edits[key] != nil
+    var t = EWRowTag(unsaved: unsaved)
+    switch Pending.shared.tag(for: key, editing: unsaved) {
+    case .sent(let text)?: t.text = text; t.posted = true
+    case .mismatch(let text, let k)?: t.text = text; t.resendKey = k; t.posted = true
+    case .applied(let text)?: t.text = text
+    case nil: break
+    }
+    return t.unsaved || t.text != nil ? t : nil
+}
+
+/// Tags for every config path of a game, keyed by path (the rows' own key).
+@MainActor
+func ewTags(game: String, master: EWMaster, edits: [String: EWEdit]) -> [String: EWRowTag] {
+    var out: [String: EWRowTag] = [:]
+    let prefix = "master|\(game)|"
+    var paths = Set(master.values.keys)
+    for k in Array(edits.keys) + Array(Pending.shared.items.keys) + Array(Pending.shared.acked.keys) where k.hasPrefix(prefix) {
+        paths.insert(String(k.dropFirst(prefix.count)))
+    }
+    for p in paths { if let t = ewTag(prefix + p, edits: edits) { out[p] = t } }
+    return out
 }
 
 /// Pending's receipt check reads the machine's value of every sent field (view.js render: `liveVals[id] = val`).
@@ -127,14 +164,20 @@ enum EWSave {
             if to.isEmpty { return (key, nil) }
             return (key, EWEdit(label: label, src: "master", owner: game, path: path, from: .object(from), to: .object(to)))
         }
+        var v = v
+        // view.js:1097-1099: the machine's type wins — MaaEnd stores some numbers as text ("5"), so a text value stays text.
+        if case .text? = machine, case .number = v { v = .text(v.key) }
         if let machine, machine == v { return (key, nil) }
         return (key, EWEdit(label: label, src: "master", owner: game, path: path, from: machine?.json, to: v.json))
     }
 
-    /// The review text: one line per change.
+    /// The review text: one line per change, values by their option names (view.js doSave / valLabel).
     static func summary(_ edits: [String: EWEdit]) -> String {
         edits.values.sorted { $0.label < $1.label }
-            .map { "\($0.label)：\(Pending.fmt($0.from)) → \(Pending.fmt($0.to))" }
+            .map { e in
+                let p = PendingEdit(label: e.label, src: e.src, owner: e.owner, path: e.path, from: e.from, to: e.to, sentAt: 0)
+                return "\(e.label)：\(Pending.shared.valueLabel(p, e.from)) → \(Pending.shared.valueLabel(p, e.to))"
+            }
             .joined(separator: "\n")
     }
 
@@ -174,12 +217,13 @@ enum EWSave {
                 for k in wb.keys { left[k] = nil }
             } catch { if failed == nil { failed = error } }
         }
+        // view.js:2446-2454, same words and 7 s
         if let failed {
             relay.showToast(sent > 0
                 ? "发出去 \(sent) 项，剩下 \(left.count) 项没发出去（\(Live.why(failed))）。没发出去的还在页面上，可以再按一次保存。"
-                : "没发出去（\(Live.why(failed))）。改动还在页面上，可以再按一次保存。", ms: 6000)
-        } else {
-            relay.showToast("已寄出 \(sent) 项（机器开着就是马上，关着就是下次开机）")
+                : "一项都没发出去（\(Live.why(failed))）。改动还在页面上，可以再按一次保存。", ms: 7000)
+        } else if sent > 0 {
+            relay.showToast("\(sent) 项已寄出。机器开着几秒内生效；关着就等开机——每一项下面都标着「已寄出」，生效了才会消失。", ms: 7000)
         }
         // view.js:2455-2457: ask the machine once, 2 s later, for a state reported after the send. One request, no loop.
         if sent > 0 {
@@ -194,26 +238,29 @@ enum EWSave {
 }
 
 /// The edit bar and its review alert, shared by both tabs (view.js updateBar / #confirm).
+/// `title`: the page title when nothing waits; while editing the title is 「待保存 N 项」 (view.js:1283 swaps the same span).
 struct EWSaveBar: ViewModifier {
     @Binding var edits: [String: EWEdit]
+    var title: String? = nil
     @State var reviewing = false
     @State var saving = false
 
     func body(content: Content) -> some View {
-        content
+        titled(content)
             .toolbar {
                 if !edits.isEmpty {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("放弃") { edits = [:] }
+                        Button { edits = [:] } label: { Image(systemName: "xmark") }
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("保存（\(edits.count)）") { reviewing = true }
+                        Button { reviewing = true } label: { Image(systemName: "checkmark") }
                             .disabled(saving)
                     }
                 }
             }
-            .alert("保存修改？", isPresented: $reviewing) {
-                Button("寄出") {
+            // index.html:849-857
+            .alert("确认这次修改", isPresented: $reviewing) {
+                Button("确认修改") {
                     guard !saving else { return }   // 2026-09-01: three taps sent three times
                     saving = true
                     Task {
@@ -221,11 +268,22 @@ struct EWSaveBar: ViewModifier {
                         saving = false
                     }
                 }
-                Button("取消", role: .cancel) {}
+                Button("再想想", role: .cancel) {}
             } message: {
                 Text(EWSave.summary(edits))
             }
             // the toast is one layer over all tabs now (Pages/Shell/ToastLayer.swift)
+    }
+
+    /// Branches on `title` only (fixed per tab), so a first edit never swaps the page's view identity.
+    /// StatusTab passes none and keeps the title StatusPage sets.
+    @ViewBuilder
+    private func titled(_ content: Content) -> some View {
+        if let title {
+            content.navigationTitle(edits.isEmpty ? title : "待保存 \(edits.count) 项")
+        } else {
+            content
+        }
     }
 }
 
@@ -248,6 +306,7 @@ struct EndfieldStockpilePage: View {
                 Text(text).foregroundStyle(.secondary)
             case .empty(let title, let text, let button, let action):
                 VStack(alignment: .leading, spacing: 6) {
+                    EWStockBox()   // stockpile.js:146 the empty-state box
                     Text(title).font(.headline)
                     Text(text).foregroundStyle(.secondary)
                     if action == .retry {
@@ -265,6 +324,13 @@ struct EndfieldStockpilePage: View {
                     Section {
                         ForEach(sec.rows) { r in
                             HStack {
+                                // stockpile.js:74, 98: the material's picture, 28 pt, fit; a picture that fails leaves the space empty
+                                AsyncImage(url: r.icon.flatMap { URL(string: $0) }) { img in
+                                    img.resizable().scaledToFit()
+                                } placeholder: {
+                                    Color.clear
+                                }
+                                .frame(width: 28, height: 28)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(r.name)
                                     Text(r.subtitle + (r.origin ?? "")).font(.caption).foregroundStyle(.secondary)
@@ -292,5 +358,27 @@ struct EndfieldStockpilePage: View {
         }
         .refreshable { await s.load(force: true) }
         .task { await s.open() }
+    }
+}
+
+/// The empty-state box, traced from stockpile.js:146's SVG (viewBox 24, drawn 60 pt, stroke 1.2, secondary label colour).
+struct EWStockBox: View {
+    var body: some View {
+        let k: CGFloat = 60.0 / 24.0
+        var p = Path()
+        p.move(to: CGPoint(x: 3 * k, y: 7.5 * k))
+        p.addLine(to: CGPoint(x: 12 * k, y: 3 * k))
+        p.addLine(to: CGPoint(x: 21 * k, y: 7.5 * k))
+        p.addLine(to: CGPoint(x: 21 * k, y: 16.5 * k))
+        p.addLine(to: CGPoint(x: 12 * k, y: 21 * k))
+        p.addLine(to: CGPoint(x: 3 * k, y: 16.5 * k))
+        p.closeSubpath()
+        p.move(to: CGPoint(x: 3 * k, y: 7.5 * k))
+        p.addLine(to: CGPoint(x: 12 * k, y: 12 * k))
+        p.addLine(to: CGPoint(x: 21 * k, y: 7.5 * k))
+        p.move(to: CGPoint(x: 12 * k, y: 12 * k))
+        p.addLine(to: CGPoint(x: 12 * k, y: 21 * k))
+        return p.stroke(Color.secondary, style: StrokeStyle(lineWidth: 1.2 * k, lineJoin: .round))
+            .frame(width: 60, height: 60)
     }
 }

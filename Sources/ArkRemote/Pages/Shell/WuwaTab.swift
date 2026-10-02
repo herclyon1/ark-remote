@@ -39,7 +39,8 @@ struct WuwaTab: View {
                                 lastGoodMaster: lastGood.map { ewShown($0, game: Self.game, edits: edits) },
                                 tacetShots: edits[Self.tacetKey]?.to.bool ?? sentTacet ?? bits.tacetShots,
                                 parkDone: bits.parkDone, weeklyBossDone: bits.bossDone,
-                                weeklyBossIndex: Int(edits[Self.bossKey]?.to.number ?? Double(bits.bossIndex)))
+                                weeklyBossIndex: Int(edits[Self.bossKey]?.to.number ?? Double(bits.bossIndex)),
+                                tags: tags(master))
         WuwaPage(data: data, onChange: { path, v in
             let machine = ewEffectiveMaster(master, lastGood: lastGood).0
             let label = ewLabel([WuwaSchema.group], machine ?? master, path)
@@ -53,13 +54,20 @@ struct WuwaTab: View {
                          body: .object(["action": .string("tacet_shots"), "on": .bool(on)]))
         }, onWeeklyBossIndex: { n in
             edits[Self.bossKey] = n == bits.bossIndex ? nil
-                : EWEdit(label: "周本打第几个", src: "wb", from: .int(bits.bossIndex), to: .int(n))
-        })
-        .navigationTitle("鸣潮")
-        .modifier(EWSaveBar(edits: $edits))
+                : EWEdit(label: "周本 · 打第几个", src: "wb", from: .int(bits.bossIndex), to: .int(n))   // view.js:1088
+        }, onResend: { k in Task { await Pending.shared.resend(k) } })
+        .modifier(EWSaveBar(edits: $edits, title: "游戏机遥控"))   // view.js:1283 one title for every page
         .refreshable { await load() }
         .task { await load() }
         .onChange(of: relay.snapAt) { _, _ in sync() }
+    }
+
+    /// Config rows, the 无音区截图 switch, and 周本 (unsaved only: it keeps no receipt, view.js:2435).
+    private func tags(_ master: EWMaster) -> [String: EWRowTag] {
+        var out = ewTags(game: Self.game, master: master, edits: edits)
+        out[Self.tacetKey] = ewTag(Self.tacetKey, edits: edits)
+        if edits[Self.bossKey] != nil { out[Self.bossKey] = EWRowTag(unsaved: true) }
+        return out
     }
 
     private func load() async {
