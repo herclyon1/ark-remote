@@ -199,8 +199,17 @@ func httpFetch(_ urlString: String, method: String = "GET", headers: [String: St
     if noStore { req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData }
     for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
     req.httpBody = body
-    let (data, resp) = try await URLSession.shared.data(for: req)
+    let t0 = nowMs()
+    let data: Data, resp: URLResponse
+    do {
+        (data, resp) = try await URLSession.shared.data(for: req)
+    } catch {
+        // 诊断记录 (Pages/Phone/PhoneDiag.swift): a no-op unless the switch is on
+        DiagLog.shared.record("fetch", ["method": method, "url": DiagLog.redact(urlString), "ms": "\(Int(nowMs() - t0))", "error": errorMessage(error)])
+        throw error
+    }
     let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+    DiagLog.shared.record("fetch", ["method": method, "url": DiagLog.redact(urlString), "ms": "\(Int(nowMs() - t0))", "status": "\(status)", "bytes": "\(data.count)"])
     return (data, status)
 }
 

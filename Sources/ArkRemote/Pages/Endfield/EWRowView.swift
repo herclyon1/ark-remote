@@ -67,7 +67,7 @@ struct EWRowView: View {
             .pickerStyle(.menu)
         case .icons:
             NavigationLink {
-                EWChoiceList(title: row.label, choices: row.choices, multi: false,
+                EWChoiceList(title: row.label, choices: row.choices, multi: false, icons: true,
                              selected: Binding(get: { [value.key] }, set: { setChoice($0.first ?? "") }))
             } label: {
                 HStack {
@@ -149,6 +149,8 @@ struct EWChoiceList: View {
     var title: String
     var choices: [EWChoice]
     var multi: Bool
+    /// icons rows: each echo set's icon before the label, 28 pt (view.js:1215 `.pico`, index.html:379 --ios-row2-icon).
+    var icons = false
     @Binding var selected: [String]
 
     var body: some View {
@@ -158,6 +160,16 @@ struct EWChoiceList: View {
                     toggle(c.value)
                 } label: {
                     HStack {
+                        if icons {
+                            ForEach(c.label.components(separatedBy: " ＋ "), id: \.self) { name in
+                                if let asset = WuwaSchema.setIcons[name] {
+                                    Image(asset, bundle: .module, label: Text(name))
+                                        .resizable()
+                                        .frame(width: 28, height: 28)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                }
+                            }
+                        }
                         Text(c.label)
                         Spacer()
                         if selected.contains(c.value) {

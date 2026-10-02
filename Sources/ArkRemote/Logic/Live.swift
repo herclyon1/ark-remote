@@ -407,6 +407,7 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         session = s
         buffer = Data()
         s.dataTask(with: req).resume()
+        DiagLog.shared.record("stream", ["state": "connecting"])
     }
 
     func close() {
@@ -423,6 +424,7 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         if let id = events.last?["id"]?.string { lastId = id }
         let isClosed = closed
         lock.unlock()
+        if events.contains(where: { $0["event"]?.string == "open" }) { DiagLog.shared.record("stream", ["state": "open"]) }
         if isClosed { return }
         let f = onEvent
         for e in events { Task { @MainActor in f(e) } }
@@ -447,6 +449,7 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         if reconnect { self.session = nil }
         lock.unlock()
         session.finishTasksAndInvalidate()
+        DiagLog.shared.record("stream", ["state": reconnect ? "dropped" : "closed", "error": error.map { errorMessage($0) } ?? ""])
         guard reconnect else { return }
         DispatchQueue.global().asyncAfter(deadline: .now() + 3) { [weak self] in self?.open() }
     }

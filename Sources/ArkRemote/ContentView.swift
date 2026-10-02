@@ -11,6 +11,20 @@ struct ContentView: View {
     @AppStorage("tab") var tab = ContentTab.status
 
     var body: some View {
+        // in-app update banner above the tabs (Logic/AppUpdate.swift); Android only, iOS keeps the bare TabView
+        #if os(Android)
+        VStack(spacing: 0) {
+            if AppUpdate.shared.showsBanner {
+                UpdateBanner()
+            }
+            tabs
+        }
+        #else
+        tabs
+        #endif
+    }
+
+    private var tabs: some View {
         // Tab images are view.js TAB_ICONS / TAB_IMAGES exported as-is (Resources/Module.xcassets): the game icons keep
         // their colors; tab-status / tab-phone are template images. resizable() makes them fit the tab icon slot on Android.
         TabView(selection: $tab) {

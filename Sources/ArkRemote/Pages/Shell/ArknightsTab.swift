@@ -9,12 +9,21 @@ struct ArknightsTab: View {
     /// The same without the unsaved edits; the difference is what 保存 sends.
     @State var base = ArknightsPageData()
     @State var saving = false
+    /// The shift picked on the 状态 tab (view.js curQueue, localStorage "ark-remote-cfg-queue").
+    @AppStorage("ark-remote-cfg-queue") var storedQueue = ""
 
-    private var bridge: ArknightsBridge { ArknightsBridge(snap: Relay.shared.snap) }
+    private var bridge: ArknightsBridge {
+        ArknightsBridge(snap: Relay.shared.snap, queue: storedQueue, lastGoodMaster: ArknightsBridge.lastGoodMaster())
+    }
     private var edits: [ArknightsEdit] { bridge.edits(from: base, to: shown) }
 
     var body: some View {
-        ArknightsPage(data: $shown)
+        ArknightsPage(data: $shown, onResend: { key in
+            Task {
+                await Pending.shared.resend(key)
+                refresh()
+            }
+        })
             .toolbar {
                 if !edits.isEmpty {
                     Button("放弃") { shown = base }
@@ -33,16 +42,22 @@ struct ArknightsTab: View {
             .onChange(of: Relay.shared.snapAt) {
                 refresh()
             }
+            // view.js:945-949: a new shift re-renders and keeps the unsaved edits.
+            .onChange(of: storedQueue) {
+                refresh()
+            }
     }
 
     /// Re-reads the snapshot and keeps the unsaved edits on top (view.js: `const keep = { ...edits }; render(); edits = keep`).
     private func refresh() {
         let kept = edits
+        // view.js:423-426: keep the last readable master copy for the next time it can't be read.
+        EWLastGood.save(snap: Relay.shared.snap, game: "MAA")
         let b = bridge
         // The web's render fills liveVals for every field on the page, then reconciles the sent changes.
         Pending.shared.liveVals.merge(b.liveVals) { _, new in new }
         Pending.shared.reconcile()
-        let next = b.pageData(withPending: true)
+        let next = b.pageData(withPending: true, editing: Set(kept.map { $0.ref.id }))
         var page = next
         for e in kept {
             e.field.apply(e.to, to: &page)
@@ -74,11 +89,15 @@ struct ArknightsTab: View {
                 ? "发出去 \(sent) 项，剩下 \(left) 项没发出去（\(errorMessage(failed))）。没发出去的还在页面上，可以再按一次保存。"
                 : "一项都没发出去（\(errorMessage(failed))）。改动还在页面上，可以再按一次保存。", ms: 7000)
         } else if sent > 0 {
-            // TODO: the per-row 「已寄出 HH:MM」 tag (Pending.shared.tag(for:)) is not drawn yet, so the web's
-            // second sentence about it is left out.
-            Relay.shared.showToast("\(sent) 项已寄出。机器开着几秒内生效；关着就等开机。", ms: 7000)
-            // TODO: the web asks the machine for a fresh state 2 s after sending (view.js:2455-2457 ping(after));
-            // that belongs to the live-state logic, not this page.
+            Relay.shared.showToast("\(sent) 项已寄出。机器开着几秒内生效；关着就等开机——每一项下面都标着「已寄出」，生效了才会消失。", ms: 7000)
+        }
+        // view.js:2455-2457: ask the machine once, 2 s later, for a state reported after the send. One request, no loop.
+        if sent > 0 {
+            let after = nowSec()   // view.js:2456: taken after the sends, only a state reported after this counts
+            Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await Live.shared.ping(minAt: after)
+            }
         }
         saving = false
     }

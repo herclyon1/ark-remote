@@ -181,6 +181,14 @@ enum EWSave {
         } else {
             relay.showToast("已寄出 \(sent) 项（机器开着就是马上，关着就是下次开机）")
         }
+        // view.js:2455-2457: ask the machine once, 2 s later, for a state reported after the send. One request, no loop.
+        if sent > 0 {
+            let after = nowSec()
+            Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await Live.shared.ping(minAt: after)
+            }
+        }
         return left
     }
 }
@@ -233,6 +241,10 @@ struct EWSaveBar: ViewModifier {
 
 /// The 库存 page (stockpile.js): sections of materials, or a loading / empty state.
 struct EndfieldStockpilePage: View {
+    /// ContentView's tab selection (same AppStorage key), for 「去手机页」.
+    @AppStorage("tab") var tab = ContentTab.status
+    @Environment(\.dismiss) var dismiss
+
     var body: some View {
         let s = Stockpile.shared
         List {
@@ -251,8 +263,11 @@ struct EndfieldStockpilePage: View {
                     if action == .retry {
                         Button(button) { Task { await s.load(force: true) } }
                     } else {
-                        // TODO: 「去手机页」 should back out and switch to the 手机 tab; the tab selection lives in ContentView.
-                        Text(button).foregroundStyle(.secondary)
+                        // 「去手机页」: pop 库存 and select 手机 (accept-stockpile.js ⑨).
+                        Button(button) {
+                            dismiss()
+                            tab = .phone
+                        }
                     }
                 }
             case .list(let sections, let footnote):
