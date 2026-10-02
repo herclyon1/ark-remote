@@ -24,8 +24,8 @@
 //
 // Not a straight port:
 //   · EventSource (SSE) → ntfy's `/json` stream read through a URLSessionDataDelegate (`NtfyStream`);
-//     same event fields (event, topic, message, time). Reconnects after 3 s like EventSource. If the
-//     stream yields nothing in 10 s it falls back to Relay.pollTopic every 5 s (see NtfyStream).
+//     same event fields (event, topic, message, time). Reconnects after 3 s like EventSource. No polling
+//     (user 2026-09-02, quoted under Presence above); FoundationNetworking hands a delegate each chunk.
 //   · setInterval → Task loops started by `start()`; document.hidden → `foreground`, set by the page from
 //     scenePhase; `visibilitychange` → `becameVisible()`; navigator.onLine / online / offline →
 //     `deviceOnline`, set by the page.
@@ -372,16 +372,12 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
 
 /// An ntfy subscription read as a stream: `GET /<topics>/json?since=…` keeps the connection open and writes
 /// one JSON event per line (ntfy sends an `open` event at once and a `keepalive` every 45 s). Events are
-/// delivered on the main actor. Reconnects 3 s after a drop until closed.
+/// delivered on the main actor. Reconnects 3 s after a drop until closed, from the last message id seen.
 ///
-/// Fallback: if nothing at all arrives within 10 s of connecting (the platform's URLSession does not hand
-/// over a long response piece by piece), the stream switches to `Relay.pollTopic` every 5 s from the last
-/// message id it saw — ntfy.sh refills one request per 5 s per IP. live.js never polls; this only runs
-/// where the stream cannot.
+/// No polling fallback, like live.js (user 2026-09-02, see the file header). On Android, FoundationNetworking's
+/// NativeProtocol.didReceive(data:) passes each libcurl chunk to `urlSession(_:dataTask:didReceive:)`
+/// as it arrives (swift-corelibs-foundation main, NativeProtocol.swift:96-141), so the stream works there.
 final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-    static let firstEventTimeout: Double = 10
-    static let pollEvery: UInt64 = 5_000_000_000
-
     private let topics: String
     private let since: String
     private let onEvent: @MainActor (JSONValue) -> Void
@@ -389,9 +385,7 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private var session: URLSession?
     private var buffer = Data()
     private var closed = false
-    private var gotAny = false
     private var lastId: String?
-    private var poller: Task<Void, Never>?
 
     init(topics: String, since: String, onEvent: @escaping @MainActor (JSONValue) -> Void) {
         self.topics = topics
@@ -402,7 +396,7 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     func open() {
         lock.lock()
         defer { lock.unlock() }
-        guard !closed, session == nil, poller == nil,
+        guard !closed, session == nil,
               let url = URL(string: "\(ntfyBase)/\(topics)/json?since=\(lastId ?? since)") else { return }
         let q = OperationQueue()
         q.maxConcurrentOperationCount = 1
@@ -413,11 +407,6 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         session = s
         buffer = Data()
         s.dataTask(with: req).resume()
-        if !gotAny {
-            DispatchQueue.global().asyncAfter(deadline: .now() + Self.firstEventTimeout) { [weak self] in
-                self?.fallBackIfSilent()
-            }
-        }
     }
 
     func close() {
@@ -425,41 +414,12 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         closed = true
         let s = session
         session = nil
-        let p = poller
-        poller = nil
         lock.unlock()
         s?.invalidateAndCancel()
-        p?.cancel()
-    }
-
-    private func fallBackIfSilent() {
-        lock.lock()
-        guard !closed, !gotAny, poller == nil else { lock.unlock(); return }
-        let s = session
-        session = nil
-        poller = Task { [weak self] in await self?.pollLoop() }
-        lock.unlock()
-        s?.invalidateAndCancel()
-    }
-
-    private func pollLoop() async {
-        while !Task.isCancelled {
-            let (from, isClosed) = pollState()
-            if isClosed { return }
-            if let events = try? await Relay.pollTopic(topics, since: from) { deliver(events) }
-            try? await Task.sleep(nanoseconds: Self.pollEvery)
-        }
-    }
-
-    private func pollState() -> (String, Bool) {
-        lock.lock()
-        defer { lock.unlock() }
-        return (lastId ?? since, closed)
     }
 
     private func deliver(_ events: [JSONValue]) {
         lock.lock()
-        gotAny = true
         if let id = events.last?["id"]?.string { lastId = id }
         let isClosed = closed
         lock.unlock()
