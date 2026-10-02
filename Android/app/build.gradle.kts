@@ -18,22 +18,29 @@ kotlin {
 android {
     namespace = group as String
     compileSdk = libs.versions.android.sdk.compile.get().toInt()
+    // the installed NDK (skip-env.sh ANDROID_NDK_HOME); without it AGP looks for its own default NDK version,
+    // does not find it, and packages the .so files unstripped ("Unable to strip the following libraries")
+    ndkVersion = "30.0.16248370"
     compileOptions {
         sourceCompatibility = JavaVersion.toVersion(libs.versions.jvm.get())
         targetCompatibility = JavaVersion.toVersion(libs.versions.jvm.get())
     }
     packaging {
         jniLibs {
-            keepDebugSymbols.add("**/*.so")
+            // no keepDebugSymbols: AGP strips the .debug_* sections from the Swift .so files
             pickFirsts.add("**/*.so")
-            // this option would compress JNI .so files and reduce overall size for Skip Fuse apps, but cost more at install time
-            //useLegacyPackaging = true
+            // compress JNI .so files: a smaller APK for Skip Fuse apps, at some cost at install time
+            useLegacyPackaging = true
         }
     }
 
     defaultConfig {
         minSdk = libs.versions.android.sdk.min.get().toInt()
         targetSdk = libs.versions.android.sdk.compile.get().toInt()
+        // arm64 phones only: armeabi-v7a and x86_64 each added ~130 MB of Swift libraries
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
         // skip.tools.skip-build-plugin will automatically use Skip.env properties for:
         // applicationId = ANDROID_APPLICATION_ID ?? PRODUCT_BUNDLE_IDENTIFIER
         // versionCode = CURRENT_PROJECT_VERSION
