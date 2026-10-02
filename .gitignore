@@ -4,3 +4,8 @@
 xcuserdata/
 Android/.gradle/
 Android/app/build/
+# release signing: never commit keys or passwords (public repo)
+Android/app/keystore.properties
+Android/keystore.properties
+*.jks
+*.keystore

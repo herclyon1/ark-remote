@@ -58,8 +58,11 @@ android {
 
     // default signing configuration tries to load from keystore.properties
     // see: https://skip.dev/docs/deployment/#export-signing
+    // The repo is public, so the key lives outside it: when there is no Android/app/keystore.properties,
+    // read ~/.config/ark/ark-remote-signing.properties (same keys: keyAlias, storeFile, storePassword, keyPassword).
     signingConfigs {
-        val keystorePropertiesFile = file("keystore.properties")
+        val keystorePropertiesFile = file("keystore.properties").takeIf { it.isFile }
+            ?: File(System.getProperty("user.home"), ".config/ark/ark-remote-signing.properties")
         create("release") {
             if (keystorePropertiesFile.isFile) {
                 val keystoreProperties = Properties()
@@ -70,6 +73,7 @@ android {
                 storePassword = keystoreProperties.getProperty("storePassword")
             } else {
                 // when there is no keystore.properties file, fall back to signing with debug config
+                logger.warn("w: no release signing properties at ${keystorePropertiesFile}; the release build is signed with the DEBUG key")
                 keyAlias = signingConfigs.getByName("debug").keyAlias
                 keyPassword = signingConfigs.getByName("debug").keyPassword
                 storeFile = signingConfigs.getByName("debug").storeFile
