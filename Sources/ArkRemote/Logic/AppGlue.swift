@@ -105,22 +105,57 @@ import SwiftUI
     /// (MainActivity.onWindowFocusChanged → ArkRemoteAppDelegate.onWindowFocus → windowFocus). iOS has no such gate.
     #if os(Android)
     private static var windowFocused = false
+    /// When the text clip on the clipboard was put there (ms), from the clip's description; 0 = none / not text.
+    private static var clipAt: Double = 0
+    /// The clipAt of the last clip whose content was read, so a clip is read once.
+    private static let clipReadKey = "ark-remote-clip-read-at"
+    /// Only a clip put there this recently is read: the link is copied just before opening the app.
+    private static let clipFreshMs: Double = 10 * 60 * 1000
     #else
     private static let windowFocused = true
     #endif
 
-    static func windowFocus(_ has: Bool) {
+    static func windowFocus(_ has: Bool, clipAt at: Double = 0) {
         #if os(Android)
         windowFocused = has
+        if has { clipAt = at }
         #endif
         if has { takeClipboardIfDue() }
     }
 
+    /// Reading another app's clip makes Android 12+ show 「已粘贴」 and iOS ask to paste, so the content is read
+    /// only when it can be a link copied just now: on Android a text clip from the last 10 minutes not read before
+    /// (its description, which shows no notice); on iOS a probable web URL (detectPatterns, which shows no prompt)
+    /// that changed since the last look (changeCount).
     private static func takeClipboardIfDue() {
         guard clipboardDue, windowFocused else { return }
         clipboardDue = false
+        #if os(Android)
+        let d = UserDefaults.standard
+        let age = Date().timeIntervalSince1970 * 1000 - clipAt
+        guard clipAt > 0, age <= clipFreshMs, d.double(forKey: clipReadKey) != clipAt else {
+            logger.info("clipboard: not read (\(clipAt == 0 ? "no text clip" : age > clipFreshMs ? "older than 10 min" : "read before"))")
+            return
+        }
+        d.set(clipAt, forKey: clipReadKey)
+        logger.info("clipboard: read (put there \(Int(age / 1000)) s ago)")
         PhoneLink.takeClipboardLink()
+        #elseif canImport(UIKit)
+        let pb = UIPasteboard.general
+        guard pb.hasStrings, pb.changeCount != clipChange else { return }
+        clipChange = pb.changeCount
+        pb.detectPatterns(for: [.probableWebURL]) { r in
+            guard case .success(let found) = r, found.contains(.probableWebURL) else { return }
+            Task { @MainActor in PhoneLink.takeClipboardLink() }
+        }
+        #else
+        PhoneLink.takeClipboardLink()
+        #endif
     }
+    #if !os(Android) && canImport(UIKit)
+    /// UIPasteboard.changeCount at the last look.
+    private static var clipChange = -1
+    #endif
 
     /// visibilitychange → hidden.
     static func enterBackground() {

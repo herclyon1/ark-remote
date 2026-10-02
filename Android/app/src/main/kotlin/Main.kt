@@ -7,6 +7,8 @@ import skip.ui.*
 
 import android.Manifest
 import android.app.Application
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.graphics.Color as AndroidColor
@@ -121,9 +123,19 @@ open class MainActivity: AppCompatActivity {
 
     // Android 10+ serves the clipboard only to the app whose window has focus, which comes after onResume
     // (ClipboardService: "Denying clipboard access … not in focus", ark37 2026-10-03); AppGlue reads it then.
+    // Handed over with it: when the clip on the clipboard was put there (ClipDescription.getTimestamp, API 26,
+    // System.currentTimeMillis base), 0 when there is none or it is not text. Only the description is looked at:
+    // getPrimaryClipDescription reads no content, so Android 12+ shows no 「已粘贴」 notice for it (that notice comes
+    // with getPrimaryClip, ClipboardService.showAccessNotificationLocked). AppGlue reads the content only for a
+    // text clip from the last 10 minutes it has not read before.
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        AppDelegate.shared.onWindowFocus(hasFocus)
+        var clipAt = 0.0
+        if (hasFocus) {
+            val d = (getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)?.primaryClipDescription
+            if (d != null && d.hasMimeType("text/*")) clipAt = d.timestamp.toDouble()
+        }
+        AppDelegate.shared.onWindowFocus(hasFocus, clipAt)
     }
 
     override fun onStop() {

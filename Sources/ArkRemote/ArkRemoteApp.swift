@@ -64,8 +64,9 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
     }
 
     /// MainActivity.onWindowFocusChanged (Main.kt): the clipboard can be read only while the window has focus.
-    /* SKIP @bridge */public func onWindowFocus(hasFocus: Bool) {
-        Task { @MainActor in AppGlue.windowFocus(hasFocus) }
+    /// `clipAt`: when the text clip on the clipboard was put there (ms since 1970), 0 for none or not text.
+    /* SKIP @bridge */public func onWindowFocus(hasFocus: Bool, clipAt: Double) {
+        Task { @MainActor in AppGlue.windowFocus(hasFocus, clipAt: clipAt) }
     }
 
     // MARK: In-app update (Android only; AppUpdater.kt drives these, Logic/AppUpdate.swift shows them)
