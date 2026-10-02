@@ -81,6 +81,10 @@ import SwiftUI
         live.foreground = true
         live.start()
         Task { await live.becameVisible() }
+        // one GitHub Releases request per open (Logic/AppUpdate.swift); Android only
+        #if os(Android)
+        AppUpdate.shared.checkOnOpen()
+        #endif
     }
 
     /// visibilitychange → hidden.

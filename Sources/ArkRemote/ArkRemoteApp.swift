@@ -62,4 +62,32 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
     /* SKIP @bridge */public func onNetwork(online: Bool) {
         Task { @MainActor in Live.shared.deviceOnline = online }
     }
+
+    // MARK: In-app update (Android only; AppUpdater.kt drives these, Logic/AppUpdate.swift shows them)
+
+    /// AndroidAppMain hands over the two Kotlin entry points once at startup: `check` (one GitHub request)
+    /// and `install` (download + PackageInstaller session). AppUpdate calls them on the main thread.
+    /* SKIP @bridge */public func registerUpdater(check: @escaping () -> Void, install: @escaping () -> Void) {
+        AppUpdate.hooks = AppUpdate.Hooks(check: check, install: install)
+    }
+
+    /// The latest release is newer than this build and carries an .apk asset. Called on a worker thread.
+    /* SKIP @bridge */public func onUpdateAvailable(version: String) {
+        Task { @MainActor in AppUpdate.shared.found(version: version) }
+    }
+
+    /// Download progress in bytes; `total` is 0 or less when the server sent no Content-Length.
+    /* SKIP @bridge */public func onUpdateProgress(done: Int, total: Int) {
+        Task { @MainActor in AppUpdate.shared.progress(done: done, total: total) }
+    }
+
+    /// The APK is downloaded and handed to the system installer; `message` says what the user sees now.
+    /* SKIP @bridge */public func onUpdateInstalling(message: String) {
+        Task { @MainActor in AppUpdate.shared.installing(message: message) }
+    }
+
+    /// Download or install failed (or the install permission is missing); `message` is shown as is.
+    /* SKIP @bridge */public func onUpdateError(message: String) {
+        Task { @MainActor in AppUpdate.shared.failed(message: message) }
+    }
 }

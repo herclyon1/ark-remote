@@ -45,6 +45,8 @@ open class AndroidAppMain: Application {
         ProcessInfo.launch(applicationContext)
         AppDelegate.shared.onInit()
         watchNetwork()
+        // in-app update from GitHub Releases (AppUpdater.kt); hands Swift the check / install entry points
+        AppUpdater.start(this)
     }
 
     /// navigator.onLine / online / offline: the system's default-network callback, event-driven (no timer,
