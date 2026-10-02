@@ -10,8 +10,11 @@ struct StatusPage: View {
     @State var bossIndex = 1
     @State var echoUntil = "08:30"
     @State var echoNewUntil = ""
+    /// Bumped every 30 s by a local timer so 「X 分钟前」 follows the clock (no network: view.js ago() redrawn on render).
+    @State var tick = 0
 
     var body: some View {
+        let _ = tick
         List {
             deviceCard
             notices
@@ -20,7 +23,7 @@ struct StatusPage: View {
             if let note = data.estopNote {
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(note.title)
+                        Text(note.title).foregroundStyle(.red)   // index.html:766 .estopnote .row label{color:var(--bad)}
                         Text(note.receipt).font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -41,12 +44,38 @@ struct StatusPage: View {
             tomorrow
             receiptsSection
         }
-        .navigationTitle("状态")
+        .navigationTitle("游戏机遥控")   // web index.html <title> / top bar 「游戏机遥控」 (view.js:1554 with nothing to save)
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                tick &+= 1
+            }
+        }
     }
 
-    /// The Pending tag under a switch row (「已寄出 HH:MM · …」).
+    /// The small line under a switch row (pending.js:50-73; index.html:769-773): grey, red for 没生效, 「再发一次」 in link colour.
     @ViewBuilder private func tagLine(_ id: String) -> some View {
-        if let t = data.switchTags[id] { Text(t).font(.footnote).foregroundStyle(.blue) }
+        switch data.switchTags[id] {
+        case .unsaved(let t)?, .applied(let t)?:
+            Text(t).font(.footnote).foregroundStyle(.secondary)
+        case .sent(let t, let again)?:
+            HStack(spacing: 6) {
+                Text(t).font(.footnote).foregroundStyle(.secondary)
+                if again { Button("再发一次") { actions.resend(id) }.font(.footnote).buttonStyle(.borderless) }
+            }
+        case .bad(let t)?:
+            HStack(spacing: 6) {
+                Text(t).font(.footnote).foregroundStyle(.red)
+                Button("再发一次") { actions.resend(id) }.font(.footnote).buttonStyle(.borderless)
+            }
+        case nil:
+            EmptyView()
+        }
+    }
+
+    /// pending.js:63 `.posted`: a sent row sits on a light green ground (index.html:768, --ok at 8 %).
+    private func rowGround(_ id: String) -> Color? {
+        (data.switchTags[id]?.posted ?? false) ? Color.green.opacity(0.08) : nil
     }
 
     // MARK: device card
@@ -54,7 +83,7 @@ struct StatusPage: View {
     private var deviceCard: some View {
         Section {
             HStack(spacing: 12) {
-                Circle().fill(data.online ? Color.green : Color.gray).frame(width: 10, height: 10)
+                Circle().fill(data.dotOn ? Color.green : Color.gray.opacity(0.5)).frame(width: 10, height: 10)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(data.deviceHead.isEmpty ? data.deviceName : "\(data.deviceName) · \(data.deviceHead)")
                     Text(data.deviceStatus).font(.footnote).foregroundStyle(.secondary)
@@ -105,7 +134,8 @@ struct StatusPage: View {
                           icon: "play.fill", tint: .blue)
             }
             Button { actions.refresh() } label: {
-                tileLabel("刷新", data.lastUpdate, icon: "arrow.clockwise", tint: .gray)
+                tileLabel("刷新", data.snapAt.map { ago($0) } ?? data.lastUpdate, icon: "arrow.clockwise", tint: .gray,
+                          spinning: data.refreshing)
             }
             Button { actions.stopAll() } label: {
                 tileLabel("停止一切", "脚本和游戏", icon: "stop.fill", tint: .red)
@@ -113,9 +143,9 @@ struct StatusPage: View {
         }
     }
 
-    private func tileLabel(_ title: String, _ sub: String, icon: String, tint: Color) -> some View {
+    private func tileLabel(_ title: String, _ sub: String, icon: String, tint: Color, spinning: Bool = false) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: icon).foregroundStyle(tint)
+            if spinning { ProgressView() } else { Image(systemName: icon).foregroundStyle(tint) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).foregroundStyle(title == "停止一切" ? Color.red : Color.primary)
                 if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(.secondary) }
@@ -125,29 +155,67 @@ struct StatusPage: View {
 
     // MARK: stamina
 
+    /// view.js numTiles(): three tiles 2 + 1 (the last one spans the row, Reminders' odd smart-list tile), each with the
+    /// resource's own icon (view.js:266 RES → Module.xcassets res-ak / res-ef / res-ww) and its colour; before the first
+    /// reading the tiles show with placeholders and 「正在读取…」 under them (view.js:293-297).
     @ViewBuilder private var staminaSection: some View {
         if let tiles = data.stamina {
+            let shown = tiles.isEmpty
+                ? [StatusStamina(label: "明日方舟 理智", value: nil, cap: nil, sub: ""),
+                   StatusStamina(label: "终末地 理智", value: nil, cap: nil, sub: ""),
+                   StatusStamina(label: "鸣潮 波片", value: nil, cap: nil, sub: "")]
+                : tiles
             Section {
-                if tiles.isEmpty {
-                    Text("正在读取…").foregroundStyle(.secondary)
-                } else {
-                    ForEach(tiles) { t in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(t.label).font(.footnote).foregroundStyle(.secondary)
-                            if let err = t.error {
-                                Text(err).foregroundStyle(.red)
-                            } else {
-                                Text(t.cap.map { "\(t.value.map(String.init) ?? "–")/\($0)" } ?? (t.value.map(String.init) ?? "–"))
-                                    .font(.title2)
-                                if !t.sub.isEmpty { Text(t.sub).font(.footnote).foregroundStyle(.secondary) }
-                            }
-                        }
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        staminaTile(shown[0], placeholder: tiles.isEmpty)
+                        if shown.count > 1 { staminaTile(shown[1], placeholder: tiles.isEmpty) }
                     }
+                    if shown.count > 2 { staminaTile(shown[2], placeholder: tiles.isEmpty) }
                 }
+                .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))
             } footer: {
-                if !data.staminaSource.isEmpty { Text("\(data.staminaSource) 读取，下拉刷新会重新读") }
+                if tiles.isEmpty { Text("正在读取…") }
+                else if !data.staminaSource.isEmpty { Text("\(data.staminaSource) 读取，下拉刷新会重新读") }
             }
         }
+    }
+
+    private static let staminaIcon = ["明日方舟 理智": "res-ak", "终末地 理智": "res-ef", "鸣潮 波片": "res-ww"]
+    private static let staminaColour: [String: Color] = [
+        "明日方舟 理智": .blue, "终末地 理智": .orange,
+        "鸣潮 波片": Color(red: 0x30 / 255.0, green: 0xb0 / 255.0, blue: 0xc7 / 255.0),
+    ]
+
+    private func staminaTile(_ t: StatusStamina, placeholder: Bool) -> some View {
+        let icon = Self.staminaIcon[t.label] ?? "res-ak"
+        let colour = Self.staminaColour[t.label] ?? Color.blue
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top) {
+                Image(icon, bundle: .module).resizable().scaledToFit().frame(width: 30, height: 30)
+                Spacer()
+                if placeholder {
+                    RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.2)).frame(width: 56, height: 22)
+                } else if t.error == nil {
+                    HStack(alignment: .firstTextBaseline, spacing: 1) {
+                        Text(t.value.map(String.init) ?? "–").font(.title2).bold().foregroundStyle(colour)
+                        if let cap = t.cap { Text("/\(cap)").font(.footnote).foregroundStyle(colour) }
+                    }
+                }
+            }
+            Text(t.label).font(.subheadline).bold().foregroundStyle(.secondary)
+            if placeholder {
+                RoundedRectangle(cornerRadius: 3).fill(Color.gray.opacity(0.2)).frame(width: 90, height: 11)
+            } else if let err = t.error {
+                Text(err).font(.footnote).foregroundStyle(.red)
+            } else if !t.sub.isEmpty {
+                Text(t.sub).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.gray.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     // MARK: plan (这一趟 / 明日安排)
@@ -164,6 +232,7 @@ struct StatusPage: View {
                         tagLine(StatusSwitchID.queue(q))
                     }
                 }
+                .listRowBackground(rowGround(StatusSwitchID.queue(q)))
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(b.time)
@@ -209,7 +278,7 @@ struct StatusPage: View {
             } header: {
                 Text("明日安排")
             } footer: {
-                Text(Self.switchFoot)
+                Text((data.planFoot + [Self.switchFoot]).joined(separator: "\n"))   // view.js:259 foot lines + the switch note
             }
         }
     }
@@ -222,7 +291,10 @@ struct StatusPage: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("改成刷到几点")
                     Text("提前或延后都行，填 21:00 这种。已经过了的时刻＝立刻收工").font(.footnote).foregroundStyle(.secondary)
+                    // view.js:398 #efnew value = the current 到; :1235 data-time: a bad entry rolls back with a toast when it is left
                     TextField(ef.until, text: $echoNewUntil)
+                        .onAppear { if echoNewUntil.isEmpty { echoNewUntil = ef.until } }
+                        .onSubmit { echoNewUntil = Self.checkedTime(echoNewUntil, else: ef.until) }
                 }
             } else {
                 Picker(selection: $bossIndex) {
@@ -238,10 +310,18 @@ struct StatusPage: View {
                     Text("刷到几点（机器时间）")
                     Text("填 08:30 这种，已过就算明天。到点自动收工、配置还原").font(.footnote).foregroundStyle(.secondary)
                     TextField("08:30", text: $echoUntil)
+                        .onSubmit { echoUntil = Self.checkedTime(echoUntil, else: "08:30") }
                 }
                 Button("开始刷") { actions.startEchoFarm(bossIndex, echoUntil) }
             }
         }
+    }
+
+    /// view.js:1235 input[data-time] onchange: 「8:30」 → 「08:30」; anything else rolls back with 「时刻填成 08:30 这种」.
+    @MainActor static func checkedTime(_ v: String, else last: String) -> String {
+        if let t = statusTimeHHMM(v) { return t }
+        Relay.shared.showToast("时刻填成 08:30 这种")
+        return last
     }
 
     // MARK: 机器 (schema.js RELAY_SWITCHES, tab 状态)
@@ -255,6 +335,7 @@ struct StatusPage: View {
                     tagLine(StatusSwitchID.skipShutdown)
                 }
             }
+            .listRowBackground(rowGround(StatusSwitchID.skipShutdown))
             Toggle(isOn: Binding(get: { data.debugModeUntil != nil }, set: { actions.setDebugMode($0) })) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("调试模式")
@@ -263,6 +344,7 @@ struct StatusPage: View {
                     tagLine(StatusSwitchID.debugMode)
                 }
             }
+            .listRowBackground(rowGround(StatusSwitchID.debugMode))
         }
     }
 
@@ -325,6 +407,7 @@ struct StatusReceiptsPage: View {
                 }
             }
         }
-        .navigationTitle("机器最近的回执")
+        .navigationTitle("回执")   // view.js:1162 openPage("回执", …)
+        .refreshable { await Live.shared.ping() }
     }
 }

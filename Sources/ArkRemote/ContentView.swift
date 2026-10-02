@@ -103,5 +103,6 @@ struct ContentView: View {
         }
         // the no-input link opening the app: mailbox + PIN (#k=) and game tokens (&t=), view.js fromLink / Stamina.fromLink
         .onOpenURL { url in PhoneLink.open(url) }
+        .overlay { ToastLayer() }   // view.js toast(): one layer over all five tabs (Pages/Shell/ToastLayer.swift)
     }
 }

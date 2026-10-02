@@ -19,10 +19,22 @@ struct StatusTab: View {
         StatusPage(data: data, actions: StatusCommands.actions(data, ask: $ask, storedQueue: $storedQueue, edits: $edits))
             .refreshable { await Live.shared.ping() }
             .task {
-                // first open: newest state from the mailbox, and the stamina numbers
-                if let s = try? await relay.latestState() {
-                    relay.adopt(s)
-                    Pending.shared.reconcile()
+                // first open (view.js boot :2928-2946): say what the cached state is, then ask the mailbox; a failure is said
+                // in words (no network ≠ machine off), and a mailbox full of states none of which match the PIN says so
+                if relay.statusText.isEmpty {
+                    relay.setStatus(relay.snapAt.map { "状态 \(ago($0))" } ?? "正在读取…", "")
+                }
+                do {
+                    if let s = try await relay.latestState() {
+                        relay.adopt(s)
+                        Pending.shared.reconcile()
+                    }
+                    if relay.snap == nil && relay.pinScan.seen > 0 && relay.pinScan.matched == 0 {
+                        relay.setStatus("信箱里有 \(relay.pinScan.seen) 条消息但 PIN 对不上——检查设置里的 PIN", "off")
+                    }
+                } catch {
+                    Live.shared.netOk = false
+                    relay.setStatus("读不到信箱 · " + Live.why(error) + "，先看看你这边有没有网", "")
                 }
                 _ = await StaminaStore.shared.refresh()
             }
@@ -37,6 +49,6 @@ struct StatusTab: View {
             } message: {
                 Text(ask?.message ?? "")
             }
-            .modifier(EWSaveBar(edits: $edits))   // 「保存（N）」 / 「放弃」 and the toast, shared with the 终末地 / 鸣潮 tabs
+            .modifier(EWSaveBar(edits: $edits))   // 「保存（N）」 / 「放弃」, shared with the 终末地 / 鸣潮 tabs
     }
 }

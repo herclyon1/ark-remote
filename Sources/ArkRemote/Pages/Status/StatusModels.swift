@@ -60,6 +60,16 @@ struct StatusBoss: Hashable, Identifiable {
     var id: Int { index }
 }
 
+/// The small line under a row (pending.js applyPending; index.html:769-773): grey, or red with 「再发一次」.
+enum StatusTag: Hashable {
+    case unsaved(String)                 // 待保存
+    case sent(String, again: Bool)       // 已寄出 … / 没回执 · 已寄出 HH:MM (+ 再发一次 past 10 h)
+    case bad(String)                     // 没生效 · … + 再发一次, red
+    case applied(String)                 // 已应用 HH:MM
+    /// pending.js:63 `row.classList.add("posted")`: the row gets the light green ground (index.html:768).
+    var posted: Bool { switch self { case .sent, .bad: return true; default: return false } }
+}
+
 /// 「已停止 · 下一趟 HH:MM 照常」 with the machine's receipt as the footnote.
 struct StatusEstopNote: Hashable {
     var title: String
@@ -71,7 +81,8 @@ struct StatusData {
     var deviceName = "游戏机"
     var deviceHead = ""
     var deviceStatus = "正在读取…"
-    var online = false
+    var online = false                        // heartbeat verdict (Live.alive): gates 现在在跑 (view.js:356-357)
+    var dotOn = false                         // the card's dot: setStatus state "on" (index.html .devcard .dot.on green, else tertiary)
     // Notices.
     var busy: [String] = []                   // run.在跑的 (only shown while online)
     var echoFarm: StatusEchoFarm?             // relay.刷声骸 when 到 is set
@@ -80,6 +91,8 @@ struct StatusData {
     // Action tiles.
     var nextAt = ""                           // next 🕘 time in plan
     var lastUpdate = "还没有数据"               // ago(snap.at)
+    var snapAt: Int? = nil                    // snap.at, so the page can redraw 「X 分钟前」 by the local clock
+    var refreshing = false                    // Live.busy: the 刷新 tile spins while a ping runs
     // Stamina tiles; nil = phone not configured, [] = configured but still reading.
     var stamina: [StatusStamina]? = nil
     var staminaSource = ""                    // 取自
@@ -95,7 +108,9 @@ struct StatusData {
     var skipShutdown = false                  // 下次别关机
     var debugModeUntil: String? = nil         // 调试模式, value = until HH:MM when on ("" = on, time unknown)
     // The line under a switch while a sent change waits (Pending tag), keyed by StatusSwitchID.
-    var switchTags: [String: String] = [:]
+    var switchTags: [String: StatusTag] = [:]
+    // Plan lines before the first 🕘 (view.js planRows foot), shown in 明日安排's footnote.
+    var planFoot: [String] = []
     // Receipts (newest first) and the group-header note.
     var receipts: [StatusReceipt] = []
     var todayLast = ""                        // 今天.最近
@@ -116,6 +131,7 @@ struct StatusActions {
     var stopEchoFarm: () -> Void = {}
     var setSkipShutdown: (Bool) -> Void = { _ in }
     var setDebugMode: (Bool) -> Void = { _ in }
+    var resend: (String) -> Void = { _ in }                       // 「再发一次」 under a row, switch id
 }
 
 extension StatusData {
