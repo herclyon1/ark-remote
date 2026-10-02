@@ -62,6 +62,8 @@ import SwiftUI
             fillLiveVals()
             Pending.shared.reconcile()
         }
+        // the cached state the app starts with counts too (the 状态 switches compare against liveVals)
+        if Relay.shared.snap != nil { fillLiveVals() }
     }
 
     /// render() fills liveVals before reconcile; StatusData.from does the same field mapping, so build it
@@ -70,7 +72,7 @@ import SwiftUI
         let d = UserDefaults.standard
         _ = StatusData.from(relay: Relay.shared, live: Live.shared, stamina: StaminaStore.shared, pending: Pending.shared,
                             currentQueue: d.string(forKey: "ark-remote-cfg-queue") ?? "",
-                            estopAt: d.integer(forKey: "ark-remote-estop"))
+                            estopAt: d.integer(forKey: "ark-remote-estop"), record: true)
     }
 
     /// visibilitychange → visible (also the boot sequence).

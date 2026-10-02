@@ -49,11 +49,15 @@ enum StatusSwitchID {
 
 extension StatusData {
     /// Builds the page data. `currentQueue` is the stored choice (view.js curQueue); `estopAt` the time of the
-    /// last 停止一切 in seconds (localStorage ark-remote-estop). Also writes Pending.liveVals for the switches,
-    /// as view.js render() fills liveVals.
+    /// last 停止一切 in seconds (localStorage ark-remote-estop).
+    ///
+    /// `record`: also do what view.js render() does besides drawing — fill Pending.liveVals for the switches and keep
+    /// the last readable AUTO-MAS config. Only AppGlue passes true, once per adopted state. StatusTab.body must not:
+    /// a write to the @Observable Pending during the view update (even of an equal value) re-ran the body, which
+    /// wrote again — the 状态 tab redrew nonstop while idle (验收 10-02 19:3x: +258 frames in 10 s, 115 % CPU).
     @MainActor
     static func from(relay: Relay, live: Live, stamina: StaminaStore, pending: Pending,
-                     currentQueue: String, estopAt: Int) -> StatusData {
+                     currentQueue: String, estopAt: Int, record: Bool = false) -> StatusData {
         var d = StatusData()
         let snap = relay.snap
         let relayObj = snap?["relay"]
@@ -64,7 +68,7 @@ extension StatusData {
         // view.js:323-328: a good config is kept (LS + "-config"); unreadable → the page falls back to it and says so
         if d.configUnreadable {
             d.configIsStale = statusLastGoodConfig() != nil
-        } else if let c = snap?["config"], let at = relay.snapAt, at != statusLastGoodAt {
+        } else if record, let c = snap?["config"], let at = relay.snapAt, at != statusLastGoodAt {
             statusLastGoodAt = at
             UserDefaults.standard.set(c.encodedString(), forKey: statusLastGoodKey)
         }
@@ -137,7 +141,7 @@ extension StatusData {
             if let q = d.queues.first(where: { $0.scripts.sorted().joined(separator: "|") == owners }) {
                 let id = StatusSwitchID.queue(q.name)
                 let on = !skipped.contains(q.name)
-                pending.liveVals[id] = .bool(on)
+                if record { pending.liveVals[id] = .bool(on) }
                 blocks[i].queueName = q.name
                 blocks[i].runsToday = pending.shownValue(for: id)?.truthy ?? on
                 if let t = tag(pending, id) { d.switchTags[id] = t }
@@ -198,11 +202,11 @@ extension StatusData {
 
         // 机器 switches (relayRow): value = relay[key]; shown value = the sent one while it waits
         let skipLive = relayObj?["下次别关机"]?.truthy ?? false
-        pending.liveVals[StatusSwitchID.skipShutdown] = .bool(skipLive)
+        if record { pending.liveVals[StatusSwitchID.skipShutdown] = .bool(skipLive) }
         d.skipShutdown = pending.shownValue(for: StatusSwitchID.skipShutdown)?.truthy ?? skipLive
         let dbg = relayObj?["调试模式"]
         let dbgLive = dbg?.truthy ?? false
-        pending.liveVals[StatusSwitchID.debugMode] = .bool(dbgLive)
+        if record { pending.liveVals[StatusSwitchID.debugMode] = .bool(dbgLive) }
         let dbgShown = pending.shownValue(for: StatusSwitchID.debugMode)?.truthy ?? dbgLive
         d.debugModeUntil = dbgShown ? (dbgLive ? (dbg?.jsString ?? "") : "") : nil   // "" = on, until not reported yet
         for id in [StatusSwitchID.skipShutdown, StatusSwitchID.debugMode] {
