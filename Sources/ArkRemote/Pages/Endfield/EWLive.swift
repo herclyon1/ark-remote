@@ -194,8 +194,9 @@ enum EWSave {
         return (skips + rest).joined(separator: "\n\n")
     }
 
-    /// view.js #go: send each change; the sent ones leave 「待保存」, the failed ones stay. Returns the keys still unsent.
-    static func send(_ edits: [String: EWEdit]) async -> [String: EWEdit] {
+    /// view.js #go: send each change; the sent ones leave 「待保存」, the failed ones stay. Returns the keys still unsent and,
+    /// when something did not go out, the message of the 「有改动没发出去」 alert (view.js:3005-3009).
+    static func send(_ edits: [String: EWEdit]) async -> (left: [String: EWEdit], failure: String?) {
         let relay = Relay.shared
         var left = edits
         var sent = 0
@@ -235,13 +236,15 @@ enum EWSave {
                 for k in wb.keys { left[k] = nil }
             } catch { if failed == nil { failed = error } }
         }
-        // view.js:2446-2454, same words and 7 s
+        // view.js:3005-3012: a failure is an alert 「有改动没发出去」 with one 「好」 (EWSaveBar shows it); a full success is the
+        // one-line toast 「已寄出 N 项」 at toast()'s default 2.6 s (view.js:72) — each row's own 「已寄出」 mark says the rest
+        var failure: String? = nil
         if let failed {
-            relay.showToast(sent > 0
+            failure = sent > 0
                 ? "发出去 \(sent) 项，剩下 \(left.count) 项没发出去（\(Live.why(failed))）。没发出去的还在页面上，可以再按一次保存。"
-                : "一项都没发出去（\(Live.why(failed))）。改动还在页面上，可以再按一次保存。", ms: 7000)
+                : "一项都没发出去（\(Live.why(failed))）。改动还在页面上，可以再按一次保存。"
         } else if sent > 0 {
-            relay.showToast("\(sent) 项已寄出。机器开着几秒内生效；关着就等开机——每一项下面都标着「已寄出」，生效了才会消失。", ms: 7000)
+            relay.showToast("已寄出 \(sent) 项")
         }
         // view.js:2455-2457: ask the machine once, 2 s later, for a state reported after the send. One request, no loop.
         if sent > 0 {
@@ -251,7 +254,7 @@ enum EWSave {
                 await Live.shared.ping(minAt: after)
             }
         }
-        return left
+        return (left, failure)
     }
 }
 
@@ -262,6 +265,11 @@ struct EWSaveBar: ViewModifier {
     var title: String? = nil
     @State var reviewing = false
     @State var saving = false
+    /// The 「有改动没发出去」 alert's message after a send that left changes unsent (view.js:3007 ask(..., { single: true })).
+    @State var failNote: String? = nil
+    /// view.js:1619 goArmedAt: while the review lists a 今天不跑 / 今天照常跑, a tap on 寄出 in its first 400 ms is not a
+    /// confirm (the 08:46 skips, 检查 09-30). 0 = armed at once.
+    @State var armedAt: Double = 0
 
     private var edits: [String: EWEdit] { EWEdits.shared.items }
 
@@ -275,7 +283,10 @@ struct EWSaveBar: ViewModifier {
                             .accessibilityLabel("放弃")
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button { reviewing = true } label: { Image(systemName: "checkmark") }
+                        Button {
+                            armedAt = edits.values.contains(where: EWSave.isSkip) ? nowMs() + 400 : 0   // view.js:1619
+                            reviewing = true
+                        } label: { Image(systemName: "checkmark") }
                             .accessibilityLabel("完成")
                             .disabled(saving)
                     }
@@ -284,17 +295,30 @@ struct EWSaveBar: ViewModifier {
             // index.html:933-939; doSave (view.js:1617) names the button by how many orders go out: 「寄出 N 项」
             .alert("确认这次修改", isPresented: $reviewing) {
                 Button("寄出 \(edits.count) 项") {
+                    // view.js:2955: a tap in the first 400 ms does nothing and the sheet stays; an alert closes on any button,
+                    // so it is shown again (on the next turn: setting it here is undone by the dismissal)
+                    if nowMs() < armedAt {
+                        Task { @MainActor in reviewing = true }
+                        return
+                    }
                     guard !saving else { return }   // 2026-09-01: three taps sent three times
                     saving = true
                     Task {
-                        let left = await EWSave.send(EWEdits.shared.items)
-                        EWEdits.shared.items = left   // view.js:3003: the sent ones go, the unsent stay on the page
+                        let r = await EWSave.send(EWEdits.shared.items)
+                        EWEdits.shared.items = r.left   // view.js:3003: the sent ones go, the unsent stay on the page
                         saving = false
+                        failNote = r.failure
                     }
                 }
                 Button("再想想", role: .cancel) {}
             } message: {
                 Text(verbatim: EWSave.summary(edits))
+            }
+            // view.js:3007: ask("有改动没发出去", …, "好", false, { single: true })
+            .alert("有改动没发出去", isPresented: Binding(get: { failNote != nil }, set: { if !$0 { failNote = nil } })) {
+                Button("好") {}
+            } message: {
+                Text(verbatim: failNote ?? "")
             }
             // the toast is one layer over all tabs now (Pages/Shell/ToastLayer.swift)
     }

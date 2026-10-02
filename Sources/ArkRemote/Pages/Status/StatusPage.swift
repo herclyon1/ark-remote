@@ -425,26 +425,32 @@ private struct StatusPlanGameRow: Identifiable {
     var id: String { block + "/" + game.id }
 }
 
+/// The icon and the time keep their width; only the text gives way and wraps (a long receipt squeezed both out on Android).
+/// The web row (view.js:449-451, index.html:392 / :379) keeps the text to one line with an ellipsis and the time nowrap.
 func receiptRow(_ r: StatusReceipt, at: String) -> some View {
     HStack {
-        if r.ok {
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.green)
-        } else {
-            // no Material cancel icon in skip-ui's table: a red disc with the mapped xmark on Android
-            #if os(Android)
-            // sized to the Material CheckCircle beside it: a 13 pt disc in a 16 pt box (measured on the emulator)
-            ZStack {
-                Circle().fill(Color.red).frame(width: 13, height: 13)
-                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(Color.white)
-            }
-            .frame(width: 16, height: 16)
-            #else
-            Image(systemName: "xmark.circle.fill").foregroundStyle(Color.red)
-            #endif
-        }
+        receiptIcon(r).fixedSize(horizontal: true, vertical: false)
         Text(r.text)
         Spacer()
-        Text(at).foregroundStyle(.secondary)
+        Text(at).foregroundStyle(.secondary).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+@ViewBuilder private func receiptIcon(_ r: StatusReceipt) -> some View {
+    if r.ok {
+        Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.green)
+    } else {
+        // no Material cancel icon in skip-ui's table: a red disc with the mapped xmark on Android
+        #if os(Android)
+        // sized to the Material CheckCircle beside it: a 13 pt disc in a 16 pt box (measured on the emulator)
+        ZStack {
+            Circle().fill(Color.red).frame(width: 13, height: 13)
+            Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(Color.white)
+        }
+        .frame(width: 16, height: 16)
+        #else
+        Image(systemName: "xmark.circle.fill").foregroundStyle(Color.red)
+        #endif
     }
 }
 
