@@ -43,6 +43,21 @@ struct ArknightsPageData: Equatable {
     // Section 明日方舟 · 周常 — relay["周常"]["剿灭"]["本周已完成"] (view.js:510-523)
     /// This week's Annihilation is maxed out. nil = MAA not in this shift, section hidden.
     var annihilationDoneThisWeek: Bool?
+
+    /// The master copy could not be read this time and the rows show the last one read (view.js:421).
+    var masterStale: Bool = false
+    /// The picked shift does not run MAA, so nothing is drawn (view.js:405 `if (!inShift(g.owner)) continue`).
+    var notInShift: Bool = false
+    /// The shift the page follows (picked on the 状态 tab, view.js:827).
+    var shiftName: String = ""
+    /// The line under a row, keyed by the field's path (pending.js:47-67).
+    var tags: [String: ArknightsRowTag] = [:]
+}
+
+/// 「已寄出 HH:MM · …」, 「已应用 HH:MM」, or 「没生效 · …」 with a 再发一次 button (`resendKey`).
+struct ArknightsRowTag: Equatable {
+    var text: String
+    var resendKey: String? = nil
 }
 
 /// One choice of a select field: the label shown and the value written back.
