@@ -29,6 +29,8 @@ struct PhoneTab: View {
                     copyNoInputLink: {
                         guard let link = PhoneLink.make() else { return .noConfig }
                         PhoneLink.copy(link)
+                        // this phone's own link: nothing to take back from the clipboard on the next open
+                        if let u = URL(string: link) { UserDefaults.standard.set(PhoneLink.linkHash(u), forKey: PhoneLink.takenKey) }
                         // read back: navigator.clipboard.writeText can reject, UIPasteboard just does nothing
                         return PhoneLink.pasted() == link ? .copied : .failed(link)
                     }))
@@ -85,6 +87,25 @@ enum PhoneLink {
         return pageURL + "#k=" + k + (tok.map { "&t=" + enc($0.encodedString()) } ?? "")
     }
 
+    /// The last link this phone took (its SHA-256, not the link: the link carries the PIN and the game tokens).
+    static let takenKey = "ark-remote-link-taken"
+
+    static func linkHash(_ url: URL) -> String {
+        Hash.hex(Hash.sha256(Array(url.absoluteString.utf8)))
+    }
+
+    /// App back in front with a mailbox already set (AppGlue.enterForeground): a 免输入链接 copied since is taken the
+    /// way SetupScreen takes it on 「第一次使用」 (the use the user set 10-02 20:47: copy the link, open the app). One
+    /// clipboard read per foreground, no timer; the same link is taken once (takenKey); anything else on the
+    /// clipboard is left alone.
+    @MainActor static func takeClipboardLink() {
+        guard Relay.shared.config != nil,
+              let s = pasted()?.trimmingCharacters(in: .whitespacesAndNewlines), s.contains("#k="),
+              let u = URL(string: s),
+              UserDefaults.standard.string(forKey: takenKey) != linkHash(u) else { return }
+        if open(u) { Relay.shared.showToast("已从剪贴板的链接更新密钥") }
+    }
+
     /// An opened link (.onOpenURL): view.js fromLink() for `#k=` and Stamina.fromLink() for `&t=`.
     /// The web then wipes the hash from the address bar; an app has no address bar to wipe.
     /// True when the link carried something this phone took.
@@ -95,7 +116,12 @@ enum PhoneLink {
            let m = frag.firstMatch(of: re), m.output.count > 1, let sub = m.output[1].substring,
            let j = try? StaminaStore.decodeB64(String(sub)),
            let t = j["t"]?.string, !t.isEmpty, let p = j["p"].map({ $0.string ?? jsStr($0) }), !p.isEmpty {
-            Relay.shared.saveConfig(topic: t, pin: p)
+            // the same mailbox and PIN: leave the config alone, so the page on screen is not redrawn from scratch
+            let cur = Relay.shared.config
+            if cur?.topic != t.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                || cur?.pin != p.trimmingCharacters(in: .whitespacesAndNewlines) {
+                Relay.shared.saveConfig(topic: t, pin: p)
+            }
             took = true
         }
         if StaminaStore.shared.fromLink(url) {
@@ -104,7 +130,11 @@ enum PhoneLink {
             // pass (Stamina.fromSnapshot(snap) on every render), so take it again from the state already here.
             if let snap = Relay.shared.snap { StaminaStore.shared.fromSnapshot(snap) }
         }
-        if took { Task { await StaminaStore.shared.refresh(force: true) } }
+        if took {
+            // taken from any way in (opened, pasted, clipboard on open): the clipboard check skips it after this
+            UserDefaults.standard.set(linkHash(url), forKey: takenKey)
+            Task { await StaminaStore.shared.refresh(force: true) }
+        }
         return took
     }
 }

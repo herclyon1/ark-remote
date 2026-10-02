@@ -90,10 +90,36 @@ import SwiftUI
         live.foreground = true
         live.start()
         Task { await live.becameVisible() }
+        // a 免输入链接 copied while away (Pages/Phone/PhoneTab.swift); before setup SetupScreen.onAppear takes it
+        clipboardDue = true
+        takeClipboardIfDue()
         // one GitHub Releases request per open (Logic/AppUpdate.swift); Android only
         #if os(Android)
         AppUpdate.shared.checkOnOpen()
         #endif
+    }
+
+    /// One clipboard look per foreground (enterForeground sets it, takeClipboardIfDue spends it).
+    private static var clipboardDue = false
+    /// Android 10+ hands the clipboard only to the focused window, and focus arrives after onResume / `.active`
+    /// (MainActivity.onWindowFocusChanged → ArkRemoteAppDelegate.onWindowFocus → windowFocus). iOS has no such gate.
+    #if os(Android)
+    private static var windowFocused = false
+    #else
+    private static let windowFocused = true
+    #endif
+
+    static func windowFocus(_ has: Bool) {
+        #if os(Android)
+        windowFocused = has
+        #endif
+        if has { takeClipboardIfDue() }
+    }
+
+    private static func takeClipboardIfDue() {
+        guard clipboardDue, windowFocused else { return }
+        clipboardDue = false
+        PhoneLink.takeClipboardLink()
     }
 
     /// visibilitychange → hidden.

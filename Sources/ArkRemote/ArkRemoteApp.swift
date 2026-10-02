@@ -63,6 +63,11 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
         Task { @MainActor in Live.shared.deviceOnline = online }
     }
 
+    /// MainActivity.onWindowFocusChanged (Main.kt): the clipboard can be read only while the window has focus.
+    /* SKIP @bridge */public func onWindowFocus(hasFocus: Bool) {
+        Task { @MainActor in AppGlue.windowFocus(hasFocus) }
+    }
+
     // MARK: In-app update (Android only; AppUpdater.kt drives these, Logic/AppUpdate.swift shows them)
 
     /// AndroidAppMain hands over the two Kotlin entry points once at startup: `check` (one GitHub request)

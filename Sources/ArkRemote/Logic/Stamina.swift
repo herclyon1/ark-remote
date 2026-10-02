@@ -146,6 +146,8 @@ func stampFrom(_ epoch: Double?) -> String {
     var data: StaminaReading?
     var at: Double = 0
     var busy = false
+    /// A forced read asked for while one was running (new tokens from a link): run again when it ends.
+    @ObservationIgnored private var again = false
     /// `{sk: {cred, token, dId, uid, efRole, efServer}, kuro: {token, did, roleId, serverId}}`, kept as JSON
     /// because the machine hands the 森空岛 part over as is.
     var tokens: JSONValue?
@@ -445,9 +447,10 @@ func stampFrom(_ epoch: Double?) -> String {
     func refresh(force: Bool = false) async -> StaminaReading? {
         guard let t = tokens ?? loadTokens() else { return nil }
         if !force, data != nil, nowMs() - at < Self.minGapMs { return data }
-        if busy { return data }
+        // a forced read during a running one: the running one may have started on the old tokens (a link taken just
+        // as the app came to the front, while the 森空岛-only read was out: 波片 stayed 「没配库街区」, ark37 10-03)
+        if busy { if force { again = true }; return data }
         busy = true
-        defer { busy = false }
         let sk = t["sk"].flatMap { $0.truthy ? $0 : nil }
         let ku = t["kuro"].flatMap { $0.truthy ? $0 : nil }
         async let skPart: (GameStamina, GameStamina) = sk != nil ? skland(sk!)
@@ -462,6 +465,11 @@ func stampFrom(_ epoch: Double?) -> String {
         if let d = try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(reading)) {
             let c: JSONValue = .object(["at": .double(at), "data": d])
             UserDefaults.standard.set(c.encodedString(), forKey: Self.cacheKey)
+        }
+        busy = false
+        if again {
+            again = false
+            return await refresh(force: true)
         }
         return reading
     }

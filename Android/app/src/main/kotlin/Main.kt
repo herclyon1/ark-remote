@@ -119,6 +119,13 @@ open class MainActivity: AppCompatActivity {
         AppDelegate.shared.onPause()
     }
 
+    // Android 10+ serves the clipboard only to the app whose window has focus, which comes after onResume
+    // (ClipboardService: "Denying clipboard access … not in focus", ark37 2026-10-03); AppGlue reads it then.
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        AppDelegate.shared.onWindowFocus(hasFocus)
+    }
+
     override fun onStop() {
         super.onStop()
         AppDelegate.shared.onStop()
