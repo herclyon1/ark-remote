@@ -46,7 +46,7 @@ struct PhonePage: View {
                 Button("复制免输入链接") {
                     // view.js #mklink: toast on success, prompt("长按复制这条链接：", url) when the clipboard refuses
                     switch actions.copyNoInputLink() {
-                    case .copied: Relay.shared.showToast("链接已复制。存成书签或加到主屏幕就不用再填了")
+                    case .copied: Relay.shared.showToast("链接已复制")   // view.js:1327
                     case .noConfig: Relay.shared.showToast("这台手机还没填信箱和 PIN，链接里没东西可带", ms: 4000)
                     case .failed(let link):
                         manualLink = link

@@ -10,6 +10,9 @@ struct StatusPage: View {
     @State var bossIndex = 1
     @State var echoUntil = "08:30"
     @State var echoNewUntil = ""
+    /// Which time field has the keyboard: leaving it checks the entry (view.js:1235 data-time onchange fires on blur).
+    @FocusState var timeFocus: Bool
+    @FocusState var newTimeFocus: Bool
     /// Bumped every 30 s by a local timer so 「X 分钟前」 follows the clock (no network: view.js ago() redrawn on render).
     @State var tick = 0
 
@@ -303,6 +306,10 @@ struct StatusPage: View {
                     TextField(ef.until, text: $echoNewUntil)
                         .onAppear { if echoNewUntil.isEmpty { echoNewUntil = ef.until } }
                         .onSubmit { echoNewUntil = Self.checkedTime(echoNewUntil, else: ef.until) }
+                        .focused($newTimeFocus)
+                        .onChange(of: newTimeFocus) { _, on in
+                            if !on { echoNewUntil = Self.checkedTime(echoNewUntil, else: ef.until) }
+                        }
                         .multilineTextAlignment(.trailing)
                         .frame(width: Self.timeFieldWidth)
                 }
@@ -321,6 +328,10 @@ struct StatusPage: View {
                     rowTitle("刷到几点（机器时间）", "填 08:30 这种，已过就算明天。到点自动收工、配置还原")
                     TextField("08:30", text: $echoUntil)
                         .onSubmit { echoUntil = Self.checkedTime(echoUntil, else: "08:30") }
+                        .focused($timeFocus)
+                        .onChange(of: timeFocus) { _, on in
+                            if !on { echoUntil = Self.checkedTime(echoUntil, else: "08:30") }
+                        }
                         .multilineTextAlignment(.trailing)
                         .frame(width: Self.timeFieldWidth)
                 }
@@ -425,12 +436,14 @@ private struct StatusPlanGameRow: Identifiable {
     var id: String { block + "/" + game.id }
 }
 
-/// The icon and the time keep their width; only the text gives way and wraps (a long receipt squeezed both out on Android).
-/// The web row (view.js:449-451, index.html:392 / :379) keeps the text to one line with an ellipsis and the time nowrap.
+/// As the web row (view.js:449-451): the text on one line with an ellipsis at the end (index.html:392 `.row > label`
+/// nowrap / ellipsis), the time never wrapping (:379 `.ro.short` nowrap); the icon and the time keep their width.
 func receiptRow(_ r: StatusReceipt, at: String) -> some View {
     HStack {
         receiptIcon(r).fixedSize(horizontal: true, vertical: false)
-        Text(r.text)
+        // iOS truncates the tail with 「…」 by default; skip-fuse-ui marks truncationMode unavailable (Text.swift:559) and
+        // skip-ui then clips a one-line Text without an ellipsis (Text.swift:497-510, no mode = TextOverflow.Clip)
+        Text(r.text).lineLimit(1)
         Spacer()
         Text(at).foregroundStyle(.secondary).lineLimit(1).fixedSize(horizontal: true, vertical: false)
     }

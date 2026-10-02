@@ -13,7 +13,8 @@ struct ArknightsPage: View {
 
     var body: some View {
         Form {
-            if data.notInShift {
+            // listSection, not a bare `if`: a false `if` at the top of a List draws an empty grey section on Android (SkipFixes.swift)
+            listSection("ark-notinshift", if: data.notInShift) {
                 Section {
                     Text(verbatim: "\(data.shiftName.isEmpty ? "这个班次" : data.shiftName)不跑明日方舟。换班次在「状态」页。")
                         .foregroundStyle(.secondary)
@@ -30,9 +31,9 @@ struct ArknightsPage: View {
     // MARK: 明日方舟 (schema.js:116-127)
 
     /// view.js:798-801: a section with no rows is not drawn.
-    @ViewBuilder var stageSection: some View {
-        if data.configUnreadable || data.stage != nil || data.medicineNumb != nil || data.ifFight != nil
-            || data.ifActivityFirst != nil || data.activityStageIndex != nil {
+    var stageSection: some View {
+        listSection("ark-stage", if: data.configUnreadable || data.stage != nil || data.medicineNumb != nil || data.ifFight != nil
+            || data.ifActivityFirst != nil || data.activityStageIndex != nil) {
         Section {
             // view.js:309-311: AUTO-MAS not running → the last config read, said so in yellow.
             if data.configUnreadable {
@@ -83,8 +84,8 @@ struct ArknightsPage: View {
 
     // MARK: 明日方舟 · 基建 (schema.js:128-131)
 
-    @ViewBuilder var infrastSection: some View {
-        if data.masterUnreadable || data.usesOfDrones != nil {
+    var infrastSection: some View {
+        listSection("ark-infrast", if: data.masterUnreadable || data.usesOfDrones != nil) {
         Section {
             if data.masterUnreadable {
                 ArknightsWarningRow()
@@ -105,9 +106,9 @@ struct ArknightsPage: View {
 
     // MARK: 明日方舟 · 领取奖励 (schema.js:132-141)
 
-    @ViewBuilder var awardSection: some View {
-        if data.masterUnreadable || data.awardMail != nil || data.awardOrundum != nil
-            || data.awardMining != nil || data.awardSpecialAccess != nil {
+    var awardSection: some View {
+        listSection("ark-award", if: data.masterUnreadable || data.awardMail != nil || data.awardOrundum != nil
+            || data.awardMining != nil || data.awardSpecialAccess != nil) {
         Section {
             if data.masterUnreadable {
                 ArknightsWarningRow()
@@ -150,8 +151,8 @@ struct ArknightsPage: View {
 
     // MARK: 明日方舟 · 周常 (view.js:519-523; shown only when MAA is in this shift)
 
-    @ViewBuilder var weeklySection: some View {
-        if let done = data.annihilationDoneThisWeek {
+    var weeklySection: some View {
+        listSection("ark-weekly", ifLet: data.annihilationDoneThisWeek) { done in
             Section {
                 HStack {
                     ArknightsLabel(label: "剿灭", hint: "打满本周剿灭后自动停掉，下周一 04:00 自动恢复")
@@ -180,18 +181,18 @@ struct ArknightsPage: View {
     /// A row with its 「已寄出 / 已应用 / 没生效」 line under it (pending.js:47-67: the tag sits under the control).
     /// An unsaved edit replaces that line with 「待保存」 in the accent colour on a tinted row
     /// (view.js:1268-1275; index.html:686 `.cap.edit`, :689 `.changed` = accent 8%).
-    @ViewBuilder private func tagged<Row: View>(_ path: String, @ViewBuilder _ row: () -> Row) -> some View {
-        if edited.contains(path) {
-            VStack(alignment: .leading, spacing: 4) {
-                row()
+    /// One shape with or without a tag (as EWRowView, 8c1160d): a branch around `row()` rebuilt the text field on the first
+    /// keystroke, when 「待保存」 appears, and dropped the keyboard.
+    private func tagged<Row: View>(_ path: String, @ViewBuilder _ row: () -> Row) -> some View {
+        let unsaved = edited.contains(path)
+        let tag = unsaved ? nil : data.tags[path]
+        return VStack(alignment: .leading, spacing: 4) {
+            row()
+            if unsaved {
                 Text("待保存")
                     .font(.footnote)
                     .foregroundStyle(Color.accentColor)
-            }
-            .listRowBackground(Color.accentColor.opacity(0.08))
-        } else if let tag = data.tags[path] {
-            VStack(alignment: .leading, spacing: 4) {
-                row()
+            } else if let tag {
                 HStack(spacing: 8) {
                     Text(verbatim: tag.text)
                         .font(.footnote)
@@ -203,9 +204,8 @@ struct ArknightsPage: View {
                     }
                 }
             }
-        } else {
-            row()
         }
+        .listRowBackground(unsaved ? Color.accentColor.opacity(0.08) : nil)
     }
 
     /// A binding to an optional field that the row only draws when the field is non-nil.
