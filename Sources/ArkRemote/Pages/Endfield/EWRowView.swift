@@ -42,16 +42,15 @@ struct EWRowView: View {
     }
 
     var body: some View {
-        if let tag, row.kind != .box {
-            VStack(alignment: .leading, spacing: 4) {
-                control
+        // One shape with or without a tag: a branch here would rebuild the TextField on the first keystroke (「待保存」 appears) and drop the keyboard.
+        VStack(alignment: .leading, spacing: 4) {
+            control
+            if let tag, row.kind != .box {
                 EWTagLine(tag: tag, onResend: onResend)
             }
-            // index.html:689-690: unsaved rows tinted accent 8 %, sent rows ok-green 8 % (近似: replaces the card colour, not mixed into it)
-            .listRowBackground(tag.unsaved ? Color.accentColor.opacity(0.08) : tag.posted ? Color.green.opacity(0.08) : nil)
-        } else {
-            control
         }
+        // index.html:689-690: unsaved rows tinted accent 8 %, sent rows ok-green 8 % (近似: replaces the card colour, not mixed into it)
+        .listRowBackground(row.kind == .box ? nil : EWTagLine.tint(tag))
     }
 
     @ViewBuilder
@@ -193,6 +192,11 @@ struct EWTagLine: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    static func tint(_ tag: EWRowTag?) -> Color? {
+        guard let tag else { return nil }
+        return tag.unsaved ? Color.accentColor.opacity(0.08) : tag.posted ? Color.green.opacity(0.08) : nil
     }
 }
 

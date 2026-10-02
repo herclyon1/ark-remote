@@ -178,16 +178,14 @@ struct WuwaPage: View {
         }
     }
 
-    /// A row with its small lines under it, same as the config rows (EWRowView).
-    @ViewBuilder private func tagged<Row: View>(_ key: String, @ViewBuilder _ row: () -> Row) -> some View {
-        if let tag = data.tags[key] {
-            VStack(alignment: .leading, spacing: 4) {
-                row()
+    /// A row with its small lines under it, same as the config rows (EWRowView); one shape either way so the 周本 field keeps focus.
+    private func tagged<Row: View>(_ key: String, @ViewBuilder _ row: () -> Row) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            row()
+            if let tag = data.tags[key] {
                 EWTagLine(tag: tag, onResend: onResend)
             }
-            .listRowBackground(tag.unsaved ? Color.accentColor.opacity(0.08) : tag.posted ? Color.green.opacity(0.08) : nil)
-        } else {
-            row()
         }
+        .listRowBackground(EWTagLine.tint(data.tags[key]))
     }
 }
