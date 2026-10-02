@@ -16,6 +16,19 @@ enum WuwaSchema {
         (["长路启航之星", "斑驳粉饰之沫"], 5),
     ]
 
+    /// Echo set icons in Module.xcassets, exported verbatim from schema.js SET_ICONS (76×76 PNGs from the Kuro wiki, oldest first).
+    /// Asset names stay ASCII because they become Android resources.
+    static let setIcons: [String: String] = [
+        "长路启航之星": "echo-set-1",
+        "斑驳粉饰之沫": "echo-set-2",
+        "听唤语义之愿": "echo-set-3",
+        "雪落无声之愿": "echo-set-4",
+        "剪心辑梦之影": "echo-set-5",
+        "羽落空尘之歌": "echo-set-6",
+        "清邪荡煞之心": "echo-set-7",
+        "冥途夜行之灯": "echo-set-8",
+    ]
+
     /// 凝素领域: the 梦州 row only, fixed order 迅刀 / 音感仪 / 长刃 / 臂铠 / 佩枪 (schema.js:75).
     static let forge: [EWChoice] = [
         EWChoice("1 · 迅刀（陨翼云渊）", "1"),
