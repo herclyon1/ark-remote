@@ -332,8 +332,12 @@ struct EWSaveBar: ViewModifier {
     /// The 「有改动没发出去」 alert's message after a send that left changes unsent (view.js:3007 ask(..., { single: true })).
     @State var failNote: String? = nil
     /// view.js:1619 goArmedAt: while the review lists a 今天不跑 / 今天照常跑, a tap on 寄出 in its first 400 ms is not a
-    /// confirm (the 08:46 skips, 检查 09-30); the sheet stays. 0 = armed at once.
-    @State var armedAt: Double = 0
+    /// confirm (the 08:46 skips, 检查 09-30); the sheet stays. The web judges by when the press began (view.js:2953-2955
+    /// goPressAt), so a slow press started early and let go late is no confirm either: here 寄出 stays disabled for those
+    /// 400 ms, counted from when the sheet is up (showModal), and a press that began on a disabled button never fires.
+    @State var armed = true
+    /// Bumped on each ✓, so a 400 ms wait left over from a sheet closed early cannot arm a newer one.
+    @State var armGen = 0
 
     private var edits: [String: EWEdit] { EWEdits.shared.items }
 
@@ -348,7 +352,8 @@ struct EWSaveBar: ViewModifier {
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button {
-                            armedAt = edits.values.contains(where: EWSave.isSkip) ? nowMs() + 400 : 0   // view.js:1619
+                            armed = !edits.values.contains(where: EWSave.isSkip)   // view.js:1619
+                            armGen += 1
                             reviewing = true
                         } label: { Image(systemName: "checkmark") }
                             .accessibilityLabel("完成")
@@ -389,8 +394,16 @@ struct EWSaveBar: ViewModifier {
                         ToolbarItem(placement: .confirmationAction) {
                             // doSave (view.js:1617) names the button by how many orders go out: 「寄出 N 项」
                             Button("寄出 \(edits.count) 项") { go() }
-                                .disabled(saving)
+                                .disabled(saving || !armed)
                         }
+                    }
+                }
+                .onAppear {
+                    guard !armed else { return }
+                    let gen = armGen
+                    Task {
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        if gen == armGen { armed = true }
                     }
                 }
                 .presentationDetents([.medium, .large])
@@ -406,7 +419,7 @@ struct EWSaveBar: ViewModifier {
 
     /// #go (view.js:2954-3016): a tap in the first 400 ms while a skip is listed does nothing and the sheet stays.
     private func go() {
-        if nowMs() < armedAt { return }
+        guard armed else { return }
         guard !saving else { return }   // 2026-09-01: three taps sent three times
         saving = true
         reviewing = false

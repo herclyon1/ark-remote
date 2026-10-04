@@ -19,7 +19,7 @@ struct PhoneDiagRows: View {
             if v { DiagWatch.start() }
             Relay.shared.showToast(v ? "诊断记录已开" : "诊断记录已关")   // view.js:1316
         })) {
-            PhoneRowLabel(title: "诊断记录", hint: "开着时页面按 ?diag 方式启动：底部一行几何数，分段控件每次操作后弹出记录，可复制 / 分享给我们")
+            PhoneRowLabel(title: "诊断记录", hint: "开着时记下这台手机收发消息、网络通断和机器状态的变化，可复制 / 分享给我们")
         }
         .onAppear { if diagOn { DiagWatch.start(); DiagUI.shared.start() } }
         .sheet(isPresented: $checkShown) { SelfCheckSheet { checkShown = false } }

@@ -303,8 +303,9 @@ func diagKB(_ text: String) -> String {
     static let keepMax = 10
     /// seg-frames-logger.js:440 MARK_WORDS, and the panel's last row 「直接发（不选词）」 (word nil).
     static let markWords = ["不该动", "动错了", "卡住了", "慢半拍", "位置不对"]
-    /// seg-frames-logger.js:497, the line while nothing has been sent yet.
-    static let startLine = "诊断记录开着：点过的控件记在手机里，不送；出问题按右下角「就是这里」，只送那一份和它前面 3 份"
+    /// seg-frames-logger.js:497, the line while nothing has been sent yet. The App logs messages, the network and the
+    /// machine status (not taps) and sends the whole log as one record, so the web's wording would be wrong here.
+    static let startLine = "诊断记录开着：收发消息、网络通断和机器状态记在手机里，不送；出问题按右下角「就是这里」，送整份记录"
 
     /// The 诊断记录 switch, mirrored here so the mark button and the line appear / go at once.
     var on = DiagLog.shared.enabled
