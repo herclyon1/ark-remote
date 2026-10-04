@@ -234,6 +234,12 @@ struct Toast: Sendable, Equatable {
     let at: Double
 }
 
+/// view.js ask(title, msg, "好", false, { single: true }): an alert with one 「好」 (a reason is a sentence, not a toast).
+struct AlertNote: Sendable, Equatable {
+    let title: String
+    let message: String
+}
+
 /// net.js pinScan: how many states the mailbox held and how many matched the PIN.
 struct PinScan: Sendable, Equatable {
     var seen = 0
@@ -256,6 +262,8 @@ struct PinScan: Sendable, Equatable {
     var statusState = ""
     /// view.js toast(text, ms): the last transient message for the page to show.
     var toast: Toast?
+    /// view.js ask(..., { single: true }): the alert for the page to present; nil when none is up.
+    var alert: AlertNote?
     /// net.js pinScan.
     var pinScan = PinScan()
 
@@ -312,6 +320,13 @@ struct PinScan: Sendable, Equatable {
 
     func showToast(_ text: String, ms: Int = 2600) {
         toast = Toast(text: text, ms: ms, at: nowMs())
+    }
+
+    /// view.js ask(title, msg, "好", false, { single: true }). One alert at a time (view.js:46, UIAlertController presents
+    /// one): the page's single `.alert` shows `alert`; a newer note replaces it rather than being dropped, so a failure is
+    /// never swallowed when nothing has cleared an earlier one.
+    func showAlert(_ title: String, _ message: String) {
+        alert = AlertNote(title: title, message: message)
     }
 
     // MARK: mailbox

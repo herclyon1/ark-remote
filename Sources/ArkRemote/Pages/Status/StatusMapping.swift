@@ -179,8 +179,36 @@ extension StatusData {
         // receipts, newest first
         let rcs = relayObj?["最近指令"]?.array ?? []
         d.receipts = rcs.reversed().map { r in
-            StatusReceipt(ok: r["ok"]?.truthy ?? false, text: r["text"]?.jsString ?? "", at: r["at"]?.jsString ?? "")
+            StatusReceipt(ok: r["ok"]?.truthy ?? false, text: r["text"]?.jsString ?? "", at: r["at"]?.jsString ?? "",
+                          sent: r["sent"]?.jsString ?? "", action: r["action"]?.jsString ?? "")
         }
+        // view.js:418-438: a skip receipt is the machine's answer at that moment, not what holds now. Per day and queue only
+        // the last successful skip / unskip stays; earlier ones go grey with what replaced them, and a today's one that the
+        // snapshot's 「今天跳过队列」 contradicts goes grey with what holds now. The queue is the first 「…」 in the text.
+        let todayMD = String(statusBeijingToday().dropFirst(5))
+        var lastOk: [String: StatusReceipt] = [:]
+        var skipToday = false
+        for i in d.receipts.indices {
+            let r = d.receipts[i]
+            guard r.action == "skip_today" || r.action == "unskip_today",
+                  let q = statusFirstQuoted(r.text) else { continue }
+            let day = String(r.at.prefix(5)), key = day + "|" + q
+            if day == todayMD { skipToday = true }
+            if !r.ok { continue }
+            if let later = lastOk[key] {
+                d.receipts[i].note = "已被 \(String(later.at.dropFirst(6))) 的「\(later.action == "skip_today" ? "跳过" : "取消跳过")\(q)」取代"
+                continue
+            }
+            lastOk[key] = r
+            if day == todayMD && (r.action == "skip_today") != skipped.contains(q) {
+                d.receipts[i].note = "机器现在：\(q)今天\(skipped.contains(q) ? "跳过" : "照常")"
+            }
+        }
+        // view.js:439-440 nowRow: what each shift does today, while a skip is in play
+        if (skipToday || !skipped.isEmpty) && !d.queues.isEmpty {
+            d.todayActual = d.queues.map { "\($0.name) \(skipped.contains($0.name) ? "跳过" : "照常")" }.joined(separator: " · ")
+        }
+        d.receiptsToday = todayMD
 
         // 停止一切 note for 6 hours
         if estopAt > 0, nowSec() - estopAt < 6 * 3600 {
@@ -226,17 +254,24 @@ extension StatusData {
     /// pending.js:50-73: the small line under a row. Past 10 h without a receipt the line is 「没回执 · 已寄出 HH:MM」 with
     /// 「再发一次」 (pending.js:58-59: resent only by a tap, never automatically).
     @MainActor private static func tag(_ pending: Pending, _ id: String) -> StatusTag? {
-        if let p = pending.items[id], p.mismatchAt == nil {
-            let at = p.resentAt ?? p.sentAt
-            if nowSec() - at > 10 * 3600 { return .sent("没回执 · 已寄出 \(Pending.hhmm(at))", again: true) }
-        }
         switch pending.tag(for: id) {
-        case .sent(let text): return .sent(text, again: false)
+        case .sent(let text): return .sent(text, again: pending.staleResendKey(for: id) != nil)
         case .mismatch(let text, _): return .bad(text)
         case .applied(let text): return .applied(text)
         case nil: return nil
         }
     }
+}
+
+/// view.js `/「([^」]+)」/.exec(text)[1]`: the first non-empty 「…」 in the text, nil when there is none.
+func statusFirstQuoted(_ text: String) -> String? {
+    var from = text.startIndex
+    while let a = text.range(of: "「", range: from..<text.endIndex) {
+        guard let b = text.range(of: "」", range: a.upperBound..<text.endIndex) else { return nil }
+        if a.upperBound < b.lowerBound { return String(text[a.upperBound..<b.lowerBound]) }
+        from = a.upperBound
+    }
+    return nil
 }
 
 /// view.js lastGoodConfig: the last readable AUTO-MAS config, localStorage LS + "-config".

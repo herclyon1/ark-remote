@@ -54,6 +54,9 @@ struct ArknightsPageData: Equatable {
 
     /// The master copy could not be read this time and the rows show the last one read (view.js:421).
     var masterStale: Bool = false
+    /// Yellow notes at the top of each master section (view.js:488-493): 「有 N 项的名字没翻译出来…」,
+    /// 「这一版脚本的定义文件里没有这些任务…」.
+    var masterNotes: [String] = []
     /// The picked shift does not run MAA, so nothing is drawn (view.js:405 `if (!inShift(g.owner)) continue`).
     var notInShift: Bool = false
     /// The shift the page follows (picked on the 状态 tab, view.js:827).
@@ -66,6 +69,10 @@ struct ArknightsPageData: Equatable {
 struct ArknightsRowTag: Equatable {
     var text: String
     var resendKey: String? = nil
+    /// 「没生效」: red text (index.html `.row .sent.bad`).
+    var bad: Bool = false
+    /// Sent and not yet confirmed: the row's light green ground (pending.js:63 `.posted`, index.html:768).
+    var posted: Bool = false
 }
 
 /// One choice of a select field: the label shown and the value written back.

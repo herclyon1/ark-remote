@@ -16,8 +16,19 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
         AppShell()
             .task {
                 logger.info("Skip app logs are viewable in the Xcode console for iOS; Android logs can be viewed in Studio or using adb logcat")
+                await startRecorders()
             }
     }
+}
+
+/// index.html loads crash-rec.js and fluency-rec.js on every page load: the app starts both recorders once per process
+/// (Logic/CrashRec.swift, Logic/FluencyRec.swift); later calls do nothing.
+@MainActor func startRecorders() {
+    CrashRec.shared.start()
+    FluencyRec.shared.start()
+    #if !os(Android) && canImport(UIKit)
+    TouchProbe.install()
+    #endif
 }
 
 /// Global application delegate functions.
@@ -39,14 +50,24 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
 
     /* SKIP @bridge */public func onResume() {
         logger.debug("onResume")
+        // visibilitychange → visible for the recorders (crash-rec heartbeat, queued uploads)
+        CrashRec.shared.shown()
+        #if !os(Android) && canImport(UIKit)
+        Task { @MainActor in TouchProbe.install() }
+        #endif
     }
 
     /* SKIP @bridge */public func onPause() {
         logger.debug("onPause")
+        // visibilitychange → hidden: the alive marker is written at once (crash-rec), a pending flu hit is sent
+        CrashRec.shared.hidden()
+        FluencyRec.shared.hidden()
     }
 
     /* SKIP @bridge */public func onStop() {
         logger.debug("onStop")
+        CrashRec.shared.hidden()
+        FluencyRec.shared.hidden()
     }
 
     /* SKIP @bridge */public func onDestroy() {
@@ -61,12 +82,38 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
     /// default-network callback here. Called on a ConnectivityManager thread; Live is main-actor state.
     /* SKIP @bridge */public func onNetwork(online: Bool) {
         Task { @MainActor in Live.shared.deviceOnline = online }
+        // window "online": the recorders' queues go when the network comes back
+        CrashRec.shared.network(online)
+        if online { Task.detached { await FluencyRec.shared.flushIfQueued() } }
     }
 
     /// MainActivity.onWindowFocusChanged (Main.kt): the clipboard can be read only while the window has focus.
     /// `clipAt`: when the text clip on the clipboard was put there (ms since 1970), 0 for none or not text.
     /* SKIP @bridge */public func onWindowFocus(hasFocus: Bool, clipAt: Double) {
         Task { @MainActor in AppGlue.windowFocus(hasFocus, clipAt: clipAt) }
+        CrashRec.shared.focus(hasFocus)   // crash-rec's focused / focus_changed tags (window focus / blur)
+    }
+
+    // MARK: Recorders (Android; Logic/CrashRec.swift, Logic/FluencyRec.swift)
+
+    /// MainActivity.dispatchTouchEvent (Main.kt), the primary pointer only: `phase` 0 = down, 1 = up, 2 = cancel;
+    /// x / y in dp from the window's top left; `waitMs` = SystemClock.uptimeMillis() − the event's eventTime when the
+    /// activity got it (how late the press reached the main thread). On the main thread.
+    /* SKIP @bridge */public func onTouch(phase: Int, x: Double, y: Double, waitMs: Double) {
+        if phase == 0 {
+            TouchFeed.down(x: x, y: y, waitMs: max(0, waitMs))
+            #if os(Android)
+            Task { @MainActor in FrameClock.run() }
+            #endif
+        } else {
+            TouchFeed.up(x: x, y: y, cancelled: phase == 2)
+        }
+    }
+
+    /// Thread.setDefaultUncaughtExceptionHandler (Main.kt): an uncaught Kotlin exception is about to kill the app;
+    /// crash-rec keeps it synchronously and sends it at the next start.
+    /* SKIP @bridge */public func onUncaughtException(message: String, stack: String) {
+        CrashRec.shared.fatal(message, stack: stack)
     }
 
     // MARK: In-app update (Android only; AppUpdater.kt drives these, Logic/AppUpdate.swift shows them)

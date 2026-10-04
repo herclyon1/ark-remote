@@ -12,11 +12,18 @@ struct EndfieldTab: View {
         EndfieldPage(data: Self.pageData(), live: Self.pageData, onChange: { path, v in
             let machine = ewEffectiveMaster(master, lastGood: lastGood).0
             let label = ewLabel(EndfieldSchema.groups, machine ?? master, path)
-            let (k, e) = EWSave.masterEdit(game: Self.game, path: path, label: label, to: v, machine: machine?.values[path])
-            EWEdits.shared.items[k] = e
+            // view.js:1254 base(): a change back to the sent-but-unconfirmed value drops the edit, not only one back to the machine's
+            let base = ewBase(game: Self.game, path: path, machine: machine?.values[path])
+            let (k, e) = EWSave.masterEdit(game: Self.game, path: path, label: label, to: v, machine: base)
+            ewPutEdit(k, e)   // a row changed again keeps its place in the review order
         }, onResend: { k in Task { await Pending.shared.resend(k) } })
         .modifier(EWSaveBar(title: "游戏机遥控"))   // view.js:1283 one title for every page
-        .refreshable { await load() }
+        // a pull asks the machine to report again and waits for it (view.js:1151 pullRefresh → live.js ping), as the 状态
+        // tab does (StatusTab.swift:23); the state it adopts is then checked against what was sent
+        .refreshable {
+            await Live.shared.ping()
+            sync()
+        }
         .task { await load() }
         .onChange(of: relay.snapAt) { _, _ in sync() }
     }

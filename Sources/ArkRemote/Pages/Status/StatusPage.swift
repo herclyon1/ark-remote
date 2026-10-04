@@ -21,6 +21,8 @@ struct StatusPage: View {
         List {
             deviceCard
             notices
+            // view.js:362: the 月卡 0–5 days reminder card, after the notices and before the tiles (Pages/Status/MonthCard*.swift)
+            MonthCardReminder()
             actionTiles
             staminaSection
             // top-level conditional sections go through listSection (Pages/Shell/SkipFixes.swift): a bare `if` leaves
@@ -46,6 +48,8 @@ struct StatusPage: View {
             thisShift
             echoFarmSection
             machineSection
+            // view.js:404: the 月卡 rows, after the 机器 section (and its config note) and before 明日安排
+            MonthCardRows()
             tomorrow
             receiptsSection
         }
@@ -406,10 +410,12 @@ struct StatusPage: View {
             let note = [data.todayLast.isEmpty ? "" : "最近一趟 \(data.todayLast)",
                         data.todayFailed > 0 ? "失败 \(data.todayFailed) 趟" : ""].filter { !$0.isEmpty }.joined(separator: " · ")
             Section {
+                // view.js:458 nowRow sits above the newest three
+                if let actual = data.todayActual { todayActualRow(actual) }
                 ForEach(data.receipts.prefix(3)) { r in receiptRow(r, at: r.at) }
                 if data.receipts.count > 3 {
                     NavigationLink {
-                        StatusReceiptsPage(receipts: data.receipts)
+                        StatusReceiptsPage(receipts: data.receipts, todayActual: data.todayActual, today: data.receiptsToday)
                     } label: {
                         HStack {
                             Text("查看全部")
@@ -442,18 +448,36 @@ private struct StatusPlanGameRow: Identifiable {
 /// A receipt shows its whole text, wrapping onto as many lines as it needs (user, 10-02 20:49: a cut-off receipt, with
 /// or without an ellipsis, hides the information). The web row is one line with an ellipsis (view.js:449-451,
 /// index.html:392); the App does not follow it here. The icon and the time keep their width (time never wraps, as
-/// :379 `.ro.short` nowrap); only the text gives way.
+/// :379 `.ro.short` nowrap); only the text gives way. The time is 「HH:MM 发出 · <at> 执行」 when the send time differs
+/// (view.js rcWhen); a skip receipt that no longer holds is grey with the reason under it (view.js:451-452, index.html:377
+/// `.row.stale > label{color:var(--dim)}`, `.sf.stale` dim icon).
 func receiptRow(_ r: StatusReceipt, at: String) -> some View {
     HStack {
         receiptIcon(r).fixedSize(horizontal: true, vertical: false)
-        Text(r.text)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(r.text).foregroundStyle(r.note == nil ? Color.primary : Color.secondary)
+            if let note = r.note { Text(note).font(.footnote).foregroundStyle(.secondary) }
+        }
         Spacer()
-        Text(at).foregroundStyle(.secondary).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+        Text(r.when(at)).foregroundStyle(.secondary).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+/// view.js nowRow: 「今天实际」 with each shift's 跳过 / 照常 today as the row's grey value (`.ro.short`).
+func todayActualRow(_ actual: String) -> some View {
+    HStack {
+        Text("今天实际")
+        Spacer()
+        Text(actual).foregroundStyle(.secondary).lineLimit(1).fixedSize(horizontal: true, vertical: false)
     }
 }
 
 @ViewBuilder private func receiptIcon(_ r: StatusReceipt) -> some View {
-    if r.ok {
+    if r.note != nil {
+        // a stale skip receipt: the icon goes dim with its row (index.html:377 .sf.stale{background:var(--dim)});
+        // only successful receipts get a note, so it is always the check
+        Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.gray).accessibilityLabel("成功")
+    } else if r.ok {
         // the receipt text does not say whether it went through: the icon carries it, so it is named (accessibilityLabel docs:
         // "a view that doesn't display text, like an icon")
         Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.green).accessibilityLabel("成功")
@@ -477,6 +501,9 @@ func receiptRow(_ r: StatusReceipt, at: String) -> some View {
 /// 「查看全部」: every receipt grouped by day (回执只带 月-日, so the header is 「9月17日」).
 struct StatusReceiptsPage: View {
     var receipts: [StatusReceipt]
+    /// view.js:463 the 今天实际 row heads today's group (`g.d === today ? nowRow : ""`).
+    var todayActual: String? = nil
+    var today = ""
 
     private var days: [String] {
         var seen: [String] = []
@@ -494,6 +521,7 @@ struct StatusReceiptsPage: View {
         List {
             ForEach(days, id: \.self) { d in
                 Section(dayName(d)) {
+                    if d == today, let actual = todayActual { todayActualRow(actual) }
                     ForEach(receipts.filter { $0.at.hasPrefix(d) }) { r in receiptRow(r, at: String(r.at.dropFirst(6))) }
                 }
             }

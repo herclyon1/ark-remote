@@ -352,7 +352,6 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             if nowMs() - at < cosEvery * 2000 + 30000 && at > lastHb {
                 lastHb = at
                 if let n = b["every"]?.number, n > 0 { hbEvery = Int(n) }
-                pending.resendStale()
             }
         }
         if show { updateLive() }
@@ -402,7 +401,6 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             } else {
                 lastHb = t
                 if let n = Self.hbPace(d["message"]) { hbEvery = n }
-                pending.resendStale()
             }
             updateLive()
             return
@@ -415,7 +413,6 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.relay.readCosState()
-                self.pending.resendStale()
                 self.updateLive()
             }
             return
@@ -426,7 +423,6 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         relay.adopt(body)
         lastHb = max(lastHb, t)   // a state is proof of life too
         sawHb(t)
-        pending.resendStale()
         updateLive()
     }
 

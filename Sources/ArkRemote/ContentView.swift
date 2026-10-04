@@ -55,8 +55,8 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var main: some View {
-        // Android: the update notice and the #pendbar line (web/pending.js) sit in each tab under its top bar
-        // (noticed() below → topNotices, Logic/AppUpdate.swift); iOS keeps the bare TabView
+        // the #pendbar line (web/pending.js:76-88), and on Android the update notice, sit in each tab under its top bar
+        // (noticed() below → topNotices, Logic/AppUpdate.swift)
         tabs
     }
 
@@ -95,7 +95,13 @@ struct ContentView: View {
             }
 
             NavigationStack {
-                PhoneTab().noticed()
+                PhoneTab()
+                    // the pull to refresh (view.js:1150-1153 pullRefresh → ping) is on PhonePage's List, so the
+                    // 「粘贴密钥串」 sheet does not inherit it
+                    // the one top bar of the web page (index.html:921, view.js:1551-1556 updateBar) is over 手机 as well:
+                    // ✕ / 「待保存 N 项」 / ✓ for the changes left on the other tabs
+                    .modifier(EWSaveBar(title: "游戏机遥控"))
+                    .noticed()
             }
             .tabItem { Label { Text("手机") } icon: { Image("tab-phone", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.phone)
@@ -106,18 +112,23 @@ struct ContentView: View {
         // skip-ui README "tabViewTransitions": NavDisplayTransitionOptions(.none).
         .tabViewTransitions { _ in .init(.none) }   // SkipUI.NavDisplayTransitionOptions; importing SkipUI here clashes with SwiftUI.View
         #endif
+        .overlay { DiagOverlay() }   // seg-frames-logger.js #diagmark / #diagline over every tab (Pages/Phone/PhoneDiagRows.swift)
         .overlay { ToastLayer() }   // view.js toast(): one layer over all five tabs (Pages/Shell/ToastLayer.swift)
+        // view.js ask(title, why, "好", false, { single: true }) for a note raised outside a page's own flow:
+        // Pending.resend's 「发不出去」 (pending.js:118). One alert at a time (Relay.showAlert).
+        .alert(Relay.shared.alert?.title ?? "", isPresented: Binding(get: { Relay.shared.alert != nil },
+                                                                     set: { if !$0 { Relay.shared.alert = nil } })) {
+            Button("好") {}
+        } message: {
+            Text(verbatim: Relay.shared.alert?.message ?? "")
+        }
     }
 }
 
 private extension View {
-    /// Android: the update notice and the pending-receipt line above the tab's content (topNotices); iOS: unchanged.
-    @ViewBuilder func noticed() -> some View {
-        #if os(Android)
+    /// The pending-receipt line (both platforms) and the update notice (Android) above the tab's content (topNotices).
+    func noticed() -> some View {
         topNotices()
-        #else
-        self
-        #endif
     }
 }
 

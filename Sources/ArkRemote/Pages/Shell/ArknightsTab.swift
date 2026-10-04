@@ -53,14 +53,18 @@ struct ArknightsTab: View {
         }, edited: edited)
             .modifier(EWSaveBar(title: "游戏机遥控"))   // view.js:1554: one title for every page, 「待保存 N 项」 while editing
             .task { await reload() }
-            // Pull to refresh, as the other tabs have: one read of the latest state.
-            .refreshable { await reload() }
+            // Pull to refresh asks the machine to report again (view.js:1150 → live.js:21 ping: {action:"refresh"}, up to 11 s),
+            // as the 状态 tab does (StatusTab.swift:23); the state it adopts redraws through onChange(of: snapAt).
+            .refreshable {
+                await Live.shared.ping()
+                refresh()
+            }
             // a change on the page goes into the pool (view.js note → edits[id])
             .onChange(of: shown) {
                 let next = changes(shown)
                 for f in ArknightsField.allCases {
                     guard let id = f.ref?.id else { continue }
-                    if EWEdits.shared.items[id] != next[id] { EWEdits.shared.items[id] = next[id] }
+                    if EWEdits.shared.items[id] != next[id] { ewPutEdit(id, next[id]) }   // a row changed again keeps its place
                 }
             }
             // the pool changed from elsewhere — ✕ on any tab, or ✓ sent them (view.js:2950 / 3003 then render()): redraw

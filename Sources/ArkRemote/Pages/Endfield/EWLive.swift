@@ -42,7 +42,8 @@ extension JSONValue {
     }
 }
 
-/// The value a row shows: unsaved → sent (and not refused) → reported (view.js:445 `eff`).
+/// The value a row shows: unsaved → sent → reported (view.js:505 `eff`). A sent value the machine answered differently
+/// (mismatchAt) is still what the control shows (applyPending, pending.js:37), with 「没生效 … 再发一次」 under it.
 @MainActor
 func ewShown(_ m: EWMaster, game: String, edits: [String: EWEdit]) -> EWMaster {
     var out = m
@@ -55,25 +56,52 @@ func ewShown(_ m: EWMaster, game: String, edits: [String: EWEdit]) -> EWMaster {
         }
     }
     let prefix = "master|\(game)|"
-    for (k, p) in Pending.shared.items where k.hasPrefix(prefix) && p.mismatchAt == nil { put(p.path, p.to) }
+    for (k, p) in Pending.shared.items where k.hasPrefix(prefix) { put(p.path, p.to) }
     for (k, e) in edits where k.hasPrefix(prefix) { put(e.path, e.to) }
     return out
 }
 
-/// The row's name for the review list, 「卡名 · 行名」 (view.js:1041 `${g.title} · ${labelOf(g, f)}`).
+/// The row's name for the review list, 「卡名 · 行名」 (view.js:1292 `${g.title} · ${labelOf(g, f)}`). Looked up in the
+/// card's whole field table (locate, view.js:1270: a tree card's g.fields is the whole tree, treeFields :1416), not only
+/// the rows the machine's values open: a child that shows after an unsaved parent change keeps its name.
 func ewLabel(_ groups: [EWGroupSpec], _ m: EWMaster, _ path: String) -> String {
     for g in groups {
-        if let r = ewRows(g, m, values: m.values).first(where: { $0.path == path && $0.kind != .box }) { return "\(g.title) · \(r.label)" }
+        let fields = g.tree != nil ? ewTreeFields(g, m) : g.fields
+        if let f = fields.first(where: { $0.path == path }) { return "\(g.title) · \(ewLabel(f, m))" }
     }
     return path
+}
+
+/// view.js base() (:1286): the value the control showed before this change — the sent value while it waits for its
+/// receipt (also when the machine answered differently), else the machine's. A change back to it drops the edit; taking
+/// the machine's alone made a change back after a save look like no change, and the sent value still landed (检查 09-30).
+/// Boxes: the machine's boxes with the sent ones over them (view.js:1374).
+@MainActor
+func ewBase(game: String, path: String, machine: EWValue?) -> EWValue? {
+    guard let p = Pending.shared.items["master|\(game)|\(path)"] else { return machine }
+    if case .boxes(let sent) = p.to.ewValue {
+        return .boxes((machine?.boxValues ?? [:]).merging(sent) { _, b in b })
+    }
+    return p.to.ewValue
+}
+
+/// Puts a change into 「待保存」 (nil drops it) where a JS object would: a key already there keeps its place in the
+/// change order (`edits[id] = …` on an existing key), a new or re-added one goes last (view.js note / delete edits[id]).
+@MainActor
+func ewPutEdit(_ key: String, _ edit: EWEdit?) {
+    guard var e = edit else { EWEdits.shared.items[key] = nil; return }
+    if let old = EWEdits.shared.items[key] { e.at = old.at }
+    EWEdits.shared.items[key] = e
 }
 
 /// The small lines under a row (pending.js:47-70, view.js:1268-1275): 「待保存」 while unsaved, then the receipt tag.
 struct EWRowTag: Equatable {
     var unsaved = false
     var text: String? = nil
-    /// 「没生效」: red, with 「再发一次」 for this Pending key.
+    /// 「再发一次」 for this Pending key: under 「没生效」 and under the 10 h 「没回执 · 已寄出 HH:MM」 line (pending.js:59).
     var resendKey: String? = nil
+    /// 「没生效」 (class "sent bad"): red. The 10 h line is class "sent": grey, though it has a button too.
+    var bad = false
     /// sent and waiting (`.posted`, view.js:60).
     var posted = false
 }
@@ -84,8 +112,8 @@ func ewTag(_ key: String, edits: [String: EWEdit]) -> EWRowTag? {
     let unsaved = edits[key] != nil
     var t = EWRowTag(unsaved: unsaved)
     switch Pending.shared.tag(for: key, editing: unsaved) {
-    case .sent(let text)?: t.text = text; t.posted = true
-    case .mismatch(let text, let k)?: t.text = text; t.resendKey = k; t.posted = true
+    case .sent(let text)?: t.text = text; t.resendKey = Pending.shared.staleResendKey(for: key); t.posted = true
+    case .mismatch(let text, let k)?: t.text = text; t.resendKey = k; t.posted = true; t.bad = true
     case .applied(let text)?: t.text = text
     case nil: break
     }
@@ -142,6 +170,19 @@ struct EWEdit: Equatable {
     var to: JSONValue
     /// relay switches: the command body (sw.on / sw.off).
     var body: JSONValue? = nil
+    /// When the change was made (ms): the review lists and sends in this order, as the web page's `edits` object keeps
+    /// its keys in insertion order (view.js doSave :1609, #go :2962).
+    var at: Double = nowMs()
+}
+
+/// One entry of the review sheet (view.js doSave :1612-1615): a shift skip in plain words (red, bold), or a change
+/// 「卡名 · 行名」 (bold) with old → new by option names.
+struct EWReviewLine: Identifiable {
+    var id: String
+    var title: String
+    var old: String? = nil
+    var new: String? = nil
+    var skip = false
 }
 
 @MainActor
@@ -177,21 +218,34 @@ enum EWSave {
         return a == "skip_today" || a == "unskip_today"
     }
 
-    /// The review text (view.js doSave, 1609-1616): the shift skips first, in plain words (skipLine, view.js:1608:
-    /// 「今天不跑：早班（09:00）」); then one change per line, 「卡名 · 行名」 with old → new by their option names (valLabel).
-    static func summary(_ edits: [String: EWEdit]) -> String {
-        let all = edits.values.sorted { $0.label < $1.label }
-        let skips = all.filter(isSkip).map { e -> String in
+    /// The changes in the order they were made (the web page's `Object.values(edits)` / `Object.entries(edits)`).
+    static func ordered(_ edits: [String: EWEdit]) -> [String] {
+        edits.keys.sorted { a, b in
+            let x = edits[a]?.at ?? 0
+            let y = edits[b]?.at ?? 0
+            return x != y ? x < y : a < b
+        }
+    }
+
+    /// The review list (view.js doSave, 1609-1616): the shift skips first, in plain words (skipLine, view.js:1608:
+    /// 「今天不跑：早班（09:00）」); then the other changes in the order they were made, 「卡名 · 行名」 with old → new by
+    /// their option names (valLabel).
+    static func review(_ edits: [String: EWEdit]) -> [EWReviewLine] {
+        let keys = ordered(edits)
+        let skips = keys.compactMap { k -> EWReviewLine? in
+            guard let e = edits[k], isSkip(e) else { return nil }
             let parts = e.label.components(separatedBy: " · ")
             let verb = e.body?["action"]?.string == "skip_today" ? "今天不跑" : "今天照常跑"
-            return "\(verb)：\(parts[0])\(parts.count > 1 ? "（\(parts[1])）" : "")"
+            return EWReviewLine(id: k, title: "\(verb)：\(parts[0])\(parts.count > 1 ? "（\(parts[1])）" : "")", skip: true)
         }
-        let rest = all.filter { !isSkip($0) }.map { e -> String in
+        let rest = keys.compactMap { k -> EWReviewLine? in
+            guard let e = edits[k], !isSkip(e) else { return nil }
             let p = PendingEdit(label: e.label, src: e.src, owner: e.owner, path: e.path, from: e.from, to: e.to, sentAt: 0,
                                 body: e.body)
-            return "\(e.label)\n\(Pending.shared.valueLabel(p, e.from)) → \(Pending.shared.valueLabel(p, e.to))"
+            return EWReviewLine(id: k, title: e.label, old: Pending.shared.valueLabel(p, e.from),
+                                new: Pending.shared.valueLabel(p, e.to))
         }
-        return (skips + rest).joined(separator: "\n\n")
+        return skips + rest
     }
 
     /// view.js #go: send each change; the sent ones leave 「待保存」, the failed ones stay. Returns the keys still unsent and,
@@ -203,7 +257,8 @@ enum EWSave {
         var failed: Error? = nil
         // view.js:2964-2973: everything that is not a switch or 周本 is a config field — set_master for a master copy
         // (终末地 / 鸣潮 / 方舟 基建 and 奖励), set_config for AUTO-MAS (方舟 「明日方舟」, src "mas").
-        for (k, e) in edits.sorted(by: { $0.key < $1.key }) where e.src == "master" || e.src == "mas" {
+        for k in ordered(edits) {
+            guard let e = edits[k], e.src == "master" || e.src == "mas" else { continue }
             let body: JSONValue = e.src == "master"
                 ? .object(["action": .string("set_master"), "confirmed": .bool(true), "game": .string(e.owner),
                            "path": .string(e.path), "value": e.to])
@@ -217,8 +272,8 @@ enum EWSave {
                                                   from: e.from, to: e.to, sentAt: nowSec()))
             } catch { failed = error; break }
         }
-        for (k, e) in edits.sorted(by: { $0.key < $1.key }) where e.src == "relay" {
-            guard let body = e.body else { continue }
+        for k in ordered(edits) {
+            guard let e = edits[k], e.src == "relay", let body = e.body else { continue }
             do {
                 try await relay.send(body)
                 sent += 1
@@ -226,14 +281,23 @@ enum EWSave {
                 Pending.shared.add(k, PendingEdit(label: e.label, src: "relay", to: e.to, sentAt: nowSec(), body: body))
             } catch { if failed == nil { failed = error } }
         }
-        // 周本 has one editable item, sent as weekly_boss; the web page records no receipt for it (view.js:2435-2440).
-        let wb = edits.filter { $0.value.src == "wb" }
-        if let last = wb.values.first {
+        // 周本 has one editable item, sent as weekly_boss (view.js:2984-2998). It gets the same receipt as the switches
+        // (user 09-29 13:39: after saving, the number box showed neither 「已寄出」 nor the new number): Pending keeps the
+        // body for 「再发一次」 and `to` for the check against snap.relay 周常.周本.第几个周本 (view.js:576).
+        let wb = ordered(edits).filter { edits[$0]?.src == "wb" }
+        if let lastKey = wb.last, let last = edits[lastKey] {
             do {
                 let n = Int(last.to.number ?? 1)   // view.js: Number(...) || 1
-                try await relay.send(.object(["action": .string("weekly_boss"), "index": .int(n == 0 ? 1 : n)]))
+                let idx = n == 0 ? 1 : n
+                let body: JSONValue = .object(["action": .string("weekly_boss"), "index": .int(idx)])
+                try await relay.send(body)
                 sent += wb.count
-                for k in wb.keys { left[k] = nil }
+                for k in wb {
+                    left[k] = nil
+                    guard let w = edits[k] else { continue }
+                    Pending.shared.add(k, PendingEdit(label: w.label, src: "wb", from: w.from, to: .int(idx), sentAt: nowSec(),
+                                                      body: body))
+                }
             } catch { if failed == nil { failed = error } }
         }
         // view.js:3005-3012: a failure is an alert 「有改动没发出去」 with one 「好」 (EWSaveBar shows it); a full success is the
@@ -268,7 +332,7 @@ struct EWSaveBar: ViewModifier {
     /// The 「有改动没发出去」 alert's message after a send that left changes unsent (view.js:3007 ask(..., { single: true })).
     @State var failNote: String? = nil
     /// view.js:1619 goArmedAt: while the review lists a 今天不跑 / 今天照常跑, a tap on 寄出 in its first 400 ms is not a
-    /// confirm (the 08:46 skips, 检查 09-30). 0 = armed at once.
+    /// confirm (the 08:46 skips, 检查 09-30); the sheet stays. 0 = armed at once.
     @State var armedAt: Double = 0
 
     private var edits: [String: EWEdit] { EWEdits.shared.items }
@@ -292,27 +356,44 @@ struct EWSaveBar: ViewModifier {
                     }
                 }
             }
-            // index.html:933-939; doSave (view.js:1617) names the button by how many orders go out: 「寄出 N 项」
-            .alert("确认这次修改", isPresented: $reviewing) {
-                Button("寄出 \(edits.count) 项") {
-                    // view.js:2955: a tap in the first 400 ms does nothing and the sheet stays; an alert closes on any button,
-                    // so it is shown again (on the next turn: setting it here is undone by the dismissal)
-                    if nowMs() < armedAt {
-                        Task { @MainActor in reviewing = true }
-                        return
+            // index.html:933-939 #confirm; doSave (view.js:1609-1617). A sheet, not an alert: an alert's message is plain
+            // text, and the web's list sets each name in bold, a shift skip in red (index.html:875-876 .diff.skip / .diff b),
+            // the old value grey and struck through, the new one green (index.html:877-878 .old / .new).
+            .sheet(isPresented: $reviewing) {
+                NavigationStack {
+                    List {
+                        ForEach(EWSave.review(edits)) { line in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(verbatim: line.title)
+                                    .bold()
+                                    .foregroundStyle(line.skip ? Color.red : Color.primary)
+                                if let old = line.old, let new = line.new {
+                                    HStack(spacing: 4) {
+                                        Text(verbatim: old).strikethrough().foregroundStyle(.secondary)
+                                        Text(verbatim: "→")
+                                        Text(verbatim: new).foregroundStyle(Color.green)
+                                    }
+                                    .font(.subheadline)
+                                }
+                            }
+                        }
                     }
-                    guard !saving else { return }   // 2026-09-01: three taps sent three times
-                    saving = true
-                    Task {
-                        let r = await EWSave.send(EWEdits.shared.items)
-                        EWEdits.shared.items = r.left   // view.js:3003: the sent ones go, the unsent stay on the page
-                        saving = false
-                        failNote = r.failure
+                    .navigationTitle("确认这次修改")
+                    #if !os(macOS)
+                    .navigationBarTitleDisplayMode(.inline)
+                    #endif
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("再想想") { reviewing = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            // doSave (view.js:1617) names the button by how many orders go out: 「寄出 N 项」
+                            Button("寄出 \(edits.count) 项") { go() }
+                                .disabled(saving)
+                        }
                     }
                 }
-                Button("再想想", role: .cancel) {}
-            } message: {
-                Text(verbatim: EWSave.summary(edits))
+                .presentationDetents([.medium, .large])
             }
             // view.js:3007: ask("有改动没发出去", …, "好", false, { single: true })
             .alert("有改动没发出去", isPresented: Binding(get: { failNote != nil }, set: { if !$0 { failNote = nil } })) {
@@ -321,6 +402,20 @@ struct EWSaveBar: ViewModifier {
                 Text(verbatim: failNote ?? "")
             }
             // the toast is one layer over all tabs now (Pages/Shell/ToastLayer.swift)
+    }
+
+    /// #go (view.js:2954-3016): a tap in the first 400 ms while a skip is listed does nothing and the sheet stays.
+    private func go() {
+        if nowMs() < armedAt { return }
+        guard !saving else { return }   // 2026-09-01: three taps sent three times
+        saving = true
+        reviewing = false
+        Task {
+            let r = await EWSave.send(EWEdits.shared.items)
+            EWEdits.shared.items = r.left   // view.js:3003: the sent ones go, the unsent stay on the page
+            saving = false
+            failNote = r.failure
+        }
     }
 
     /// Branches on `title` only (fixed per tab), so a first edit never swaps the page's view identity.

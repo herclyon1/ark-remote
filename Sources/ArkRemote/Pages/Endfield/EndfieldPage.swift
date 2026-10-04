@@ -60,13 +60,14 @@ struct EndfieldPage: View {
         if let c = ewCard(g, data, values: values) {
             let main = c.rows.filter { EndfieldSchema.firstLevel.contains($0.path) }
             let more = c.rows.contains { !EndfieldSchema.firstLevel.contains($0.path) }
+            let foot = ewFoot(main, card: c.rows)   // view.js:976-995: the hints sit under the card, 「行名：」 in front
             // view.js:801-803, 826: a card with no rows this time is not drawn (listSection: a bare `if` leaves an empty
             // grey section on Android, Pages/Shell/SkipFixes.swift).
             listSection("endfield-\(g.title)", if: !c.rows.isEmpty) {
                 Section {
                     ForEach(ewNoteRows(c.notes, "warn-\(g.title)") + main) { row in
                         EWRowView(row: row, values: $values, readonly: c.master.readonly, onChange: onChange,
-                                  tag: data.tags[row.path], onResend: onResend)
+                                  tag: data.tags[row.path], onResend: onResend, showHint: false)
                     }
                     // The rest of the card one level down, as Settings does (HIG-CHECKLIST.maa.md:55). A plain NavigationLink,
                     // not navigationDestination(isPresented:) - see the 库存 row above (7f89811).
@@ -80,6 +81,8 @@ struct EndfieldPage: View {
                     }
                 } header: {
                     Text(g.title)
+                } footer: {
+                    if !foot.isEmpty { Text(verbatim: foot) }
                 }
             }
         } else {
@@ -128,14 +131,17 @@ struct EndfieldMorePage: View {
         let data = self.data()
         let c = ewCard(group, data, values: values)
         let rest = c?.rows.filter { !EndfieldSchema.firstLevel.contains($0.path) } ?? []
+        let foot = ewFoot(rest, card: c?.rows ?? [])   // view.js:976-995, as on the 终末地 page
         List {
             // listSection: rows a mode opened can all go while this page is open (SkipFixes.swift)
             listSection("endfield-more-\(group.title)", if: !rest.isEmpty) {
                 Section {
                     ForEach(ewNoteRows(c?.notes ?? [], "more-warn-\(group.title)") + rest) { row in
                         EWRowView(row: row, values: $values, readonly: c?.master.readonly ?? [:], onChange: onChange,
-                                  tag: data.tags[row.path], onResend: onResend)
+                                  tag: data.tags[row.path], onResend: onResend, showHint: false)
                     }
+                } footer: {
+                    if !foot.isEmpty { Text(verbatim: foot) }
                 }
             }
         }

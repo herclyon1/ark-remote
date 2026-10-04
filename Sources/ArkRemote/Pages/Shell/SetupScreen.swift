@@ -6,7 +6,6 @@ import SwiftUI
 struct SetupScreen: View {
     @State var topic = ""
     @State var pin = ""
-    @State var missingShown = false
     @State var noLinkShown = false
 
     var body: some View {
@@ -27,7 +26,7 @@ struct SetupScreen: View {
                         let t = topic.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                         let p = pin.trimmingCharacters(in: .whitespacesAndNewlines)
                         if t.isEmpty || p.isEmpty {
-                            missingShown = true
+                            Relay.shared.showToast("两样都要填")   // view.js:126 toast, not an alert
                             return
                         }
                         // view.js: cfg = {topic, pin}; localStorage; boot(). ContentView switches to the tabs on the
@@ -51,15 +50,14 @@ struct SetupScreen: View {
             .topNotices()   // the update notice under the top bar (Logic/AppUpdate.swift); iOS never shows it
             #endif
             .navigationTitle("第一次使用")
-            .alert("两样都要填", isPresented: $missingShown) {
-                Button("好") {}
-            }
             .alert("剪贴板里没有免输入链接", isPresented: $noLinkShown) {
                 Button("好") {}
             }
             // a link already copied: take it on open, no tap needed
             .onAppear { _ = takeLink() }
         }
+        // view.js toast(): ContentView draws the toast layer over the tabs only, and this screen stands in for them
+        .overlay { ToastLayer() }
     }
 }
 

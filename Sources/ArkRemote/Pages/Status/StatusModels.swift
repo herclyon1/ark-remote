@@ -42,8 +42,21 @@ struct StatusStamina: Hashable, Identifiable {
 struct StatusReceipt: Hashable, Identifiable {
     var ok: Bool
     var text: String
-    var at: String            // "MM-DD HH:MM"
+    var at: String            // "MM-DD HH:MM", when the machine acted on it
+    var sent: String = ""     // "MM-DD HH:MM", the envelope's own time (modes.add_receipt sent=); older receipts have none
+    var action: String = ""   // the command's action (skip_today / unskip_today / estop …)
+    /// view.js rcNote: a skip receipt that no longer holds, drawn grey with this under it
+    /// (「已被 HH:MM 的「跳过早班」取代」 / 「机器现在：早班今天照常」).
+    var note: String? = nil
     var id: String { at + text }
+
+    /// view.js rcWhen(r, at): 「HH:MM 发出 · <at> 执行」 when the phone's send time differs from the run's; the send's date
+    /// shows only when it is another day. `at` is the time as the row shows it (full on the 状态 page, HH:MM in 回执).
+    func when(_ at: String) -> String {
+        if sent.isEmpty || sent == self.at { return at }
+        let s = String(sent.prefix(5)) == String(self.at.prefix(5)) ? String(sent.dropFirst(6)) : sent
+        return "\(s) 发出 · \(at) 执行"
+    }
 }
 
 /// 刷声骸 state from relay.刷声骸.
@@ -115,6 +128,9 @@ struct StatusData {
     var receipts: [StatusReceipt] = []
     var todayLast = ""                        // 今天.最近
     var todayFailed = 0                       // 今天.失败
+    /// view.js nowRow 「今天实际」: 「早班 照常 · 晚班 跳过」 while a skip is in play today, else nil.
+    var todayActual: String? = nil
+    var receiptsToday = ""                    // beijingToday "MM-DD": the 回执 page puts 今天实际 in that day's group
 
     static let ownerName = ["MAA": "明日方舟", "MaaEnd": "终末地", "OK-WW": "鸣潮"]
 }

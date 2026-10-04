@@ -43,11 +43,23 @@ struct StatusTab: View {
             }
             .alert(ask?.title ?? "", isPresented: Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })) {
                 if let a = ask {
-                    Button(a.ok, role: a.destructive ? .destructive : nil) {
-                        if a.isEstop { estopAt = nowSec() }
-                        Task { await StatusCommands.send(a) }
+                    if a.single {
+                        // view.js ask(…, { single: true }): 「正在跑别的」 / 「发不出去」, one button, nothing sent
+                        Button(a.ok, role: .cancel) {}
+                    } else {
+                        Button(a.ok, role: a.destructive ? .destructive : nil) {
+                            if a.isEstop { estopAt = nowSec() }
+                            Task {
+                                // view.js oneShot: a send that fails is the 「发不出去」 alert with the reason, not a toast
+                                if let why = await StatusCommands.send(a) {
+                                    // an instant failure (no mailbox set) must not land while this alert is still closing
+                                    try? await Task.sleep(nanoseconds: 400_000_000)
+                                    ask = StatusAsk.notice("发不出去", why)
+                                }
+                            }
+                        }
+                        Button("取消", role: .cancel) {}
                     }
-                    Button("取消", role: .cancel) {}
                 }
             } message: {
                 Text(ask?.message ?? "")

@@ -12,13 +12,22 @@ struct StatusAsk: Equatable {
     var pendingKey: String? = nil
     var pendingEdit: PendingEdit? = nil
     var isEstop = false
+    /// view.js ask(…, { single: true }): one 「好」 button, nothing is sent.
+    var single = false
+
+    /// A one-button notice in the same alert (view.js ask(title, text, "好", false, { single: true })).
+    static func notice(_ title: String, _ message: String) -> StatusAsk {
+        StatusAsk(title: title, message: message, ok: "好", body: .null, okText: "", single: true)
+    }
 }
 
 /// The 状态 tab's buttons, with the request bodies of maa-automation/web/view.js wire() (959–1020).
 @MainActor
 enum StatusCommands {
     /// view.js oneShot(body, okText), plus Pending.add for switches (the save flow's `pending[id] = {...}`).
-    static func send(_ a: StatusAsk) async {
+    /// Success is the web's short toast as is; a failure comes back as the reason, which the caller shows in the
+    /// 「发不出去」 one-button alert (view.js:1570 `ask("发不出去", e.message, "好", false, { single: true })`).
+    static func send(_ a: StatusAsk) async -> String? {
         let relay = Relay.shared
         do {
             try await relay.send(a.body)
@@ -26,9 +35,10 @@ enum StatusCommands {
                 e.sentAt = nowSec()
                 Pending.shared.add(k, e)
             }
-            relay.showToast(a.okText + "（机器开着就是马上，关着就是下次开机）")
+            relay.showToast(a.okText)
+            return nil
         } catch {
-            relay.showToast("发不出去：" + Live.why(error), ms: 6000)
+            return Live.why(error)
         }
     }
 
@@ -38,16 +48,16 @@ enum StatusCommands {
         let queue = data.currentQueue.isEmpty ? "早班" : data.currentQueue   // view.js theQueue(): curQueue || "早班"
         var a = StatusActions()
         a.runNow = {
-            // sending while a run is on makes AUTO-MAS and the manual run fight (view.js #runnow)
+            // sending while a run is on makes AUTO-MAS and the manual run fight (view.js:1209: a one-button alert)
             if !data.busy.isEmpty {
-                relay.showToast("现在正在跑 \(data.busy.joined(separator: "、"))，跑完再派。硬要派会和它打架。", ms: 5000)
+                ask.wrappedValue = StatusAsk.notice("正在跑别的", "现在正在跑 \(data.busy.joined(separator: "、"))，跑完再派。硬要派会和它打架。")
                 return
             }
             ask.wrappedValue = StatusAsk(
                 title: "现在跑一趟？", message: "让「\(queue)」现在多跑一趟。会真的花掉理智／波片；机器关着就变成下次开机跑。",
                 ok: "跑一趟",
                 body: .object(["action": .string("run_now"), "confirmed": .bool(true), "queue": .string(queue)]),
-                okText: "已让「\(queue)」现在开跑。机器关着时这条会等到下次开机才执行，那时候它本来也要跑，所以等于没多跑一趟")
+                okText: "已派：现在跑一趟")   // view.js:1215: one line, the confirm before it already says what happens when off
         }
         a.refresh = { Task { await Live.shared.ping() } }
         a.stopAll = {
@@ -55,7 +65,7 @@ enum StatusCommands {
                 title: "停止一切？", message: "停掉现在在跑的：队列、脚本和游戏。不动排班、不动任何设置，下一趟照常。回执会告诉你停干净没有。",
                 ok: "停止", destructive: true,
                 body: .object(["action": .string("estop"), "confirmed": .bool(true)]),
-                okText: "已下令停止一切，机器上几秒内生效", isEstop: true)
+                okText: "已下令停止一切", isEstop: true)   // view.js:1263
         }
         a.selectQueue = { storedQueue.wrappedValue = $0 }
         a.setRunsToday = { name, on in
@@ -75,7 +85,7 @@ enum StatusCommands {
                 title: "开始刷？", message: "刷「\(nm)」到机器时间 \(t) 为止？期间脚本会一直在打，别的任务不跑。", ok: "开始刷",
                 body: .object(["action": .string("echo_farm"), "confirmed": .bool(true), "boss": .int(boss),
                                "until": .string(t), "name": .string(nm)]),
-                okText: "已让它刷「\(nm)」到 \(t)。到点中继会自己收工并把配置还原")
+                okText: "已派：刷到 \(t)")   // view.js:1230
         }
         a.changeEchoFarmUntil = { until in
             guard let v = statusTimeHHMM(until) else {
@@ -89,7 +99,7 @@ enum StatusCommands {
         a.stopEchoFarm = {
             ask.wrappedValue = StatusAsk(
                 title: "现在收工？", message: "会关掉脚本和游戏，配置还原成你原来那份。", ok: "收工", destructive: true,
-                body: .object(["action": .string("echo_farm_stop")]), okText: "已收工，脚本和游戏都关了，配置还原")
+                body: .object(["action": .string("echo_farm_stop")]), okText: "已收工")   // view.js:1246
         }
         a.setSkipShutdown = { on in relaySwitch(edits, StatusSwitchID.skipShutdown, on: on) }
         a.setDebugMode = { on in relaySwitch(edits, StatusSwitchID.debugMode, on: on) }
@@ -103,14 +113,19 @@ enum StatusCommands {
         note(edits, id, label: sw.label, on: on, body: on ? sw.on : sw.off)
     }
 
-    /// view.js [data-relay] onchange: a flip back to the machine's value drops the edit, otherwise it waits in
-    /// 「待保存」 until the tab's 保存 sends all of them after one review (EWSaveBar, as on the 终末地 / 鸣潮 tabs).
+    /// view.js [data-relay] onchange: a flip back to the value the switch showed before drops the edit, otherwise it
+    /// waits in 「待保存」 until the tab's 保存 sends all of them after one review (EWSaveBar, as on the 终末地 / 鸣潮 tabs).
+    /// The base is the sent-but-unreceipted value while it is on its way, else the machine's (view.js:1254 / 1286 base()):
+    /// with the machine's alone a flip back after a save looked like no change and the sent value still landed.
     static func note(_ edits: Binding<[String: EWEdit]>, _ id: String, label: String, on: Bool, body: JSONValue) {
-        let from = Pending.shared.liveVals[id]?.truthy ?? false
+        let from = (Pending.shared.items[id]?.to ?? Pending.shared.liveVals[id])?.truthy ?? false
         if on == from {
             edits.wrappedValue[id] = nil
         } else {
-            edits.wrappedValue[id] = EWEdit(label: label, src: "relay", from: .bool(from), to: .bool(on), body: body)
+            var e = EWEdit(label: label, src: "relay", from: .bool(from), to: .bool(on), body: body)
+            // a row changed again keeps its place in the review order, as a JS object key does (EWLive.swift ewPutEdit)
+            if let old = edits.wrappedValue[id] { e.at = old.at }
+            edits.wrappedValue[id] = e
         }
     }
 

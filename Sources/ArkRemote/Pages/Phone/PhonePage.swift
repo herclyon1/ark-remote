@@ -35,6 +35,8 @@ struct PhonePage: View {
     @State var clearShown = false
     @State var manualLink = ""
     @State var manualShown = false
+    @State var pasteErr = ""
+    @State var pasteErrShown = false
 
     private var hasTokens: Bool { !data.staminaStatus.isEmpty }
 
@@ -75,7 +77,9 @@ struct PhonePage: View {
                 Text("免输入链接会把这里存着的密钥一起带上，换手机开一次那条链接就全有。森空岛的会话由机器交过来；库街区的：点「粘贴密钥串」，粘贴网页「手机」页复制的免输入链接、电脑上 scripts/mac/phone-link.py 打出来的链接，或 ~/.config/ark/.env 里 KUROBBS_TOKEN 和 KUROBBS_DID 那两行")
             }
         }
-        .navigationTitle("游戏机遥控")   // every page of the web console is titled so (view.js:1283)
+        // view.js:1150-1153 pullRefresh: a pull on any tab but the pushed 库存 page is ping(), the 手机 tab too
+        .refreshable { await Live.shared.ping() }
+        // the title (「游戏机遥控」, or 「待保存 N 项」 while changes wait, view.js:1283 / 1554) is set by ContentView's EWSaveBar
         // view.js #tokpaste: prompt("把 KUROBBS_TOKEN=… 和 KUROBBS_DID=… 两行粘贴到这里：") — a multi-line editor here,
         // so the two lines stay two lines (a one-line field would join them)
         .sheet(isPresented: $pasteShown) {
@@ -99,8 +103,14 @@ struct PhonePage: View {
                             let s = pasteText
                             pasteShown = false
                             guard !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                            // view.js: toast("没存：" + e.message, 5000)
-                            do { try actions.pasteTokens(s) } catch { Relay.shared.showToast("没存：" + errorMessage(error), ms: 5000) }
+                            // view.js:1304: ask("没存上", e.message, "好") — a dialog, once the paste sheet is down
+                            do { try actions.pasteTokens(s) } catch {
+                                pasteErr = errorMessage(error)
+                                Task { @MainActor in
+                                    try? await Task.sleep(nanoseconds: 600_000_000)
+                                    pasteErrShown = true
+                                }
+                            }
                         }
                     }
                 }
@@ -112,6 +122,11 @@ struct PhonePage: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("清除这台手机里的游戏密钥？体力数字会消失。")
+        }
+        .alert("没存上", isPresented: $pasteErrShown) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(pasteErr)
         }
         .alert("长按复制这条链接：", isPresented: $manualShown) {
             TextField("", text: $manualLink)

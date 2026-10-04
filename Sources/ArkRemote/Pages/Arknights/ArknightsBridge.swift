@@ -11,9 +11,12 @@ struct ArknightsFieldRef {
     var id: String { "\(section.src)|\(owner)|\(field.path)" }
 
     /// view.js valueNow(g, f) (view.js:1032-1034): master fields by path, mas fields by their Chinese key.
+    /// A master field missing from `values` falls back to the master's read-only values (view.js:517
+    /// `f.path in cur ? cur[f.path] : ro[f.path]`); a null in `values` stays null, as `in` is true for it.
     func rawValue(in snap: JSONValue?) -> JSONValue? {
         if section.src == "master" {
-            return snap?["master"]?[owner]?["values"]?[field.path]
+            let m = snap?["master"]?[owner]
+            return m?["values"]?[field.path] ?? m?["readonly"]?[field.path]
         }
         return snap?["config"]?[section.sec ?? ""]?[field.key ?? ""]
     }
@@ -149,6 +152,9 @@ struct ArknightsBridge {
     let configStale: Bool
     /// The picked shift (view.js curQueue, stored as "ark-remote-cfg-queue"; chosen on the 状态 tab).
     let queue: String
+    /// The yellow notes the web puts at the top of each master section from this read of snap.master.MAA (view.js:488-493):
+    /// keys left untranslated, and tasks the script's definition file no longer has.
+    let masterNotes: [String]
 
     init(snap given: JSONValue?, queue: String = "", lastGoodMaster: JSONValue? = nil, lastGoodConfig: JSONValue? = nil) {
         self.queue = queue
@@ -167,11 +173,25 @@ struct ArknightsBridge {
         let m = live?["master"]?["MAA"]
         let unreadable = (m?["values"]?.object ?? [:]).isEmpty && (m?["readonly"]?.object ?? [:]).isEmpty
         masterUnreadable = unreadable
+        // view.js:488-493: read from this read's master (`M`), not the last good copy.
+        var notes: [String] = []
+        let untranslated = m?["untranslated"]?.array ?? []
+        if !untranslated.isEmpty {
+            notes.append("有 \(untranslated.count) 项的名字没翻译出来（脚本这一版换了定义文件的位置），显示的是原始键名")
+        }
+        let orphans = (m?["orphans"]?.array ?? []).map { $0.jsString }
+        if !orphans.isEmpty {
+            notes.append("这一版脚本的定义文件里没有这些任务，配置里却还留着：\(orphans.joined(separator: "、"))——这些设置改了不会有效果")
+        }
+        masterNotes = notes
         // view.js:416-417: no earlier copy with values → the warning instead of the rows.
         if unreadable, let last = lastGoodMaster, last["values"]?.object?.isEmpty == false,
            case .object(var top)? = live {
             var all = top["master"]?.object ?? [:]
-            all["MAA"] = last
+            // view.js:483 takes only `last.values`; the read-only fallback `ro` stays this read's (empty here, view.js:471)
+            var kept = last.object ?? [:]
+            kept["readonly"] = nil
+            all["MAA"] = .object(kept)
             top["master"] = .object(all)
             snap = .object(top)
             masterStale = true
@@ -254,6 +274,8 @@ struct ArknightsBridge {
         data.configStale = configStale
         data.masterUnreadable = masterUnreadable && !masterStale
         data.masterStale = masterStale
+        // view.js:476-481: when the warning replaces the section, the notes are not drawn either.
+        data.masterNotes = data.masterUnreadable ? [] : masterNotes
         data.usesOfDronesOptions = droneOptions
         for f in ArknightsField.allCases {
             guard let ref = f.ref else { continue }
@@ -264,9 +286,13 @@ struct ArknightsBridge {
             f.apply((withPending ? Pending.shared.shownValue(for: ref.id) : nil) ?? raw, to: &data)
             // pending.js:47-67: 「已寄出 HH:MM · …」 / 「没生效 · …」 / 「已应用 HH:MM」 under the row.
             if withPending, let tag = Pending.shared.tag(for: ref.id, editing: editing.contains(ref.id)) {
+                // pending.js:63: a sent row (sent or refused) sits on the green ground; 「已应用」 does not.
                 switch tag {
-                case .sent(let text): data.tags[f.path] = ArknightsRowTag(text: text)
-                case .mismatch(let text, let key): data.tags[f.path] = ArknightsRowTag(text: text, resendKey: key)
+                case .sent(let text):
+                    // pending.js:59: past 10 h 「没回执 · 已寄出 HH:MM」 gets 「再发一次」 but stays grey (class "sent", not "sent bad")
+                    data.tags[f.path] = ArknightsRowTag(text: text, resendKey: Pending.shared.staleResendKey(for: ref.id), posted: true)
+                case .mismatch(let text, let key):
+                    data.tags[f.path] = ArknightsRowTag(text: text, resendKey: key, bad: true, posted: true)
                 case .applied(let text): data.tags[f.path] = ArknightsRowTag(text: text)
                 }
             }

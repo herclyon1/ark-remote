@@ -20,7 +20,8 @@ import Observation
 import SkipFuse   // @Observable types only drive the Android UI with SkipFuse imported
 
 /// One sent change waiting for the machine's receipt (pending.js `pending[id]`).
-/// src: "mas" (set_config script/path), "master" (set_master game/path) or "relay" (the exact `body` sent).
+/// src: "mas" (set_config script/path), "master" (set_master game/path), "relay" (the exact `body` sent) or "wb"
+/// (鸣潮 周本 「打第几个」: the weekly_boss `body` as sent, view.js:2992-2997).
 struct PendingEdit: Codable, Sendable, Equatable {
     var label: String
     var src: String
@@ -34,7 +35,7 @@ struct PendingEdit: Codable, Sendable, Equatable {
     var resentAt: Int? = nil
     /// The `at` of the state that still reported another value.
     var mismatchAt: Int? = nil
-    /// relay switches: the command body as sent, resent as is.
+    /// relay switches and 周本: the command body as sent, resent as is.
     var body: JSONValue? = nil
 }
 
@@ -46,7 +47,8 @@ struct AckedEdit: Codable, Sendable, Equatable {
 
 /// The small line under a control (where Messages puts 「Delivered」).
 enum PendingTag: Sendable, Equatable {
-    /// 「已寄出 HH:MM · 机器开机后生效」 (class "sent").
+    /// 「已寄出 HH:MM · 机器开机后生效」, or past 10 h 「没回执 · 已寄出 HH:MM」 (class "sent"; that one also gets
+    /// 「再发一次」: `Pending.staleResendKey(for:)`).
     case sent(text: String)
     /// 「没生效 · 机器 HH:MM 报的还是「…」」 plus a 「再发一次」 button for `key` (class "sent bad").
     case mismatch(text: String, key: String)
@@ -148,14 +150,27 @@ struct PendingBar: Sendable, Equatable {
             if let mm = p.mismatchAt {
                 return .mismatch(text: "没生效 · 机器 \(Self.hhmm(mm)) 报的还是「\(valueLabel(p, liveVals[key]))」", key: key)
             }
-            let old = (nowSec() - p.sentAt) > 10 * 3600
+            let at = p.resentAt ?? p.sentAt
+            // pending.js:58-59: past 10 h the mailbox (12 h) may have dropped it; resent only by a tap, never automatically
+            if Self.isStale(p) { return .sent(text: "没回执 · 已寄出 \(Self.hhmm(at))") }
             let fresh = relay.snapAt.map { Double(nowSec() - $0) < Live.freshMs / 1000 } ?? false
-            return .sent(text: "已寄出 \(Self.hhmm(p.resentAt ?? p.sentAt)) · \(fresh ? "几秒内回执" : "机器开机后生效")"
-                         + (old ? " · 超过 10 小时，机器开机时会自动重发" : ""))
+            return .sent(text: "已寄出 \(Self.hhmm(at)) · \(fresh ? "几秒内回执" : "机器开机后生效")")
         }
         if editing { return nil }
         guard let a = acked[key], nowSec() - a.at <= 24 * 3600 else { return nil }
         return .applied(text: "已应用 \(Self.hhmm(a.at))")
+    }
+
+    /// pending.js:58: no receipt for more than 10 h since the last send (the resend when there is one).
+    nonisolated static func isStale(_ p: PendingEdit) -> Bool {
+        p.mismatchAt == nil && nowSec() - (p.resentAt ?? p.sentAt) > 10 * 3600
+    }
+
+    /// The key for the 「再发一次」 button under a 「没回执 · 已寄出 HH:MM」 line (pending.js:59 `data-again`), or nil.
+    /// That line is a `.sent` tag (grey, class "sent", not "sent bad"), so the page asks for the button here.
+    func staleResendKey(for key: String) -> String? {
+        guard let p = items[key], Self.isStale(p) else { return nil }
+        return key
     }
 
     /// Drops 「已应用」 marks older than a day (applyPending does it while painting).
@@ -197,7 +212,9 @@ struct PendingBar: Sendable, Equatable {
                 changed = true
                 acked[key] = AckedEdit(at: at, label: p.label)
                 saveAcked()
-                relay.showToast("「\(p.label)」已生效：\(valueLabel(p, p.to))", ms: 5000)
+                // pending.js:101: one line ≤ 13 at 28 pt (the native HUD never wraps); the value is on the row
+                let t = "「\(p.label)」已生效"
+                relay.showToast(t.count <= 13 ? t : "改动已生效")
             } else if p.mismatchAt != at {
                 items[key]?.mismatchAt = at
                 changed = true
@@ -210,7 +227,7 @@ struct PendingBar: Sendable, Equatable {
     func resend(_ key: String) async {
         guard let p = items[key] else { return }
         let body: JSONValue
-        if p.src == "relay" {
+        if p.src == "relay" || p.src == "wb" {
             body = p.body ?? .null
         } else if p.src == "master" {
             body = .object(["action": .string("set_master"), "confirmed": .bool(true), "game": .string(p.owner),
@@ -224,22 +241,17 @@ struct PendingBar: Sendable, Equatable {
             items[key]?.resentAt = nowSec()
             items[key]?.mismatchAt = nil
             savePending()
-            relay.showToast("「\(p.label)」又发了一次", ms: 4000)
+            relay.showToast("又发了一次")   // pending.js:117
         } catch {
-            relay.showToast("发不出去：" + Live.why(error), ms: 6000)
+            // pending.js:118: a reason is a sentence: alert, not the one-line HUD
+            relay.showAlert("发不出去", Live.why(error))
         }
     }
 
-    /// The mailbox keeps messages 12 hours. When the machine comes up while the app is open, anything sent
-    /// more than 10 hours ago without a receipt is sent again (setting the same value twice is harmless).
-    func resendStale() {
-        for (key, p) in items {
-            let at = p.resentAt ?? p.sentAt
-            if p.mismatchAt == nil && nowSec() - at > 10 * 3600 {
-                Task { await self.resend(key) }
-            }
-        }
-    }
+    // No automatic resend (web 188a5339, 09-30, pending.js:121-124): the old resendStale re-sent every change without
+    // a receipt after 10 h on each heartbeat / state, with nobody tapping; a skip / unskip / weekly-boss order is not
+    // harmless twice, and a config value sent again can undo a newer change made elsewhere. Such a change now shows
+    // 「没回执 · 已寄出 HH:MM」 with 「再发一次」 (tag / staleResendKey) and goes again only when tapped (resend).
 
     // MARK: value names (view.js valLabel / fmt)
 
@@ -253,7 +265,15 @@ struct PendingBar: Sendable, Equatable {
     /// view.js valLabel(e, v): internal value → what a person reads, in the same order the dropdown is named:
     /// the machine's option list → valueZh → as is (2026-09-01: the confirm box showed a raw UUID).
     func valueLabel(_ e: PendingEdit, _ v: JSONValue?) -> String {
+        // view.js:1584-1587: a queue row's switch is 「今天照常 / 今天跳过」, not on / off
+        if e.src == "relay", let a = e.body?["action"]?.string, a == "skip_today" || a == "unskip_today" {
+            return (v?.truthy ?? false) ? "今天照常" : "今天跳过"
+        }
         if e.src == "relay" { return (v?.truthy ?? false) ? "开" : "关" }
+        if e.src == "wb" {   // String(v ?? "")
+            guard let v, !v.isNull else { return "" }
+            return v.jsString
+        }
         let snap = relay.snap
         let live: [(String, JSONValue)]
         if let fixed = choices[e.path] {

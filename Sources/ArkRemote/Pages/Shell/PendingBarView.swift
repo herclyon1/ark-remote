@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The #pendbar line above the tabs (maa-automation web/pending.js:72-84): 「N 项改动已寄出 · 机器开机后生效」 or
+/// The #pendbar line above each tab's content, on iOS and Android (maa-automation web/pending.js:76-88; placed by
+/// TopNotices, Logic/AppUpdate.swift): 「N 项改动已寄出 · 机器开机后生效」 or
 /// 「N 项改动机器没接受（见红字）」 with a red xmark, and 「不等了，清掉」 that drops every waiting item.
 /// Grey footnote, no card (index.html #pendbar: color --dim, footnote size, transparent background).
 struct PendingBarView: View {
@@ -23,7 +24,7 @@ struct PendingBarView: View {
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
             Button("不等了，清掉") { Pending.shared.clearAll() }
-                .font(.footnote)
+                .font(.subheadline)   // index.html:774 #pendbar button: --ios-subheadline-size (15), the native Small button
                 .buttonStyle(.bordered)
         }
         .padding(.horizontal, 16)

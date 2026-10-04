@@ -8,12 +8,15 @@ import SwiftUI
 /// The 鸣潮 card, copied from schema.js:220-239 (labels and hints verbatim).
 enum WuwaSchema {
     /// 无音区: OK-WW stores only the index into the game's F2 list; each index drops two echo sets (schema.js:54).
+    /// 3.7 list (2026-09-30), row for row as relay/ark_relay/wuwa_tacet.py TACET and schema.js:60-68.
     static let tacet: [(names: [String], value: Int)] = [
-        (["羽落空尘之歌", "冥途夜行之灯"], 1),
-        (["羽落空尘之歌", "清邪荡煞之心"], 2),
-        (["雪落无声之愿", "剪心辑梦之影"], 3),
-        (["听唤语义之愿", "长路启航之星"], 4),
-        (["长路启航之星", "斑驳粉饰之沫"], 5),
+        (["衔梦照世之心", "茜染怀想之花"], 1),
+        (["衔梦照世之心", "镜影流电之瞬"], 2),
+        (["羽落空尘之歌", "冥途夜行之灯"], 3),
+        (["羽落空尘之歌", "清邪荡煞之心"], 4),
+        (["雪落无声之愿", "剪心辑梦之影"], 5),
+        (["听唤语义之愿", "长路启航之星"], 6),
+        (["长路启航之星", "斑驳粉饰之沫"], 7),
     ]
 
     /// Echo set icons in Module.xcassets, exported verbatim from schema.js SET_ICONS (76×76 PNGs from the Kuro wiki, oldest first).
@@ -27,6 +30,9 @@ enum WuwaSchema {
         "羽落空尘之歌": "echo-set-6",
         "清邪荡煞之心": "echo-set-7",
         "冥途夜行之灯": "echo-set-8",
+        "衔梦照世之心": "echo-set-9",
+        "镜影流电之瞬": "echo-set-10",
+        "茜染怀想之花": "echo-set-11",
     ]
 
     /// 凝素领域: the 梦州 row only, fixed order 迅刀 / 音感仪 / 长刃 / 臂铠 / 佩枪 (schema.js:75).
@@ -121,45 +127,59 @@ struct WuwaPage: View {
     @ViewBuilder
     private var gameCard: some View {
         let (m, notes) = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster)
+        let rows = gameRows(m, notes)
+        // view.js:976-995: the hints sit under the card, 「行名：」 in front; the 无音区结算截图 switch is one of its rows.
+        // Only when the 母本 is readable: otherwise the card is the one warning line.
+        let cardRows = rows.filter { $0.kind != .warning }
+        let foot = m == nil ? "" : ewFoot(cardRows.map { EWFootItem(label: $0.label, hint: $0.hint) }
+            + [EWFootItem(label: "无音区结算截图", hint: "开着：日报后面带上无音区打完的两张结算图")], rows: cardRows.count + 1)
         Section {
             if let m {
-                let rows = notes.enumerated().map { EWRow(id: "warn-\(WuwaSchema.group.title)-\($0.offset)", kind: .warning, path: "", label: $0.element) }
-                    + ewRows(WuwaSchema.group, m, values: values, hidden: hidden(m))
                 ForEach(rows) { row in
                     EWRowView(row: row, values: $values, readonly: m.readonly, onChange: onChange,
-                              tag: data.tags[row.path], onResend: onResend)
+                              tag: data.tags[row.path], onResend: onResend, showHint: false)
+                }
+                // The relay's own switch for OK-WW (schema.js RELAY_SWITCHES tab "OK-WW"); not part of any config file.
+                tagged("relay|tacet_shots") {
+                    Toggle(isOn: Binding(get: { tacetShots }, set: { tacetShots = $0; onRelaySwitch("relay|tacet_shots", $0) })) {
+                        EWRowTitle(label: "无音区结算截图", hint: nil)
+                    }
                 }
             } else {
+                // view.js:478-480: no 母本 and no earlier copy → the card is only this line; the switch is not drawn either
                 warningLabel("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改")
                     .foregroundStyle(.orange)
             }
-            // The relay's own switch for OK-WW (schema.js RELAY_SWITCHES tab "OK-WW"); not part of any config file.
-            tagged("relay|tacet_shots") {
-                Toggle(isOn: Binding(get: { tacetShots }, set: { tacetShots = $0; onRelaySwitch("relay|tacet_shots", $0) })) {
-                    EWRowTitle(label: "无音区结算截图", hint: "开着：日报后面带上无音区打完的两张结算图")
-                }
-            }
         } header: {
             Text(WuwaSchema.group.title)
+        } footer: {
+            if !foot.isEmpty { Text(verbatim: foot) }
         }
+    }
+
+    /// The 母本's rows: the notes about an earlier copy first, then the fields the 体力 choice opens.
+    private func gameRows(_ master: EWMaster?, _ notes: [String]) -> [EWRow] {
+        guard let m = master else { return [] }
+        return notes.enumerated().map { EWRow(id: "warn-\(WuwaSchema.group.title)-\($0.offset)", kind: .warning, path: "", label: $0.element) }
+            + ewRows(WuwaSchema.group, m, values: values, hidden: hidden(m))
     }
 
     /// Weekly items: done this week stops them, Monday 04:00 brings them back (view.js:510-535).
     private var weeklyCard: some View {
         Section {
             HStack {
-                EWRowTitle(label: "周常乐园", hint: "不花体力。做完就停到下周一")
+                EWRowTitle(label: "周常乐园", hint: nil)
                 Spacer()
                 Text(data.parkDone ? "本周已完成" : "本周还没做").foregroundStyle(.secondary)
             }
             HStack {
-                EWRowTitle(label: "周本 战歌重奏", hint: "花体力。一周领 3 次奖励、每次 60 结晶波片、固定打 90 级，领满就停到下周一")
+                EWRowTitle(label: "周本 战歌重奏", hint: nil)
                 Spacer()
                 Text(data.weeklyBossDone ? "本周已领满" : "本周还没领满").foregroundStyle(.secondary)
             }
             tagged("wb|OK-WW|第几个周本") {
             HStack {
-                EWRowTitle(label: "周本打第几个", hint: "游戏里按 F2 打开周本列表，从上往下数，第一个填 1。新 Boss 上线顺序会变，换本时记得来改")
+                EWRowTitle(label: "周本打第几个", hint: nil)
                 Spacer()
                 TextField("1", text: Binding(get: { bossIndex }, set: { v in
                     bossIndex = v
@@ -175,6 +195,12 @@ struct WuwaPage: View {
             }
         } header: {
             Text("鸣潮 · 周常")
+        } footer: {
+            // view.js:976-995; the row name is taken without its <small> (「周本」, not 「周本 战歌重奏」)
+            Text(verbatim: ewFoot([EWFootItem(label: "周常乐园", hint: "不花体力。做完就停到下周一"),
+                                   EWFootItem(label: "周本", hint: "花体力。一周领 3 次奖励、每次 60 结晶波片、固定打 90 级，领满就停到下周一"),
+                                   EWFootItem(label: "周本打第几个", hint: "游戏里按 F2 打开周本列表，从上往下数，第一个填 1。新 Boss 上线顺序会变，换本时记得来改")],
+                                  rows: 3))
         }
     }
 

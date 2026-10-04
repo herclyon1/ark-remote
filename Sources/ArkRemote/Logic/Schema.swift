@@ -32,12 +32,16 @@ struct TacetChoice: Sendable, Equatable {
 
 /// 无音区 index = position in the F2 「素材获取 → 无音清剿」 list, checked set by set in game
 /// (docs/WUWA-TACET-INDEX.md). Every tacet field drops exactly two sets.
+/// Wuthering Waves 3.7 (2026-09-30) put 沉心域 / 烬心域 at the top and moved every older index down by 2;
+/// copied row for row from relay/ark_relay/wuwa_tacet.py TACET (web schema.js TACET, 05499e9e).
 let tacet: [TacetChoice] = [
-    TacetChoice(names: ["羽落空尘之歌", "冥途夜行之灯"], value: 1),
-    TacetChoice(names: ["羽落空尘之歌", "清邪荡煞之心"], value: 2),
-    TacetChoice(names: ["雪落无声之愿", "剪心辑梦之影"], value: 3),
-    TacetChoice(names: ["听唤语义之愿", "长路启航之星"], value: 4),
-    TacetChoice(names: ["长路启航之星", "斑驳粉饰之沫"], value: 5),
+    TacetChoice(names: ["衔梦照世之心", "茜染怀想之花"], value: 1),
+    TacetChoice(names: ["衔梦照世之心", "镜影流电之瞬"], value: 2),
+    TacetChoice(names: ["羽落空尘之歌", "冥途夜行之灯"], value: 3),
+    TacetChoice(names: ["羽落空尘之歌", "清邪荡煞之心"], value: 4),
+    TacetChoice(names: ["雪落无声之愿", "剪心辑梦之影"], value: 5),
+    TacetChoice(names: ["听唤语义之愿", "长路启航之星"], value: 6),
+    TacetChoice(names: ["长路启航之星", "斑驳粉饰之沫"], value: 7),
 ]
 
 /// 讨伐强敌 list position → boss name; source relay/ark_relay/wuwa_boss.py, pinned by

@@ -81,6 +81,66 @@ func listSection<Value, Content: View>(_ id: String, ifLet value: Value?, @ViewB
     }
 }
 
+/// A list row that opens its page as a sheet from the bottom instead of pushing it: the web page's 勾选页 (#picker,
+/// index.html:957-963; view.js:1458 openPicker, sheet.js) is a page sheet over the tab, not a pushed page. Used as
+/// `NavigationLink` is: `SheetLink { EWChoiceList(…) } label: { … }`.
+///
+/// The sheet has its own navigation bar as #picker's .pnav: 「返回」 (chevron, view.js:1484 `.pback` = close, nothing
+/// applied) on the left, the page's title small in the middle, and the page's own ✓ (完成, `.pdone`) on the right. A
+/// swipe down closes it the same way (sheet.js drag-to-dismiss). The row keeps the disclosure chevron the pushed row
+/// had (the web value row reads 「已选 N/M ›」).
+struct SheetLink<Destination: View, Label: View>: View {
+    let destination: () -> Destination
+    let label: () -> Label
+    @State var shown = false
+
+    init(@ViewBuilder destination: @escaping () -> Destination, @ViewBuilder label: @escaping () -> Label) {
+        self.destination = destination
+        self.label = label
+    }
+
+    var body: some View {
+        Button {
+            shown = true
+        } label: {
+            HStack {
+                label()
+                #if os(Android)
+                Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
+                #else
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+                #endif
+            }
+            // a row, not a tinted button: the label keeps the list's text colour (its own secondary parts stay secondary)
+            .foregroundStyle(.primary)
+            #if !os(Android)
+            .contentShape(Rectangle())   // the whole row takes the tap (skip-fuse-ui has no contentShape; a Compose row is whole already)
+            #endif
+        }
+        .sheet(isPresented: $shown) {
+            NavigationStack {
+                destination()
+                    #if !os(macOS)
+                    .navigationBarTitleDisplayMode(.inline)   // .ptitle: the small centred title of a sheet's bar
+                    #endif
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button { shown = false } label: { Image(systemName: "chevron.left") }
+                                .accessibilityLabel("返回")   // index.html:960 .pback aria-label 返回
+                        }
+                    }
+            }
+            // the tab's toast layer is under the sheet (a sheet is its own presentation on both platforms); the web's
+            // .toast sits over #picker, so 「至少要留一个…」 (EWChoiceList.done) shows here too. Both layers clear the same
+            // Relay.toast by its `at`, so two of them never fight.
+            .overlay { ToastLayer() }
+        }
+    }
+}
+
 extension View {
     /// Text fields under this view lose focus, as a web input blurs, when the user taps outside them or hides the keyboard
     /// with the system back gesture. No-op on iOS.

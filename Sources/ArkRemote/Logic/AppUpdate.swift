@@ -7,7 +7,8 @@
 // Swift calls Kotlin through the two closures AndroidAppMain registers at startup (registerUpdater).
 //
 // When: AppGlue.enterForeground (scenePhase → .active, already deduped against .inactive flaps), so at most
-// one request each time the app is opened. No timer, no polling. iOS never calls check, so nothing shows.
+// one request each time the app is opened. No timer, no polling. iOS never calls check, so no update notice shows
+// there (the pending-receipt line under the same top bar, TopNotices below, shows on both).
 
 import Foundation
 import Observation
@@ -126,13 +127,15 @@ import SwiftUI
     }
 }
 
-#if os(Android)
-/// Android only (iOS updates come from the App Store; AppUpdate never checks there). The update notice and the
-/// pending-receipt line go under the tab's top app bar, above its content — where Material puts a banner ("Banners
-/// appear at the top of the screen, below a top app bar", https://m2.material.io/components/banners). Placed above
-/// the whole TabView they doubled the status-bar inset: SkipUI's top app bar adds the status bar's window insets
-/// whenever the top system bar is there (Navigation.swift hasAbsoluteTopSystemBar → TopAppBarDefaults.windowInsets),
-/// so a strip of empty space opened under the banner.
+/// The update notice (Android only: iOS updates come from the App Store; AppUpdate never checks there) and the
+/// pending-receipt line (#pendbar, web/pending.js:76-88: on every platform, the web page shows it on every tab under
+/// its top bar, index.html:929) go under the tab's top bar, above its content.
+/// Android: where Material puts a banner ("Banners appear at the top of the screen, below a top app bar",
+/// https://m2.material.io/components/banners). Placed above the whole TabView they doubled the status-bar inset:
+/// SkipUI's top app bar adds the status bar's window insets whenever the top system bar is there (Navigation.swift
+/// hasAbsoluteTopSystemBar → TopAppBarDefaults.windowInsets), so a strip of empty space opened under the banner.
+/// iOS: a top safe-area inset with the bar material, so the list stays the scroll view the navigation bar tracks
+/// (its large title still collapses) and scrolls under the line instead of through it.
 extension View {
     func topNotices() -> some View { TopNotices(content: self) }
 }
@@ -144,13 +147,23 @@ struct TopNotices<Content: View>: View {
     let content: Content
 
     var body: some View {
+        #if os(Android)
         VStack(spacing: 0) {
             if AppUpdate.shared.showsBanner { UpdateBanner() }
             if let bar = Pending.shared.bar { PendingBarView(bar: bar) }
             content
         }
+        #else
+        content.safeAreaInset(edge: .top, spacing: 0) {
+            if let bar = Pending.shared.bar {
+                PendingBarView(bar: bar).background(.bar)
+            }
+        }
+        #endif
     }
 }
+
+#if os(Android)
 
 /// The update notice: plain SwiftUI that SkipUI draws with Material 3 components — Text in the theme's type, a
 /// LinearProgressIndicator for the download (determinate once the size is known: Play's flexible-update flow shows

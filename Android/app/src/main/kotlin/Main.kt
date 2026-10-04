@@ -46,6 +46,12 @@ open class AndroidAppMain: Application {
         logger.info("starting app")
         ProcessInfo.launch(applicationContext)
         AppDelegate.shared.onInit()
+        // crash-rec (Logic/CrashRec.swift): keep an uncaught exception's message and stack, then let the previous handler kill the app
+        val prevHandler = java.lang.Thread.getDefaultUncaughtExceptionHandler()
+        java.lang.Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try { AppDelegate.shared.onUncaughtException(e.toString(), android.util.Log.getStackTraceString(e)) } catch (_: Throwable) {}
+            prevHandler?.uncaughtException(t, e)
+        }
         watchNetwork()
         // in-app update from GitHub Releases (AppUpdater.kt); hands Swift the check / install entry points
         AppUpdater.start(this)
@@ -104,6 +110,23 @@ open class MainActivity: AppCompatActivity {
         //)
         //let requestTag = 1
         //ActivityCompat.requestPermissions(self, permissions.toTypedArray(), requestTag)
+    }
+
+    /// Touch feed for crash-rec actions and the fluency lines (AppDelegate.onTouch): down / up / cancel of the primary
+    /// pointer, in dp, with how late the event reached the main thread.
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        val phase = when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> 0
+            android.view.MotionEvent.ACTION_UP -> 1
+            android.view.MotionEvent.ACTION_CANCEL -> 2
+            else -> -1
+        }
+        if (phase >= 0) {
+            val d = resources.displayMetrics.density
+            AppDelegate.shared.onTouch(phase, (ev.x / d).toDouble(), (ev.y / d).toDouble(),
+                (android.os.SystemClock.uptimeMillis() - ev.eventTime).toDouble())
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     override fun onStart() {

@@ -20,6 +20,28 @@ struct EWRowTitle: View {
     }
 }
 
+/// One footer line's source: a row's name and its hint.
+struct EWFootItem {
+    var label: String
+    var hint: String?
+}
+
+/// The card's footer (view.js:976-995, Settings › Accessibility › Motion): each row's hint moves from the row to a
+/// paragraph under the card, prefixed 「行名：」 when the card has more than one row. `rows` = the card's row count.
+func ewFoot(_ items: [EWFootItem], rows: Int) -> String {
+    items.compactMap { i -> String? in
+        guard let h = i.hint?.trimmingCharacters(in: .whitespacesAndNewlines), !h.isEmpty else { return nil }
+        let t = i.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (rows > 1 && !t.isEmpty ? t + "：" : "") + h
+    }.joined(separator: "\n")
+}
+
+/// ewFoot over drawn rows; warnings are not rows (view.js `.warn`), box rows are (view.js `.row` with no hint).
+func ewFoot(_ shown: [EWRow], card: [EWRow]) -> String {
+    ewFoot(shown.filter { $0.kind != .warning }.map { EWFootItem(label: $0.label, hint: $0.hint) },
+           rows: card.filter { $0.kind != .warning }.count)
+}
+
 /// One config row. `values` is the page's working copy; `onChange` reports each edit (path, new value).
 struct EWRowView: View {
     var row: EWRow
@@ -29,6 +51,10 @@ struct EWRowView: View {
     /// 「待保存」 / 「已寄出 …」 / 「没生效 …」 / 「已应用 …」 under the row (box sub-rows carry none; their header does).
     var tag: EWRowTag? = nil
     var onResend: (String) -> Void = { _ in }
+    /// false: the hint is not drawn under the name; the page puts it in the card's footer instead (ewFoot).
+    var showHint = true
+
+    private var hint: String? { showHint ? row.hint : nil }
 
     private var value: EWValue { values[row.path] ?? readonly[row.path] ?? .null }
 
@@ -61,13 +87,13 @@ struct EWRowView: View {
                 .foregroundStyle(.orange)
         case .readOnly:
             HStack {
-                EWRowTitle(label: row.label, hint: row.hint)
+                EWRowTitle(label: row.label, hint: hint)
                 Spacer()
                 Text(pick(value).isEmpty ? "（空）" : pick(value)).foregroundStyle(.secondary)   // view.js fmt(null)
             }
         case .toggle:
             Toggle(isOn: Binding(get: { value.isOn }, set: { set(.bool($0)) })) {
-                EWRowTitle(label: row.label, hint: row.hint)
+                EWRowTitle(label: row.label, hint: hint)
             }
         case .select:
             // menuPicker (SkipFixes.swift): inside this row's VStack a bare Picker loses its title on Android
@@ -79,26 +105,26 @@ struct EWRowView: View {
                     Text(c.label).tag(c.value)
                 }
             } title: {
-                EWRowTitle(label: row.label, hint: row.hint)
+                EWRowTitle(label: row.label, hint: hint)
             }
         case .icons:
-            NavigationLink {
+            SheetLink {   // the 37b / 38 pick page as a sheet (SkipFixes.swift)
                 EWChoiceList(title: row.label, choices: row.choices, multi: false, icons: true,
                              initial: [value.key], commit: { setChoice($0.first ?? "") })
             } label: {
                 HStack {
-                    EWRowTitle(label: row.label, hint: row.hint)
+                    EWRowTitle(label: row.label, hint: hint)
                     Spacer()
-                    Text(pick(value)).foregroundStyle(.secondary)
+                    Text(value == .null ? "（空）" : pick(value)).foregroundStyle(.secondary)   // view.js:545 fmt(null)
                 }
             }
         case .pills:
-            NavigationLink {
+            SheetLink {   // the 37b / 38 pick page as a sheet (SkipFixes.swift)
                 EWChoiceList(title: row.label, choices: row.choices, multi: true,
                              initial: value.items, commit: { set(.list($0)) })
             } label: {
                 HStack {
-                    EWRowTitle(label: row.label, hint: row.hint)
+                    EWRowTitle(label: row.label, hint: hint)
                     Spacer()
                     Text("已选 \(row.choices.filter { value.items.contains($0.value) }.count)/\(row.choices.count)")
                         .foregroundStyle(.secondary)
@@ -106,7 +132,7 @@ struct EWRowView: View {
             }
         case .boxesHeader:
             HStack {
-                EWRowTitle(label: row.label, hint: row.hint)
+                EWRowTitle(label: row.label, hint: hint)
                 Spacer()
                 Text("\(boxCount) 格").foregroundStyle(.secondary)
             }
@@ -123,7 +149,7 @@ struct EWRowView: View {
             }
         case .number:
             HStack {
-                EWRowTitle(label: row.label, hint: row.hint)
+                EWRowTitle(label: row.label, hint: hint)
                 Spacer()
                 TextField(row.label, text: Binding(get: { value.display }, set: { setNumber($0) }))
                     .multilineTextAlignment(.trailing)
@@ -134,7 +160,7 @@ struct EWRowView: View {
             }
         case .text:
             HStack {
-                EWRowTitle(label: row.label, hint: row.hint)
+                EWRowTitle(label: row.label, hint: hint)
                 Spacer()
                 TextField(row.label, text: Binding(get: { value.display }, set: { set(.text($0)) }))
                     .multilineTextAlignment(.trailing)
@@ -182,7 +208,7 @@ struct EWTagLine: View {
                 HStack(spacing: 6) {
                     Text(verbatim: text)
                         .font(.caption2)
-                        .foregroundStyle(tag.resendKey == nil ? Color.secondary : Color.red)
+                        .foregroundStyle(tag.bad ? Color.red : Color.secondary)   // the 10 h line has a button but stays grey (class "sent")
                     if let key = tag.resendKey {
                         Button("再发一次") { onResend(key) }
                             .font(.caption2)
@@ -274,7 +300,7 @@ struct EWChoiceList: View {
     private func done() {
         let next = choices.map { $0.value }.filter { draft.contains($0) }
         if next.isEmpty {
-            if multi { Relay.shared.showToast("至少要留一个，全不选的话这个任务会直接结束") }
+            if multi { Relay.shared.showToast("至少要留一个") }   // view.js:1399 toast("至少要留一个")
             return
         }
         commit(next)
