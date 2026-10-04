@@ -8,7 +8,9 @@
 //     something unexpected), an uncaught Objective-C exception on iOS (NSSetUncaughtExceptionHandler) and an uncaught
 //     Kotlin exception on Android (Main.kt → ArkRemoteAppDelegate.onUncaughtException), both saved synchronously
 //     before the process dies, and on iOS MetricKit's crash / hang diagnostics of earlier runs (with their call stack
-//     trees), delivered at a later start. Identical errors (type + message + file:line:col) are one entry with a count;
+//     trees), delivered at a later start; on Android (11+) the 「应用无响应」 exits of earlier runs from
+//     ActivityManager.getHistoricalProcessExitReasons, read at the next start (Main.kt AnrScan, a "stall" with how
+//     "anr" and the main thread's stack from the ANR trace). Identical errors (type + message + file:line:col) are one entry with a count;
 //   · actions: a ring of the last RING_N touches (Logic/FluencyRec.swift TouchFeed: the iOS window's touches, Android's
 //     MainActivity.dispatchTouchEvent). The page names the control under the finger; the app has no DOM to ask, so an
 //     action carries the point (x, y in points) and the tab instead, ctl "";
@@ -291,7 +293,13 @@ final class CrashRec: @unchecked Sendable {
         #if !os(Android) && canImport(UIKit)
         CrashRecApple.install()
         #endif
+        #if os(Android)
+        Self.androidAnrScan?()   // earlier runs' ANRs (Main.kt AnrScan → ArkRemoteAppDelegate.onPastAnr → past)
+        #endif
     }
+
+    /// Main.kt AnrScan.scan, set once from AndroidAppMain.onCreate (registerAnrScan); it runs on its own thread.
+    nonisolated(unsafe) static var androidAnrScan: (() -> Void)?
 
     private static func number(_ v: JSONValue?) -> Double? {
         switch v {
@@ -459,7 +467,7 @@ final class CrashRec: @unchecked Sendable {
         }
     }
 
-    /// Diagnostics of earlier runs (iOS MetricKit): their own record, queued and sent like an unclean exit.
+    /// Diagnostics of earlier runs (iOS MetricKit, Android ANR exits): their own record, queued and sent like an unclean exit.
     func past(_ list: [[String: JSONValue]]) {
         guard !list.isEmpty else { return }
         locked {

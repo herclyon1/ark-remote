@@ -52,6 +52,10 @@ open class AndroidAppMain: Application {
             try { AppDelegate.shared.onUncaughtException(e.toString(), android.util.Log.getStackTraceString(e)) } catch (_: Throwable) {}
             prevHandler?.uncaughtException(t, e)
         }
+        // crash-rec: earlier runs' ANRs (AnrScan below; CrashRec.start runs the scan) and the version this run leaves for the next scan
+        AnrScan.start(this)
+        // the system share panel with its result for the 诊断记录 / 自检结果 sheet (ShareSheet.kt)
+        ShareSheet.start(this)
         watchNetwork()
         // in-app update from GitHub Releases (AppUpdater.kt); hands Swift the check / install entry points
         AppUpdater.start(this)
@@ -87,6 +91,7 @@ open class MainActivity: AppCompatActivity {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         logger.info("starting activity")
+        ShareSheet.activity = java.lang.ref.WeakReference(this)
         UIApplication.launch(this)
         enableEdgeToEdge()
 
@@ -136,11 +141,14 @@ open class MainActivity: AppCompatActivity {
 
     override fun onResume() {
         super.onResume()
+        ShareSheet.activity = java.lang.ref.WeakReference(this)
+        ShareSheet.resumed()
         AppDelegate.shared.onResume()
     }
 
     override fun onPause() {
         super.onPause()
+        ShareSheet.paused()
         AppDelegate.shared.onPause()
     }
 
@@ -195,6 +203,93 @@ open class MainActivity: AppCompatActivity {
     }
 
     companion object {
+    }
+}
+
+/// crash-rec's ANR line on Android (the iOS side is MetricKit's hang diagnostics, Logic/CrashRec.swift MetricSubscriber).
+/// ActivityManager.getHistoricalProcessExitReasons (API 30) keeps the app's recent process exits; each one with
+/// reason REASON_ANR ("应用无响应": the system killed the app after its main thread stopped answering) newer than the
+/// last one reported goes to ArkRemoteAppDelegate.onPastAnr once, with the "main" thread's block of the ANR trace
+/// (getTraceInputStream: every thread of the process, so only the first TRACE_MAX characters are read). The newest
+/// reported timestamp is kept in SharedPreferences, written once per scan. ApplicationExitInfo carries no app version,
+/// so every run writes its own into setProcessStateSummary (API 30, ≤ 128 bytes) and the next scan reads it back
+/// (getProcessStateSummary); exits from runs before this build carry none, sent as "". Below API 30 nothing is done.
+internal object AnrScan {
+    private const val PREFS = "ark-crash-anr"
+    private const val SEEN = "seen"
+    private const val TRACE_MAX = 64 * 1024
+
+    @Volatile private var app: Context? = null
+
+    /// AndroidAppMain.onCreate: this run's version into the process state summary, and the scan handed to Swift.
+    fun start(context: Context) {
+        app = context.applicationContext
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return
+        try {
+            val am = context.getSystemService(android.app.ActivityManager::class.java)
+            am?.setProcessStateSummary(version().toByteArray(Charsets.UTF_8).let { if (it.size > 128) it.copyOf(128) else it })
+        } catch (e: Throwable) {
+            logger.warning("process state summary not set: ${e}")
+        }
+        AppDelegate.shared.registerAnrScan(scan = { scan() })
+    }
+
+    /// RecKit.version's format: "name (code)", or the name alone when the two are the same.
+    private fun version(): String {
+        val name = BuildConfig.VERSION_NAME
+        val code = BuildConfig.VERSION_CODE.toString()
+        return if (code.isEmpty() || code == name) name else "${name} (${code})"
+    }
+
+    private fun scan() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return
+        val ctx = app ?: return
+        kotlin.concurrent.thread(name = "ark-anr-scan") {
+            try {
+                val am = ctx.getSystemService(android.app.ActivityManager::class.java) ?: return@thread
+                val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                val seen = prefs.getLong(SEEN, 0L)
+                val anrs = am.getHistoricalProcessExitReasons(ctx.packageName, 0, 0)
+                    .filter { it.reason == android.app.ApplicationExitInfo.REASON_ANR && it.timestamp > seen }
+                    .sortedBy { it.timestamp }
+                if (anrs.isEmpty()) return@thread
+                prefs.edit().putLong(SEEN, anrs.last().timestamp).apply()
+                for (x in anrs) {
+                    val prevV = try { x.processStateSummary?.toString(Charsets.UTF_8) ?: "" } catch (_: Throwable) { "" }
+                    val stack = try { mainThread(x) } catch (e: Throwable) { "trace not read: ${e}" }
+                    logger.info("ANR of an earlier run at ${x.timestamp} (v ${prevV}): ${x.description}")
+                    AppDelegate.shared.onPastAnr(x.timestamp.toDouble(), stack, prevV, x.description ?: "")
+                }
+            } catch (e: Throwable) {
+                logger.warning("ANR scan failed: ${e}")
+            }
+        }
+    }
+
+    /// The `"main" …` block of the ANR trace (up to the blank line that ends it); the trace's first lines when no
+    /// main block is within TRACE_MAX characters; "" when the system kept no trace.
+    private fun mainThread(x: android.app.ApplicationExitInfo): String {
+        val input = x.traceInputStream ?: return ""
+        input.bufferedReader(Charsets.UTF_8).use { r ->
+            val head = StringBuilder()
+            val main = StringBuilder()
+            var read = 0
+            var inMain = false
+            while (read < TRACE_MAX) {
+                val line = r.readLine() ?: break
+                read += line.length + 1
+                if (inMain) {
+                    if (line.isBlank()) break
+                    main.append(line).append('\n')
+                } else if (line.startsWith("\"main\"")) {
+                    inMain = true
+                    main.append(line).append('\n')
+                } else if (head.length < 3000) {
+                    head.append(line).append('\n')
+                }
+            }
+            return if (main.isNotEmpty()) main.toString() else head.toString()
+        }
     }
 }
 

@@ -44,5 +44,9 @@
         <receiver
             android:name=".UpdateStatusReceiver"
             android:exported="false" />
+        <!-- the share chooser's pick for 分享 on the 诊断记录 sheet (ShareSheet.kt) -->
+        <receiver
+            android:name=".ShareChosenReceiver"
+            android:exported="false" />
     </application>
 </manifest>

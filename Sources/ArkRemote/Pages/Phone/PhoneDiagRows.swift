@@ -95,7 +95,8 @@ struct DiagSheetBox: View {
                 }
                 .frame(maxWidth: .infinity)
                 if canShare {
-                    ShareLink(item: json) { Text("分享") }
+                    // view.js share.onclick: every outcome is said (DiagShare)
+                    Button("分享") { DiagShare.shared.share(json, title: title == "自检结果" ? "自检结果" : "诊断记录") }
                         .frame(maxWidth: .infinity)
                 }
                 Button("关闭") { close() }
@@ -105,6 +106,16 @@ struct DiagSheetBox: View {
             Spacer(minLength: 0)
         }
         .padding(16)
+        // the page's toast layer and alert are under the sheet (a sheet is its own presentation on both platforms):
+        // 「已复制整份记录」 / 「已交给分享」 / 「分享已取消」 show here too (both layers clear the same Relay.toast), and
+        // 「分享没成」 is the sheet's own alert (view.js ask("分享没成", …, "好", false, { single: true }))
+        .overlay { ToastLayer() }
+        .alert("分享没成", isPresented: Binding(get: { DiagShare.shared.failNote != nil },
+                                                set: { if !$0 { DiagShare.shared.failNote = nil } })) {
+            Button("好") {}
+        } message: {
+            Text(verbatim: DiagShare.shared.failNote ?? "")
+        }
     }
 }
 
