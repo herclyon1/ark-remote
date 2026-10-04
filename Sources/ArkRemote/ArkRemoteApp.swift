@@ -106,8 +106,14 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
             Task { @MainActor in FrameClock.run() }
             #endif
         } else {
-            TouchFeed.up(x: x, y: y, cancelled: phase == 2)
+            TouchFeed.up(x: x, y: y, cancelled: phase == 2, waitMs: max(0, waitMs))
         }
+    }
+
+    /// The activity's view tree is about to be drawn (Main.kt OnDrawListener, within 11 s of a press): fluency-rec's
+    /// UI-commit signal for slow / inp. On the main thread.
+    /* SKIP @bridge */public func onDraw() {
+        FluencyRec.shared.commit(ts: RecKit.mono())
     }
 
     /// Thread.setDefaultUncaughtExceptionHandler (Main.kt): an uncaught Kotlin exception is about to kill the app;

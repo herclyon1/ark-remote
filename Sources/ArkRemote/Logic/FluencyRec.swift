@@ -11,13 +11,22 @@
 //   rage   the same control pressed 3 times within 2 s — the app has no element identity to compare, so "the same
 //          control" is a tap within RAGE_PT points of the two before it
 //   err    an error recorded by CrashRec between the press and the end of the gesture
-// Not ported (no native counterpart to what they read): slow / dead need the first visible change after the press (the
-// page's MutationObserver on the control's region; SwiftUI / Compose expose no such signal), inp is the browser's Event
-// Timing entry. Their fields (first, react, near, scene, et) stay null, and a gesture settles SETTLE_MS after the lift
-// instead of after the page's last change.
+//   slow   the first UI commit after the lift > 200 ms after it (react)                      } approximations, see below;
+//   inp    the press → the first UI commit after the press was handled > 200 ms (et.dur)     } the page's 200 ms lines
+// slow / inp read a "the UI was committed" signal: iOS 18+ = UIUpdateLink, a passive link (requiresContinuousUpdates false:
+// "the system only calls its actions while producing a UI update in response to some kind of event, such as a gesture or
+// layer change") with an action in its afterCATransactionCommit phase; Android = ViewTreeObserver.OnDrawListener on the
+// activity's window ("invoked when the view tree is about to be drawn", Main.kt). Both cover the whole window, not the
+// control's region, so where the page's slow counts the first change of the page (MutationObserver, from the press on) the
+// app counts the first commit after the lift — the press highlight is a commit too, before the lift — and inp is the press
+// → the next commit, where the page reads the browser's Event Timing entry (the longest of pointerdown / pointerup / click).
+// What they catch is the main thread holding the next commit back. iOS 17 has no such link (none found): there both stay
+// null as before, and the line's `commit` says which signal was there ("link" / "draw" / null).
+// Not ported: dead needs the kind of control pressed, whether it was already on or disabled, and its region (fluency-rec.js
+// :141, :150); SwiftUI / Compose give a touch no control. near / scene / was_on / disabled stay as before.
 // Frames: iOS = CADisplayLink (the display's frames, the base of UITouch.timestamp); Android = a main-actor tick every
-// TICK_MS (a frame callback needs the Activity's Choreographer; the tick measures the same thing the rules ask about,
-// how long the main thread was unavailable). The line says which in `clock` ("vsync" / "tick").
+// TICK_MS. Choreographer.getInstance() on the main thread would do as well (one per Looper thread, not per Activity); the
+// tick stays so that `long` on Android reads as it did in the records so far. The line says which in `clock` ("vsync" / "tick").
 // Touches: TouchFeed below, fed by TouchProbe (iOS, a window gesture recognizer that only watches) and by
 // ArkRemoteAppDelegate.onTouch (Android, MainActivity.dispatchTouchEvent). It also feeds crash-rec's action ring.
 //
@@ -50,15 +59,16 @@ enum TouchFeed {
         FluencyRec.shared.start(x: x, y: y, waitMs: waitMs)
     }
 
-    /// pointerup / pointercancel of that touch.
-    static func up(x: Double, y: Double, cancelled: Bool) {
+    /// pointerup / pointercancel of that touch. `waitMs`: as for down (the lift is stamped with the touch's own time, so slow
+    /// does not depend on whether a control's action ran before this got the touch).
+    static func up(x: Double, y: Double, cancelled: Bool, waitMs: Double) {
         lock.lock()
         let d = downAt
         downAt = nil
         lock.unlock()
         let moved = d.map { abs($0.x - x) > MOVE_PT || abs($0.y - y) > MOVE_PT } ?? false
         CrashRec.shared.touchUp(x: x, y: y, moved: moved || cancelled)
-        FluencyRec.shared.lift(moved: moved || cancelled)
+        FluencyRec.shared.lift(moved: moved || cancelled, waitMs: waitMs)
     }
 }
 
@@ -83,12 +93,24 @@ final class TouchProbe: UIGestureRecognizer, UIGestureRecognizerDelegate {
             guard let ws = scene as? UIWindowScene else { continue }
             for w in ws.windows where !(w.gestureRecognizers ?? []).contains(where: { $0 is TouchProbe }) {
                 w.addGestureRecognizer(TouchProbe(target: nil, action: nil))
+                if #available(iOS 18.0, *) { addCommitLink(w) }
             }
             if let w = ws.windows.first(where: \.isKeyWindow) ?? ws.windows.first {
                 RecKit.setScreen(width: Double(w.bounds.width), height: Double(w.bounds.height), scale: Double(ws.screen.scale),
                                  reduceMotion: UIAccessibility.isReduceMotionEnabled, reduceTransparency: UIAccessibility.isReduceTransparencyEnabled)
             }
         }
+    }
+
+    /// The UI-commit signal for slow / inp (header): a passive UIUpdateLink on the window, its action after each
+    /// update's CATransaction commit. Kept here for the app's life, one per window that got a probe.
+    private static var links: [AnyObject] = []
+    @available(iOS 18.0, *) private static func addCommitLink(_ w: UIWindow) {
+        let l = UIUpdateLink(view: w)
+        l.addAction(to: .afterCATransactionCommit) { _, _ in FluencyRec.shared.commit(ts: RecKit.mono()) }
+        l.isEnabled = true
+        links.append(l)
+        FluencyRec.commitSrc = "link"
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -114,7 +136,7 @@ final class TouchProbe: UIGestureRecognizer, UIGestureRecognizerDelegate {
         if let t = tracking, touches.contains(t) {
             let p = t.location(in: view)
             tracking = nil
-            TouchFeed.up(x: Double(p.x), y: Double(p.y), cancelled: cancelled)
+            TouchFeed.up(x: Double(p.x), y: Double(p.y), cancelled: cancelled, waitMs: max(0, RecKit.mono() - t.timestamp * 1000))
         }
         // the last finger is up: fail, so UIKit resets the probe for the next touch sequence
         if (event.allTouches ?? touches).allSatisfy({ $0.phase == .ended || $0.phase == .cancelled }) { state = .failed }
@@ -177,8 +199,12 @@ final class FluencyRec: @unchecked Sendable {
     static let QKEY = "ark-flu-queue", DKEY = "ark-flu-day", SKEY = "ark-flu-fi"
     #if os(Android)
     static let clock = "tick"
+    /// The UI-commit signal slow / inp read (header): "draw" = Main.kt's OnDrawListener → ArkRemoteAppDelegate.onDraw;
+    /// "link" = TouchProbe's UIUpdateLink (iOS 18+); nil = none (iOS 17), and the two rules are not judged.
+    nonisolated(unsafe) static var commitSrc: String? = "draw"
     #else
     static let clock = "vsync"
+    nonisolated(unsafe) static var commitSrc: String? = nil
     #endif
 
     let sid = RecKit.hex(4)
@@ -189,6 +215,9 @@ final class FluencyRec: @unchecked Sendable {
         var at: Double, pn: Double, x: Double, y: Double, wait: Double, tab: String, errs0: Int
         var down = true, up = 0.0, moved = false
         var fi: [[Double]] = []
+        /// slow / inp: the commit signal there at the press, when the press was handled, the first commit after it and
+        /// the first after the lift (monotonic ms, 0 = none yet), and whether the settle already waited a frame for one.
+        var src: String?, handled = 0.0, cDown = 0.0, cUp = 0.0, waited = false
         var prev = 0.0
     }
     private struct Line { let pn: Double; let at: Double; let x: Double; let y: Double; let kind: String; let bad: [String]; var o: [String: JSONValue] }
@@ -243,15 +272,27 @@ final class FluencyRec: @unchecked Sendable {
             if g != nil { finish(settled: false, hidden: false) }
             let t = RecKit.mono()
             g = Gesture(at: nowMs() - waitMs, pn: t - waitMs, x: x, y: y, wait: waitMs.rounded(), tab: RecKit.tabNow(), errs0: errN)
+            g!.src = Self.commitSrc
+            g!.handled = t
         }
     }
 
-    func lift(moved: Bool) {
+    func lift(moved: Bool, waitMs: Double) {
         locked {
             guard g != nil, g!.down else { return }
             g!.down = false
-            g!.up = RecKit.mono()
+            g!.up = RecKit.mono() - max(0, waitMs)
             g!.moved = moved
+        }
+    }
+
+    /// The UI was committed (iOS: UIUpdateLink after the CATransaction commit; Android: the view tree about to be drawn),
+    /// ts = now on the monotonic clock. On the main thread; does nothing without an open gesture.
+    func commit(ts: Double) {
+        locked {
+            guard g != nil, g!.src != nil else { return }
+            if g!.cDown == 0 && ts >= g!.handled { g!.cDown = ts }
+            if g!.cUp == 0 && !g!.down && ts >= g!.up { g!.cUp = ts }
         }
     }
 
@@ -264,7 +305,11 @@ final class FluencyRec: @unchecked Sendable {
             G.prev = ts
             g = G
             let now = RecKit.mono()
-            if (!G.down && now - G.up > Self.SETTLE_MS) || now - G.pn > Self.HARD_MS {
+            let quiet = !G.down && now - G.up > Self.SETTLE_MS
+            // a main thread held up past SETTLE_MS after the lift gives this frame first and the commit after it, in the same
+            // update (UIUpdateActionPhase: CADisplayLink dispatch, then the CATransaction commit): wait one frame more for it
+            if quiet && G.src != nil && G.cUp == 0 && !G.waited && now - G.pn <= Self.HARD_MS { g!.waited = true; return true }
+            if quiet || now - G.pn > Self.HARD_MS {
                 finish(settled: true, hidden: false)
                 return g != nil
             }
@@ -296,18 +341,26 @@ final class FluencyRec: @unchecked Sendable {
         if !glass.isEmpty && n50 > 0 { bad.append("jank") }
         if !glass.isEmpty && run25 >= Self.CHOPPY_N { bad.append("choppy") }
         if G.wait > 100 { bad.append("wait") }
+        let press: Double? = G.up > 0 ? G.up - G.pn : nil
+        let first: Double? = G.cUp > 0 ? G.cUp - G.pn : nil
+        let react: Double? = first.flatMap { f in press.map { f - $0 } }
+        let etDur: Double? = G.cDown > 0 ? G.cDown - G.pn : nil
+        if let r = react, r > 200 { bad.append("slow") }
+        if let d = etDur, d > 200 { bad.append("inp") }
         if rage(kind, G.x, G.y, G.at) { bad.append("rage") }
         let pn0 = RecKit.t0
         var o: [String: JSONValue] = [
             "at": RecKit.num(G.at), "pn": RecKit.num(G.pn - pn0), "v": .string(RecKit.version), "ctl": .string(""), "id": .int(0), "kind": .string(kind),
             "watched": RecKit.num(tEnd - G.pn), "glass": .string(glass), "tab": .string(G.tab), "wait": RecKit.num(G.wait),
-            "press": G.up > 0 ? RecKit.num(G.up - G.pn) : .null, "first": .null, "react": .null, "near": .null,
+            "press": G.up > 0 ? RecKit.num(G.up - G.pn) : .null, "first": first.map { RecKit.num($0) } ?? .null,
+            "react": react.map { RecKit.num($0) } ?? .null, "near": .null,
             "was_on": .bool(false), "disabled": .bool(false), "scene": .null,
             "nf": .int(ms.count), "max": ms.isEmpty ? .null : RecKit.num(ms.max()!), "n50": .int(n50), "n100": .int(n100), "run25": .int(run25),
             "big": .array(Array(big)), "span": RecKit.num(max((G.up > 0 ? G.up : tEnd) - G.pn, 0)), "settled": .bool(settled),
             "bad": .array(bad.map { .string($0) }), "draws": .null, "dfr": .null, "d_rate": .null, "wa": .null,
-            "x": RecKit.num(G.x), "y": RecKit.num(G.y), "clock": .string(Self.clock),
+            "x": RecKit.num(G.x), "y": RecKit.num(G.y), "clock": .string(Self.clock), "commit": G.src.map { .string($0) } ?? .null,
         ]
+        if let d = etDur { o["et"] = .object(["name": .string("pointerdown"), "dur": RecKit.num(d), "delay": RecKit.num(G.wait), "proc": .null]) }
         if !e.isEmpty { o["err"] = .array(e.map { .string($0) }) }
         if !bad.isEmpty {                                    // frames ride along only the first time for version × rule × control (K12)
             var seen = (RecKit.parse(RecKit.get(Self.SKEY))?.array ?? []).compactMap(\.string)

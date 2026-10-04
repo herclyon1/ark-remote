@@ -105,6 +105,13 @@ open class MainActivity: AppCompatActivity {
 
         AppDelegate.shared.onLaunch()
 
+        // fluency-rec's UI-commit signal for slow / inp (FluencyRec.swift header): the view tree about to be drawn, handed over
+        // only within DRAW_WATCH_MS of the last press (a gesture lasts at most 10 s). The listener stays for the activity's
+        // life: one may not be added or removed inside onDraw (ViewTreeObserver.OnDrawListener).
+        window.decorView.viewTreeObserver.addOnDrawListener {
+            if (android.os.SystemClock.uptimeMillis() - lastDownAt < DRAW_WATCH_MS) AppDelegate.shared.onDraw()
+        }
+
         // Example of requesting permissions on startup.
         // These must match the permissions in the AndroidManifest.xml file.
         //let permissions = listOf(
@@ -119,7 +126,11 @@ open class MainActivity: AppCompatActivity {
 
     /// Touch feed for crash-rec actions and the fluency lines (AppDelegate.onTouch): down / up / cancel of the primary
     /// pointer, in dp, with how late the event reached the main thread.
+    private val DRAW_WATCH_MS = 11_000L
+    private var lastDownAt = -DRAW_WATCH_MS
+
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) lastDownAt = android.os.SystemClock.uptimeMillis()
         val phase = when (ev.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> 0
             android.view.MotionEvent.ACTION_UP -> 1
