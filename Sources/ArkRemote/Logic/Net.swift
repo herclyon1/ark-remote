@@ -451,16 +451,21 @@ struct PinScan: Sendable, Equatable {
         // result, only computed elsewhere.
         let pin = cfg.pin
         let got = await Task.detached(priority: .userInitiated) { Relay.decodeCosState(data, pin: pin) }.value
-        if got.wrongPin { pinScan = PinScan(seen: 1, matched: 0) }
+        guard let pinOK = got.pinOK else { return nil }   // not a state envelope
+        if !pinOK {
+            pinScan = PinScan(seen: 1, matched: 0)
+            return nil
+        }
         return got.state
     }
 
-    /// cosState's decoding: the envelope, its PIN, then `body` / `gz` (unwrap). wrongPin: a state for another PIN.
-    nonisolated static func decodeCosState(_ data: Data, pin: String) -> (state: JSONValue?, wrongPin: Bool) {
-        guard let m = try? JSONValue.parse(data), m["kind"]?.string == "state" else { return (nil, false) }
-        if m["pin"]?.jsString != pin { return (nil, true) }
+    /// cosState's decoding: the envelope, its PIN, then `body` / `gz` (unwrap). pinOK: nil when the object is not a state
+    /// envelope, false for a state under another PIN (state nil), true when it matched (state nil if unwrap failed).
+    nonisolated static func decodeCosState(_ data: Data, pin: String) -> (state: JSONValue?, pinOK: Bool?) {
+        guard let m = try? JSONValue.parse(data), m["kind"]?.string == "state" else { return (nil, nil) }
+        if m["pin"]?.jsString != pin { return (nil, false) }
         let state = try? unwrap(m)
-        return (state, false)
+        return (state, true)
     }
 
     /// Reads the state object once and takes it when it is newer. Called on open, on refresh and on the
