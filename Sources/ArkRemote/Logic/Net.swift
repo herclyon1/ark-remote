@@ -365,8 +365,10 @@ struct PinScan: Sendable, Equatable {
     /// net.js send(body).
     func send(_ body: JSONValue) async throws {
         guard let cfg = config else { throw AppError("还没设置信箱") }
+        // ts on ntfy's clock (clockSkewMs): the relay drops an order whose ts is more than 24 h off its own clock
+        // (phone.py MAX_AGE), so a phone clock that far off had every order dropped with no receipt (edge audit 3)
         let msg: JSONValue = .object(["v": .int(1), "kind": .string("cmd"), "pin": .string(cfg.pin),
-                                      "ts": .int(nowSec()), "body": body])
+                                      "ts": .int(safeInt(serverNowMs() / 1000) ?? nowSec()), "body": body])
         let (data, status) = try await httpFetch("\(ntfyBase)/\(cfg.topic)", method: "POST", body: msg.encoded())
         if status == 429 { throw NtfyLimit(daily: (try? JSONValue.parse(data))?["code"]?.number == 42908) }
         if !(200..<300).contains(status) { throw AppError("HTTP \(status)") }
