@@ -95,7 +95,9 @@ enum StatusCommands {
                 return
             }
             ask.wrappedValue = StatusAsk(
-                title: "开始刷？", message: "刷「\(nm)」到机器时间 \(t) 为止？期间脚本会一直在打，别的任务不跑。", ok: "开始刷",
+                // the relay holds no queue back for a farm (审查 B14: echofarm is read only by commands / engine tick / shutdown /
+                // phone, relay grep): a shift that comes due runs as usual
+                title: "开始刷？", message: "刷「\(nm)」到机器时间 \(t) 为止？期间脚本会一直在打；到点的班次照常跑，可能和它抢游戏。", ok: "开始刷",
                 body: .object(["action": .string("echo_farm"), "confirmed": .bool(true), "boss": .int(boss),
                                "until": .string(t), "name": .string(nm)]),
                 okText: "已派：刷到 \(t)")   // view.js:1230
