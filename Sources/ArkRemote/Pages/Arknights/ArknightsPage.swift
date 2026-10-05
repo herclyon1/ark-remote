@@ -109,8 +109,9 @@ struct ArknightsPage: View {
         Section {
             // view.js:309-311: AUTO-MAS not running → the last config read, said so in yellow.
             if data.configUnreadable {
+                // set_config fails at once when AUTO-MAS does not answer (commands.py:338-341), it is not held (审查 B16)
                 ArknightsWarningRow(text: data.configStale
-                    ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的，改了也要等它开着才生效"
+                    ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的；它没在运行时改的会失败，看回执"
                     : "读不到 AUTO-MAS 的配置（它没在运行？）")
                     .id("ark-stage-warn")   // a reselect's scroll target (topID)
             }

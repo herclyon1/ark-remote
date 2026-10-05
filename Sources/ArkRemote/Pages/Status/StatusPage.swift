@@ -422,7 +422,8 @@ struct StatusPage: View {
             // view.js:322-325 cfgNote, placed right after the 机器 section (view.js:402): a bare footnote line in --warn
             // (systemOrange, index.html:102/477), no card; AUTO-MAS unreadable, and whether a last good config stands in
             if data.configUnreadable {
-                warningLabel(data.configIsStale ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的，改了也要等它开着才生效"
+                // set_config fails at once when AUTO-MAS does not answer (commands.py:338-341), it is not held (审查 B16)
+                warningLabel(data.configIsStale ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的；它没在运行时改的会失败，看回执"
                                                 : "读不到 AUTO-MAS 的配置（它没在运行？）")
                     .font(.footnote)
                     .foregroundStyle(.orange)
