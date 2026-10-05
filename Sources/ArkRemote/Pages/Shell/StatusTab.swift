@@ -14,12 +14,24 @@ struct StatusTab: View {
         Binding(get: { EWEdits.shared.items }, set: { EWEdits.shared.items = $0 })
     }
 
+    /// The 状态 data from the singletons and the stored settings as they are now (StatusPage.live): read by a pushed page
+    /// as it draws, never captured.
+    static func liveData() -> StatusData {
+        let d = UserDefaults.standard
+        var data = StatusData.from(relay: Relay.shared, live: Live.shared, stamina: StaminaStore.shared, pending: Pending.shared,
+                                   currentQueue: d.string(forKey: "ark-remote-cfg-queue") ?? "",
+                                   estopAt: d.integer(forKey: "ark-remote-estop"))
+        StatusCommands.applyEdits(EWEdits.shared.items, to: &data)
+        return data
+    }
+
     var body: some View {
         let relay = Relay.shared
         var data = StatusData.from(relay: relay, live: Live.shared, stamina: StaminaStore.shared, pending: Pending.shared,
                                    currentQueue: storedQueue, estopAt: estopAt)
         let _ = StatusCommands.applyEdits(edits.wrappedValue, to: &data)
-        StatusPage(data: data, actions: StatusCommands.actions(data, ask: $ask, storedQueue: $storedQueue, edits: edits))
+        StatusPage(data: data, actions: StatusCommands.actions(data, ask: $ask, storedQueue: $storedQueue, edits: edits),
+                   live: Self.liveData)
             .refreshable { await Live.shared.ping() }
             .task {
                 // first open (view.js boot :2928-2946): say what the cached state is, then ask the mailbox; a failure is said

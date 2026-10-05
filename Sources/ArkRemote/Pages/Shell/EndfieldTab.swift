@@ -7,11 +7,12 @@ struct EndfieldTab: View {
 
     var body: some View {
         let relay = Relay.shared
-        // decoded once per snapshot, not per body (EWMaster.live, EWLastGood): every switch to this tab runs the body afresh
-        let master = EWMaster.live(Self.game)
-        let lastGood = EWLastGood.load(Self.game)
         EndfieldPage(data: Self.pageData(), live: Self.pageData, onChange: { path, v in
-            let machine = ewEffectiveMaster(master, lastGood: lastGood).0
+            // read at the change, not captured from this body: the 更多设置 page's rows get this closure through a
+            // navigationDestination, which skip-ui keeps from its first registration (Navigation.swift:869-872), so a
+            // captured machine value was the App's first one there. Decoded once per snapshot (EWMaster.live, EWLastGood).
+            let master = EWMaster.live(Self.game)
+            let machine = ewEffectiveMaster(master, lastGood: EWLastGood.load(Self.game)).0
             let label = ewLabel(EndfieldSchema.groups, machine ?? master, path)
             // view.js:1254 base(): a change back to the sent-but-unconfirmed value drops the edit, not only one back to the machine's
             let base = ewBase(game: Self.game, path: path, machine: machine?.values[path])

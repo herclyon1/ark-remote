@@ -6,6 +6,10 @@ import SwiftUI
 struct StatusPage: View {
     var data: StatusData
     var actions = StatusActions()
+    /// The page's data as of now, for the 「查看全部」 page: skip-ui keeps the first navigationDestination closure a stack
+    /// collects (Navigation.swift:869-872, NavigationDestination.equals is always true), so one capturing `data` showed
+    /// the receipts of the App's first draw, even pushed afresh (test pass 1, 问题 9). nil: `data` (previews).
+    var live: (() -> StatusData)? = nil
 
     @State var bossIndex = 1
     @State var echoUntil = "08:30"
@@ -67,7 +71,7 @@ struct StatusPage: View {
         .navigationDestination(for: StatusRoute.self) { route in
             switch route {
             case .receipts:
-                StatusReceiptsPage(receipts: data.receipts, todayActual: data.todayActual, today: data.receiptsToday)
+                StatusReceiptsPage(data: live ?? { [data] in data })
             case .monthCard(let g):
                 MonthCardPage(game: g)
             }
@@ -536,8 +540,18 @@ enum StatusRoute: Hashable {
     case monthCard(String)
 }
 
-/// 「查看全部」: every receipt grouped by day (回执只带 月-日, so the header is 「9月17日」).
+/// 「查看全部」: reads the data in its own body (StatusPage.live), so it follows the machine's newest state on Android too.
 struct StatusReceiptsPage: View {
+    var data: () -> StatusData
+
+    var body: some View {
+        let d = data()
+        StatusReceiptsList(receipts: d.receipts, todayActual: d.todayActual, today: d.receiptsToday)
+    }
+}
+
+/// Every receipt grouped by day (回执只带 月-日, so the header is 「9月17日」).
+struct StatusReceiptsList: View {
     var receipts: [StatusReceipt]
     /// view.js:463 the 今天实际 row heads today's group (`g.d === today ? nowRow : ""`).
     var todayActual: String? = nil
