@@ -270,6 +270,12 @@ struct PinScan: Sendable, Equatable {
     /// from ntfy alone: a normal state is on COS and the topic holds only `state <ts> <bytes>` notices (not envelopes),
     /// so a wrong PIN read as 「还没有过心跳」 (edge audit 24).
     @ObservationIgnored var cosPinBad = false
+    /// ntfy's clock minus this phone's (ms), from the `time` ntfy stamps on the open / keepalive events of a stream (its
+    /// own now; Live.onLiveEvent / onPingEvent). The age of a machine or ntfy stamp is taken against serverNowMs(): with
+    /// the phone's clock, a phone 90 s off showed 「关机」 for a running machine, one behind kept 「开机中」 after a power
+    /// cut, and a receipt check took a state from before the send as the answer (edge audit 3). 0 until the first event.
+    @ObservationIgnored var clockSkewMs: Double = 0
+    func serverNowMs() -> Double { nowMs() + clockSkewMs }
 
     /// Called after `adopt` takes a newer snapshot. view.js render() does
     /// `if (Stamina.fromSnapshot(snap)) Stamina.refresh(true)`; the stamina port hooks that in here.

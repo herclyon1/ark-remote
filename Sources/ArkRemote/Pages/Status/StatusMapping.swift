@@ -224,9 +224,12 @@ extension StatusData {
             f.locale = Locale(identifier: "en_US_POSIX")
             f.timeZone = TimeZone(identifier: "Asia/Shanghai")
             f.dateFormat = "MM-dd HH:mm"
-            let pressed = f.string(from: Date(timeIntervalSince1970: TimeInterval(estopAt)))
+            // the press on ntfy's clock (Relay.clockSkewMs): a phone running fast stamped it after the machine's receipt
+            let pressed = f.string(from: Date(timeIntervalSince1970: TimeInterval(estopAt) + relay.clockSkewMs / 1000))
             let rc = rcs.reversed().first { r in
-                r["action"]?.jsString == "estop" && (r["at"]?.jsString ?? "") >= pressed
+                let at = r["at"]?.jsString ?? ""
+                // "MM-dd" has no year: a receipt in January answers a press on 12-31 (the window is 6 hours)
+                return r["action"]?.jsString == "estop" && (at >= pressed || (pressed.hasPrefix("12-") && at.hasPrefix("01-")))
             }
             let head = rc == nil ? "已下令停止 · 等机器回执"
                 : (rc?["ok"]?.truthy ?? false) ? "已停止 · 下一趟\(d.nextAt.isEmpty ? "" : " " + d.nextAt) 照常" : "没停干净 · 见下方回执"

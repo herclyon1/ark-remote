@@ -190,10 +190,10 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         while nowMs() - t0 < 11000 {
             try? await Task.sleep(nanoseconds: 500_000_000)
             if let s = pingLatest, let sAt = Self.atOf(s), best == nil || sAt > (Self.atOf(best) ?? 0) { best = s }
-            if let b = best, let bAt = Self.atOf(b), bAt >= floor, nowMs() - bAt * 1000 < Self.freshMs,
+            if let b = best, let bAt = Self.atOf(b), bAt >= floor, relay.serverNowMs() - bAt * 1000 < Self.freshMs,
                relay.snapAt == nil || bAt > Double(relay.snapAt ?? 0) {
                 relay.adopt(b)
-                let a = nowMs() - bAt * 1000
+                let a = relay.serverNowMs() - bAt * 1000
                 relay.setStatus(a < Self.justMs ? "开机中 · 刚刚更新" : "开机中 · 在忙 · 状态 \(ago(Int(bAt)))", "on")
                 return
             }
@@ -227,7 +227,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             relay.setStatus(lb.isEmpty ? "关机 · 还没有过心跳" : "关机 · 最后心跳 \(lb)", "off")
             return
         }
-        let age = nowMs() - bAt * 1000
+        let age = relay.serverNowMs() - bAt * 1000
         if age < Self.justMs { relay.setStatus("开机中 · 刚刚更新", "on"); return }
         if age < Self.freshMs { relay.setStatus("开机中 · 在忙 · 状态 \(ago(Int(bAt)))", "on"); return }
         sawHb(bAt * 1000)
@@ -236,7 +236,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
 
     /// The ping stream's onmessage: keep the newest state whose PIN matches (chunked states are joined).
     private func onPingEvent(_ d: JSONValue, pin: String) {
-        if let ev = d["event"]?.string, ev != "message" { return }
+        if let ev = d["event"]?.string, ev != "message" { tookServerTime(d); return }
         if Relay.isStateNotice(d["message"]?.string) {
             // the reply is on COS: fetch it and keep it like a state that came in the message
             Task { @MainActor [weak self] in
@@ -257,7 +257,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     /// live.js updateLive(): the status line from the heartbeat verdict. Local clock only.
     func updateLive() {
         guard relay.config != nil else { return }
-        let isAlive = lastHb > 0 && (nowMs() - lastHb < hbWindowMs())
+        let isAlive = lastHb > 0 && (relay.serverNowMs() - lastHb < hbWindowMs())
         if alive != isAlive { alive = isAlive }
         if isAlive {
             // 「 · 」 separates: the status card's second line = 「实时 · 配置 1 分钟前」
@@ -279,7 +279,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     /// 「我在看」: the machine beats at once on receipt. No answer within 8 s counts as off.
     func askWatch() {
         guard let cfg = relay.config, !cfg.topic.isEmpty, !cfg.pin.isEmpty else { return }
-        if !(lastHb > 0 && nowMs() - lastHb < hbWindowMs()) {
+        if !(lastHb > 0 && relay.serverNowMs() - lastHb < hbWindowMs()) {
             pendingUntil = nowMs() + (cosHbSeen ? Self.confirmCosMs : Self.confirmMs)
         }
         updateLive()   // show 「正在确认…」 at once, so the old 「关机」 does not hang 5 more seconds
@@ -340,7 +340,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     func readCosHb(show: Bool = true) async {
         guard let b = await relay.cosHb(), let atS = b["at"]?.number, atS > 0 else { return }
         cosHbSeen = true
-        let at = atS * 1000
+        let at = min(atS * 1000, relay.serverNowMs())   // a machine clock ahead must not keep 「开机中」 past a power cut
         sawHb(at)
         if b["bye"]?.bool == true {
             if at >= lastHb {
@@ -349,7 +349,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             }
         } else {
             let cosEvery = b["cos_every"]?.number ?? 30
-            if nowMs() - at < cosEvery * 2000 + 30000 && at > lastHb {
+            if relay.serverNowMs() - at < cosEvery * 2000 + 30000 && at > lastHb {
                 lastHb = at
                 if let n = b["every"]?.number, n > 0 { hbEvery = Int(n) }
             }
@@ -360,8 +360,8 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     /// A state the machine stored is proof of life too (like a state on the stream), by the same 90-s rule.
     private func stateIsLife() {
         guard let a = relay.snapAt else { return }
-        let at = Double(a) * 1000
-        if nowMs() - at < Self.hbFreshMs && at > lastHb { lastHb = at }
+        let at = min(Double(a) * 1000, relay.serverNowMs())   // a stamp in the future counts as now (readCosHb)
+        if relay.serverNowMs() - at < Self.hbFreshMs && at > lastHb { lastHb = at }
         sawHb(at)
     }
 
@@ -390,8 +390,14 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         liveStream = nil
     }
 
+    /// ntfy stamps an open / keepalive event with its own now: the clock the stamps are judged against (Relay.clockSkewMs).
+    private func tookServerTime(_ d: JSONValue) {
+        guard let ev = d["event"]?.string, ev == "open" || ev == "keepalive", let t = d["time"]?.number, t > 0 else { return }
+        relay.clockSkewMs = t * 1000 - nowMs()
+    }
+
     private func onLiveEvent(_ d: JSONValue, cfg: RelayConfig) {
-        if let ev = d["event"]?.string, ev != "message" { return }
+        if let ev = d["event"]?.string, ev != "message" { tookServerTime(d); return }
         let t = (d["time"]?.number ?? 0) * 1000
         if d["topic"]?.string == cfg.topic + "-hb" {
             sawHb(t)

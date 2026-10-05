@@ -48,13 +48,17 @@ struct StatusTab: View {
                         Button(a.ok, role: .cancel) {}
                     } else {
                         Button(a.ok, role: a.destructive ? .destructive : nil) {
-                            if a.isEstop { estopAt = nowSec() }
+                            let pressed = nowSec()
                             Task {
                                 // view.js oneShot: a send that fails is the 「发不出去」 alert with the reason, not a toast
                                 if let why = await StatusCommands.send(a) {
                                     // an instant failure (no mailbox set) must not land while this alert is still closing
                                     try? await Task.sleep(nanoseconds: 400_000_000)
                                     ask = StatusAsk.notice("发不出去", why)
+                                } else if a.isEstop {
+                                    // only an order that went out waits for its receipt: written before the send, a
+                                    // failed one still read 「已下令停止 · 等机器回执」 for 6 hours (edge audit 4)
+                                    estopAt = pressed
                                 }
                             }
                         }

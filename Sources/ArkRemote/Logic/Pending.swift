@@ -153,7 +153,7 @@ struct PendingBar: Sendable, Equatable {
             let at = p.resentAt ?? p.sentAt
             // pending.js:58-59: past 10 h the mailbox (12 h) may have dropped it; resent only by a tap, never automatically
             if Self.isStale(p) { return .sent(text: "没回执 · 已寄出 \(Self.hhmm(at))") }
-            let fresh = relay.snapAt.map { Double(nowSec() - $0) < Live.freshMs / 1000 } ?? false
+            let fresh = relay.snapAt.map { relay.serverNowMs() / 1000 - Double($0) < Live.freshMs / 1000 } ?? false
             return .sent(text: "已寄出 \(Self.hhmm(at)) · \(fresh ? "几秒内回执" : "机器开机后生效")")
         }
         if editing { return nil }
@@ -205,7 +205,8 @@ struct PendingBar: Sendable, Equatable {
         guard let at = relay.snapAt, at != 0 else { return }
         var changed = false
         for (key, p) in items {
-            if at <= (p.resentAt ?? p.sentAt) { continue }
+            // sentAt is this phone's clock, `at` the machine's: compare on ntfy's (Relay.clockSkewMs, edge audit 3)
+            if Double(at) <= Double(p.resentAt ?? p.sentAt) + relay.clockSkewMs / 1000 { continue }
             guard let live = liveVals[key] else { continue }   // this state does not carry the field; wait for the next
             if Self.sameVal(live, p.to) {
                 items[key] = nil
