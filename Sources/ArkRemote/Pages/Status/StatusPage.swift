@@ -15,8 +15,6 @@ struct StatusPage: View {
     @State var echoUntil = "08:30"
     @State var echoNewUntil = ""
     /// Which time field has the keyboard: leaving it checks the entry (view.js:1235 data-time onchange fires on blur).
-    @FocusState var timeFocus: Bool
-    @FocusState var newTimeFocus: Bool
     /// Bumped every 30 s by a local timer so 「X 分钟前」 follows the clock (no network: view.js ago() redrawn on render).
     @State var tick = 0
     /// A reselect of the 状态 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
@@ -337,23 +335,11 @@ struct StatusPage: View {
     private var echoFarmSection: some View {
         Section("刷 4C 声骸") {
             if let ef = data.echoFarm {
-                // view.js:396-398: the field sits beside its title, the explanation under the title (web .row: label + .hint left,
-                // input.short right, index.html:488 72–120 px wide)
-                HStack(spacing: 12) {
-                    // echofarm.py retime (363-384) resolves the time like a start: one already past is tomorrow's (审查 A2: the
-                    // old 「已经过了的时刻＝立刻收工」 sent a farm on for another day); stopping now is 「提前收工」
-                    rowTitle("改成刷到几点（机器时间）", "提前或延后都行，填 21:00 这种。已经过了的时刻算明天；要马上停按「提前收工」")
-                    // view.js:398 #efnew value = the current 到; :1235 data-time: a bad entry rolls back with a toast when it is left
-                    TextField(ef.until, text: $echoNewUntil)
-                        .onAppear { if echoNewUntil.isEmpty { echoNewUntil = ef.until } }
-                        .onSubmit { echoNewUntil = Self.checkedTime(echoNewUntil, else: ef.until) }
-                        .focused($newTimeFocus)
-                        .onChange(of: newTimeFocus) { _, on in
-                            if !on { echoNewUntil = Self.checkedTime(echoNewUntil, else: ef.until) }
-                        }
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: Self.timeFieldWidth)
-                        .timeKeyboard()
+                // echofarm.py retime (363-384) resolves the time like a start: one already past is tomorrow's (审查 A2: the
+                // old 「已经过了的时刻＝立刻收工」 sent a farm on for another day); stopping now is 「提前收工」. view.js:398 #efnew
+                // starts at the current 到; picked with the system time picker, not typed (user 20:12, via 验收)
+                DatePicker(selection: hhmmBinding($echoNewUntil, else: ef.until), displayedComponents: .hourAndMinute) {
+                    rowTitle("改成刷到几点（机器时间）", "提前或延后都行。已经过了的时刻算明天；要马上停按「提前收工」")
                 }
             } else {
                 Picker(selection: $bossIndex) {
@@ -365,18 +351,9 @@ struct StatusPage: View {
                     }
                 }
                 .pickerStyle(.menu)
-                // view.js:174-176 echoFarmBlock: title + explanation left, the time field right of them
-                HStack(spacing: 12) {
-                    rowTitle("刷到几点（机器时间）", "填 08:30 这种，已过就算明天。到点自动收工、配置还原")
-                    TextField("08:30", text: $echoUntil)
-                        .onSubmit { echoUntil = Self.checkedTime(echoUntil, else: "08:30") }
-                        .focused($timeFocus)
-                        .onChange(of: timeFocus) { _, on in
-                            if !on { echoUntil = Self.checkedTime(echoUntil, else: "08:30") }
-                        }
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: Self.timeFieldWidth)
-                        .timeKeyboard()
+                // view.js:174-176 echoFarmBlock: title + explanation left, the time right of them; picked, not typed
+                DatePicker(selection: hhmmBinding($echoUntil, else: "08:30"), displayedComponents: .hourAndMinute) {
+                    rowTitle("刷到几点（机器时间）", "已过就算明天。到点自动收工、配置还原")
                 }
                 Button("开始刷") { actions.startEchoFarm(bossIndex, echoUntil) }
             }
@@ -393,14 +370,22 @@ struct StatusPage: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// index.html:488 input.short: 72–120 px; a fixed width in that range holds 「08:30」 with the platform field's padding.
-    private static let timeFieldWidth: CGFloat = 104
-
-    /// view.js:1235 input[data-time] onchange: 「8:30」 → 「08:30」; anything else rolls back with 「时刻填成 08:30 这种」.
-    @MainActor static func checkedTime(_ v: String, else last: String) -> String {
-        if let t = statusTimeHHMM(v) { return t }
-        Relay.shared.showToast("时刻填成 08:30 这种")
-        return last
+    /// A machine time 「HH:MM」 (sent as is, statusTimeHHMM) as the Date a time picker shows, and back. The same calendar
+    /// both ways, on today's date in the phone's zone, so the picker shows exactly the stored 「HH:MM」 (the field is the
+    /// machine's clock, but only its digits matter here: no zone conversion).
+    private func hhmmBinding(_ text: Binding<String>, else fallback: String) -> Binding<Date> {
+        Binding(
+            get: {
+                let hm = (statusTimeHHMM(text.wrappedValue) ?? statusTimeHHMM(fallback) ?? "08:30").split(separator: ":")
+                let cal = Calendar.current
+                return cal.date(bySettingHour: Int(hm[0]) ?? 8, minute: Int(hm[1]) ?? 30, second: 0,
+                                of: cal.startOfDay(for: Date())) ?? Date()
+            },
+            set: { d in
+                let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+                text.wrappedValue = "\(pad2(c.hour ?? 0)):\(pad2(c.minute ?? 0))"
+            }
+        )
     }
 
     // MARK: 机器 (schema.js RELAY_SWITCHES, tab 状态)

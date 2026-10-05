@@ -167,19 +167,6 @@ extension View {
 }
 
 extension View {
-    /// iOS: the HH:MM fields (刷到几点 / 改成刷到几点) open the digits-and-punctuation keyboard. The web's inputmode
-    /// "numeric" (view.js:161, 171) opens a digit pad, but .numberPad has no ":" and statusTimeHHMM (StatusMapping.swift:19,
-    /// view.js:71 timeHHMM) only takes 08:30, so the time could not be typed at all; the default keyboard was letters
-    /// with only a return key (test pass 5). Android: skip-ui maps .numbersAndPunctuation to Compose's Text
-    /// (UIKeyboardType.swift:30), the keyboard it already had, so nothing changes there.
-    func timeKeyboard() -> some View {
-        #if !os(Android) && canImport(UIKit)
-        keyboardType(.numbersAndPunctuation).autocorrectionDisabled()
-        #else
-        self
-        #endif
-    }
-
     /// The page's 放弃 (✕) also ends the editing: the field kept its focus and keyboard on Android, and the next tap on
     /// the keyboard typed into the reverted value and made a new 待保存 (test pass 5, 理智药 → 6). Android: the Compose
     /// focus is cleared when the press goes down (the Initial pass, before the button's click), so a field that checks
