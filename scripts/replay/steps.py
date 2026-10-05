@@ -63,7 +63,7 @@ step("setup.launch", "setup", "冷启动（一次性信箱已写好）→ 状态
 
 # ------------------------------------------------------------------ status page
 step("status.refresh", "status", "状态 · 刷新 → 寄出 refresh，设备卡仍「开机中」",
-     [tap("刷新"), ("state", "base")], expect=["~开机中"], cmd={"action": "refresh"})
+     [tap("刷新")], expect=["~开机中"], cmd={"action": "refresh"})
 step("status.runnow.ask", "status", "状态 · 现在跑一趟 → 弹「现在跑一趟？」",
      [tap(STATUS_ROOT)], expect=["现在跑一趟？", "跑一趟"])
 step("status.runnow.go", "status", "弹窗 · 跑一趟 → 寄出 run_now",
@@ -85,7 +85,7 @@ step("status.echo.ask", "status", "开始刷 → 弹「开始刷？」",
 step("status.echo.go", "status", "弹窗 · 开始刷 → 寄出 echo_farm（第 3 个，到 08:30）",
      [tap("开始刷", last=True)], absent=["开始刷？"], cmd={"action": "echo_farm"})
 step("status.keepon.discard", "status", "下次跑完不关机 打开 → 待保存 1 项 → ✕ 放弃 → 回原样、没寄出",
-     [("state", "base"), ("toggle", "下次跑完不关机"), ("wait", 0.6), tap(DISCARD, region="top")],
+     [("toggle", "下次跑完不关机"), ("wait", 0.6), tap(DISCARD, region="top")],
      absent=["~待保存"], nocmd=2)
 step("status.two.pending", "status", "下次跑完不关机 + 调试模式 打开 → 标题「待保存 2 项」",
      [("toggle", "下次跑完不关机"), ("toggle", "调试模式")], expect=["~待保存 2 项"])

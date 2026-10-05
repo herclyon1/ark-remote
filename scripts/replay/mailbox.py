@@ -11,15 +11,21 @@ output directory. Nothing is ever sent to the real mailbox. `--state <file>` reu
 import base64
 import copy
 import gzip
+import threading
 import hashlib
 import json
 import time
+import urllib.error
 import urllib.request
 
 NTFY = "https://ntfy.sh"
 COS = "https://ark-evidence-1315873325.cos.ap-shanghai.myqcloud.com"   # Sources/ArkRemote/Logic/Net.swift cosBase
 ROOM = 4096 - 400                                                       # relay phone.py pack_chunks slice size
 SHANGHAI = 8 * 3600                                                      # the machine's clock (receipt `at` / `sent`)
+
+
+class NtfyLimit(RuntimeError):
+    pass
 
 
 def fetch_real_state(real_topic):
@@ -46,6 +52,50 @@ class Mailbox:
         base = copy.deepcopy(base_state)
         base.pop("密钥", None)
         self.base = base
+        self.seen = []          # (ntfy time, envelope) of every kind=cmd message on the topic since listen()
+        self.lock = threading.Lock()
+        self.listening = False
+
+    def listen(self, since_ts):
+        """One long-lived ntfy subscription for the whole run (ntfy.sh limits requests per IP: polling per step
+        would spend them, and the app on the same Mac shares that budget)."""
+        self.listening = True
+        self.listen_ok = threading.Event()
+
+        def loop():
+            since = int(since_ts)
+            while self.listening:
+                try:
+                    with urllib.request.urlopen(f"{NTFY}/{self.topic}/json?since={since}", timeout=90) as r:
+                        self.listen_ok.set()
+                        for raw in r:
+                            if not self.listening:
+                                return
+                            self._take(raw.decode("utf-8", "replace"))
+                            since = max(since, int(time.time()) - 5)
+                except Exception:
+                    time.sleep(3)
+        threading.Thread(target=loop, daemon=True).start()
+        self.listen_ok.wait(20)
+
+    def _take(self, line):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            return
+        if e.get("event") != "message":
+            return
+        try:
+            m = json.loads(e.get("message", ""))
+        except ValueError:
+            return
+        if isinstance(m, dict) and m.get("kind") == "cmd":
+            with self.lock:
+                if not any(e.get("id") == i for i, _, _ in self.seen):
+                    self.seen.append((e.get("id"), e.get("time", 0), m))
+
+    def stop(self):
+        self.listening = False
 
     # ---- states
     def normalized(self):
@@ -100,13 +150,21 @@ class Mailbox:
         self.guard.check_publish(topic)
         req = urllib.request.Request(f"{NTFY}/{topic}", data=data, method="POST",
                                      headers={"User-Agent": "ark-replay", "Title": title})
-        with urllib.request.urlopen(req, timeout=20) as r:
-            if r.status >= 300:
-                raise RuntimeError(f"ntfy answered {r.status}")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                if r.status >= 300:
+                    raise RuntimeError(f"ntfy answered {r.status}")
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                raise NtfyLimit(f"ntfy.sh 限额（429）：{e.read()[:200]!r}")
+            raise
 
     # ---- what the app sent
     def cmds(self, since_ts):
         """kind=cmd envelopes the app posted to the throwaway topic since since_ts (s): [(ntfy time, envelope)]."""
+        if self.listening:
+            with self.lock:
+                return [(t, m) for _, t, m in self.seen if t >= int(since_ts)]
         url = f"{NTFY}/{self.topic}/json?poll=1&since={int(since_ts)}"
         out = urllib.request.urlopen(url, timeout=20).read().decode()
         res = []

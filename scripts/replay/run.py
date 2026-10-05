@@ -124,39 +124,42 @@ class Runner:
         return 0 <= n["y"] <= H and 0 <= n["x"] <= W
 
     def locate(self, sel, scroll=True, region="any"):
-        """A visible node for sel, scrolling the content to find it when needed."""
+        """A visible node for sel; when scroll is on, scroll down to the bottom, then back up to the top, looking."""
         d = norm_sel(sel)
         nth = d.get("nth", 0)
-        W, H = self.drv.size
-        tries = [None] + (["up"] * 6 + ["top"] + ["up"] * 6 if scroll else [])
-        last_sig = None
-        for move in tries:
-            if move == "up":
-                self.scroll("up")
-            elif move == "top":
-                for _ in range(6):
-                    self.scroll("down")
-            dump = self.dump(move is not None or self.cache is None)
-            hits = [n for n in self.find(sel, dump, region) if self.on_screen(n)]
+        H = self.drv.size[1]
+
+        def look(fresh):
+            dump = self.dump(fresh)
             top, bottom = self.drv.content_box(dump["nodes"])
-            good = [n for n in hits if region != "content" or top <= n["y"] <= bottom]
+            hits = [n for n in self.find(sel, dump, region) if self.on_screen(n)]
             if region == "any":
                 # prefer nodes not hidden behind the tab bar / keyboard
-                inside = [n for n in hits if top - 60 <= n["y"] <= bottom + 10] or hits
-                good = inside
-            if len(good) > nth:
-                n = good[nth]
-                if region == "any" and (n["y"] > bottom + 10) and scroll and move != "top" and n["y"] < H:
-                    self.scroll("up", short=True)
-                    continue
+                hits = [n for n in hits if top - 60 <= n["y"] <= bottom + 10] or hits
+            sig = tuple((tuple(n["texts"]), n["y"]) for n in dump["nodes"] if n["texts"])[:80]
+            return (hits[nth] if len(hits) > nth else None), sig, bottom
+
+        n, sig, bottom = look(self.cache is None)
+        if n or not scroll:
+            if n and scroll and region == "any" and n["y"] > bottom + 10:
+                self.scroll("up", short=True)
+                n2, _, _ = look(True)
+                n = n2 or n
+            if n:
                 return n
-            sig = tuple(sorted((tuple(n["texts"]), n["y"]) for n in dump["nodes"][:60]))
-            if move == "up" and sig == last_sig:
-                # bottom reached: jump to the top pass
-                tries_left = tries[tries.index(move):]
-                if "top" not in tries_left:
-                    break
-            last_sig = sig
+            raise StepFail(f"找不到「{sel_text(sel)}」")
+        for direction in ("up", "down"):
+            for _ in range(8 if direction == "up" else 12):
+                self.scroll(direction)
+                n, sig2, bottom = look(True)
+                if n:
+                    if region == "any" and n["y"] > bottom + 10:
+                        self.scroll("up", short=True)
+                        n = look(True)[0] or n
+                    return n
+                if sig2 == sig:
+                    break        # this end of the page reached
+                sig = sig2
         raise StepFail(f"找不到「{sel_text(sel)}」")
 
     def scroll(self, direction, short=False):
@@ -364,7 +367,7 @@ class Runner:
         deadline = time.time() + step.get("cmd_timeout", 25)
         wants = want if isinstance(want, list) else ([want] if want is not None else [])
         while True:
-            allc = [m for ts, m in self.mb.cmds(t0 - 2)]
+            allc = [m for ts, m in self.mb.cmds(t0 if none_for else t0 - 2)]
             got = [m for m in allc if self.cmd_action(m) not in BACKGROUND_ACTIONS]
             if none_for:
                 if got:
@@ -594,6 +597,7 @@ def main():
         drv.write_default("ark-diag-bucket", DIAG_BLACKHOLE)
         r.check_stored_config()
         drv.clear_clipboard()
+        mb.listen(t_start - 5)
         mb.publish_state("base")
         mb.hb(300)
         print(f"开始：{a.platform} {a.device or a.serial}，{len(plan)} 步，输出 {out}", flush=True)
@@ -605,6 +609,9 @@ def main():
     except guardmod.GuardError as e:
         print("拒绝运行：", e)
         rc = 2
+    except mbmod.NtfyLimit as e:
+        print("中止：", e)
+        rc = 3
     except KeyboardInterrupt:
         print("中断")
         rc = 130
@@ -614,6 +621,7 @@ def main():
         except Exception:
             pass
         drv.stop()
+        mb.stop()
     took = time.time() - t_start
     bad = [x for x in r.results if not x["ok"]]
     print(f"\n合计 {len(r.results)} 步：对 {len(r.results) - len(bad)}，不对 {len(bad)}；用时 {took / 60:.1f} 分钟")
