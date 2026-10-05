@@ -40,7 +40,7 @@ struct SetupScreen: View {
                 // (no assetlinks.json on herclyon1.github.io), so the app takes the same link from the clipboard instead.
                 Section {
                     Button("粘贴免输入链接") {
-                        if !takeLink() { noLinkShown = true }
+                        if !Self.takeLink() { noLinkShown = true }
                     }
                 } footer: {
                     Text("用免输入链接进网页的：在网页「手机」页复制免输入链接（或从书签复制那条链接），回来点这里。")
@@ -54,7 +54,7 @@ struct SetupScreen: View {
                 Button("好") {}
             }
             // a link already copied: take it on open, no tap needed
-            .onAppear { _ = takeLink() }
+            .onAppear { Self.takeLinkOnOpen() }
         }
         // view.js toast(): ContentView draws the toast layer over the tabs only, and this screen stands in for them
         .overlay { ToastLayer() }
@@ -63,11 +63,27 @@ struct SetupScreen: View {
 
 extension SetupScreen {
     /// A 免输入链接 (…#k=…) on the clipboard → PhoneLink.open, the same path as an opened link. True when it took.
-    @MainActor func takeLink() -> Bool {
+    @MainActor static func takeLink() -> Bool {
         guard let s = PhoneLink.pasted()?.trimmingCharacters(in: .whitespacesAndNewlines), s.contains("#k="),
               let u = URL(string: s) else { return false }
         PhoneLink.open(u)
         return Relay.shared.config != nil
+    }
+
+    /// On open nobody has tapped anything yet: reading another app's clip there made iOS ask 「允许粘贴」 on the very first
+    /// screen (edge audit 19). iOS reads it only when detectPatterns (no prompt) sees a probable link, as
+    /// AppGlue.takeClipboardIfDue does; the 「粘贴免输入链接」 tap reads it directly.
+    @MainActor static func takeLinkOnOpen() {
+        #if !os(Android) && canImport(UIKit)
+        let pb = UIPasteboard.general
+        guard pb.hasStrings else { return }
+        pb.detectPatterns(for: [.probableWebURL]) { r in
+            guard case .success(let found) = r, found.contains(.probableWebURL) else { return }
+            Task { @MainActor in _ = takeLink() }
+        }
+        #else
+        _ = takeLink()
+        #endif
     }
 }
 
