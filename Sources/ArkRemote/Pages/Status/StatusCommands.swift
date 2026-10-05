@@ -78,8 +78,13 @@ enum StatusCommands {
             note(edits, StatusSwitchID.queue(name), label: label, on: on, body: body)
         }
         a.startEchoFarm = { boss, until in
-            guard let t = statusTimeHHMM(until), boss > 0 else {
+            guard boss > 0 else {
                 relay.showToast("先选 boss 再填时刻")   // view.js:1228
+                return
+            }
+            // a boss picked and a time like 25:00 was told to pick a boss (edge audit 38): the time's own words, as 改收工时刻
+            guard let t = statusTimeHHMM(until) else {
+                relay.showToast("时刻填成 08:30 这种")   // view.js:1239
                 return
             }
             let nm = statusBosses.first(where: { $0.index == boss })?.name ?? "第 \(boss) 个"
