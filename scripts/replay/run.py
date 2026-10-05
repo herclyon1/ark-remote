@@ -78,6 +78,8 @@ class Runner:
         self.cache = None
         self.ctx = {}
         self.results = []
+        self.windows = {}      # step id -> (start, end) epoch s, for the app's own send log (app_posts)
+        self.note = None
 
     # ---- tree access
     def dump(self, fresh=True):
@@ -196,6 +198,14 @@ class Runner:
                 n = hits[-1]
             else:
                 n = self.locate(rest[0], scroll=opts.get("scroll", True), region=opts.get("region", "any"))
+                for _ in range(8 if opts.get("stable") else 0):
+                    # a sheet still sliding up: tap only once two dumps agree on where the element is
+                    time.sleep(0.4)
+                    self.invalidate()
+                    m = self.locate(rest[0], scroll=False, region=opts.get("region", "any"))
+                    if (m["x"], m["y"]) == (n["x"], n["y"]):
+                        break
+                    n = m
             x, y = n["x"] + opts.get("dx", 0), n["y"] + opts.get("dy", 0)
             if opts.get("right"):
                 x = n["x"] + n["w"] // 2 - opts["right"]
@@ -274,16 +284,195 @@ class Runner:
                 raise StepFail("门测试缺坐标（先跑记坐标的步骤）")
             (x1, y1), (x2, y2) = self.ctx[rest[0]], self.ctx[rest[1]]
             self.drv.gate_press(x1, y1, x2, y2, rest[2], rest[3])
+        elif kind == "gate_trials":
+            self.gate_trials(*rest)
+        elif kind == "app_posts":
+            self.check_app_posts(rest[0])
         elif kind == "clipboard":
-            if rest and rest[0]:
+            if rest and rest[0] == "@link":
+                self.drv.set_clipboard(self.own_link())
+            elif rest and rest[0]:
                 self.drv.set_clipboard(rest[0])
             else:
                 self.drv.clear_clipboard()
+        elif kind == "forget_config":
+            # the 第一次使用 screen: no stored mailbox (and no remembered link, so a copied link is taken again)
+            self.drv.terminate()
+            self.drv.delete_defaults(["ark-remote-cfg", "ark-remote-link-taken"])
+        elif kind == "restore_config":
+            self.drv.terminate()
+            self.drv.write_default("ark-remote-cfg", json.dumps({"topic": self.guard.topic, "pin": self.mb.pin}, separators=(",", ":")))
+            self.check_stored_config()
+        elif kind == "fluency":
+            self.fluency(*rest)
         elif kind == "shot":
             self.drv.screenshot(os.path.join(self.out, rest[0] + ".png"))
         else:
             raise StepFail(f"未知动作 {kind}")
         self.invalidate()
+
+    def gate_trials(self, n, gap_ms, hold_ms):
+        """Android 400 ms gate (EWLive.swift go(): a press that began before armedAt does not send; armedAt is set 400 ms
+        after the sheet's onAppear). n trials: raw tap on ✓, after gap_ms a raw press on 寄出 (its position with the sheet
+        fully up, remembered as "send") held hold_ms, so the press begins early and ends after the gate opened. Each trial
+        is timed against the sheet window's own first frame (dumpsys gfxinfo framestats, same clock as the kernel touch
+        times). None may send: judged by the mailbox here and by the app's own send log in the step (appsent=0)."""
+        if self.drv.platform != "android":
+            raise StepFail("gate_trials 只在安卓上跑")
+        if "save" not in self.ctx or "send" not in self.ctx:
+            raise StepFail("门测试缺坐标（先跑记坐标的步骤）")
+        (x1, y1), (x2, y2) = self.ctx["save"], self.ctx["send"]
+        rows = []
+        gap = gap_ms
+        for k in range(n):
+            t = self.drv.gate_trial(x1, y1, x2 + (k % 2), y2 + (k % 3), gap, hold_ms)
+            if len(t) < 4:
+                raise StepFail(f"第 {k + 1} 次：getevent 没录到四次触摸（{len(t)}）")
+            sheet = self.drv.sheet_frames(t[1])
+            if sheet is None:
+                raise StepFail(f"第 {k + 1} 次：没找到确认单的窗口帧（✓ 没点开？）")
+            first, drawn, nfr = sheet
+            # where 寄出 sits once the sheet is up: the sheet opens at the medium or the large detent, so a press
+            # aimed at the remembered spot is on the button only when this trial's sheet stopped at the same height
+            self.invalidate()
+            b = self.locate("寄出 1 项", scroll=False)
+            for _ in range(8):
+                time.sleep(0.4)
+                self.invalidate()
+                b2 = self.locate("寄出 1 项", scroll=False)
+                if (b2["x"], b2["y"]) == (b["x"], b["y"]):
+                    break
+                b = b2
+            on_button = abs(b["y"] - y2) <= b["h"] // 2 and abs(b["x"] - x2) <= b["w"] // 2
+            rows.append({"down_after_first": round(t[2] - first), "first_drawn": round(drawn - first),
+                         "up_after_first": round(t[3] - first), "tap_to_first": round(first - t[1]), "on_button": on_button})
+            self.ctx["send"] = (x2, y2) = (b["x"], b["y"])    # aim the next trial where the button was this time
+            # aim the next press just after this trial's first frame was done, if that is still inside the 400 ms
+            target = min(rows[-1]["first_drawn"] + 30, 380)
+            gap = max(0, gap + target - rows[-1]["down_after_first"])
+            # the sheet stays open when nothing was sent: close it with 再想想
+            n_ = self.locate("再想想", scroll=False)
+            self.drv.tap(n_["x"], n_["y"])
+            end = time.time() + 12
+            while time.time() < end and self.find("确认这次修改", self.dump(True)):
+                time.sleep(0.5)
+        inwin = [r for r in rows if r["on_button"] and r["first_drawn"] <= r["down_after_first"] < 400]
+        self.note = (f"{n} 次（按在寄出停稳的位置上 {sum(r['on_button'] for r in rows)} 次）：按下距单子首帧开始 {min(r['down_after_first'] for r in rows)}–{max(r['down_after_first'] for r in rows)} ms，"
+                     f"松手 {min(r['up_after_first'] for r in rows)}–{max(r['up_after_first'] for r in rows)} ms；"
+                     f"单子首帧画完要 {min(r['first_drawn'] for r in rows)}–{max(r['first_drawn'] for r in rows)} ms；"
+                     f"落在「首帧已画完且不到 400 ms」的 {len(inwin)} 次")
+        self.ctx["gate_rows"] = rows
+
+    def own_link(self):
+        """A 免输入链接 for the THROWAWAY mailbox (PhoneTab.swift PhoneLink.make: pageURL#k=base64url({"t","p"})); never
+        the real one, so the app taking it from the clipboard keeps talking to the throwaway mailbox."""
+        import base64
+        self.guard.check_publish(self.guard.topic)
+        k = base64.urlsafe_b64encode(json.dumps({"t": self.guard.topic, "p": self.mb.pin}, separators=(",", ":")).encode()).decode().rstrip("=")
+        return "https://herclyon1.github.io/maa/#k=" + k
+
+    def fluency(self, cycles=3):
+        """Android: switch the five tabs `cycles` times (1.5 s apart) and read the app's own FluencyRec lines for those
+        presses (files/diag-rec/ark-flu-queue.json: a line goes there when its gesture hit a rule, e.g. long = a frame
+        interval > 100 ms; the upload goes to the blackholed diag bucket, so the queue keeps it). Only when the Mac is
+        idle: 1-minute load below 8 before and after."""
+        if self.drv.platform != "android":
+            raise StepFail("fluency 只在安卓上跑")
+        load0 = os.getloadavg()[0]
+        if load0 >= 8:
+            raise StepFail(f"Mac 1 分钟负载 {load0:.1f} ≥ 8，没量")
+        tabs = ["方舟", "终末地", "鸣潮", "手机", "状态"]
+        dump = self.dump(True)
+        pos = {}
+        for t in tabs:
+            hits = self.find({"t": t, "region": "bottom"}, dump)
+            if not hits:
+                raise StepFail(f"底栏找不到「{t}」")
+            pos[t] = (hits[0]["x"], hits[0]["y"])
+        m0 = time.time()
+        dev = int(self.drv.sh("date +%s%3N").strip() or 0)
+        off = dev - (m0 + time.time()) / 2 * 1000
+        self.drv.sh("dumpsys gfxinfo com.herclyon.arkremote reset > /dev/null")
+        taps = []
+        for _ in range(cycles):
+            for t in tabs:
+                taps.append((t, time.time() * 1000 + off))
+                self.drv.tap(*pos[t])
+                time.sleep(1.5)
+        gfx = self.drv.sh("dumpsys gfxinfo com.herclyon.arkremote")
+        pct = {k: v for k, v in re.findall(r"^(50th|90th|99th) percentile: (\d+)ms", gfx, re.M)}
+        load1 = os.getloadavg()[0]
+        # FluencyRec queues a hit's upload SEND_MS (30 s) after the first hit
+        lines, deadline = [], time.time() + 60
+        while time.time() < deadline:
+            time.sleep(5)
+            raw = self.drv.sh("cat /data/data/com.herclyon.arkremote/files/diag-rec/ark-flu-queue.json")
+            lines = []
+            try:
+                for rec in json.loads(raw or "[]"):
+                    body = json.loads(rec.get("body") or "{}")
+                    lines += [ln for ln in body.get("lines", []) if ln.get("kind") == "tap" and ln.get("at", 0) >= taps[0][1] - 500]
+            except ValueError:
+                continue
+            if lines and max(ln["at"] for ln in lines) >= taps[-1][1] - 2000:
+                break
+        per = []
+        for t, at in taps:
+            ln = min((ln for ln in lines if at - 200 <= ln["at"] <= at + 1400), key=lambda ln: ln["at"], default=None)
+            per.append((t, ln))
+
+        def say(target):
+            got = [ln for t, ln in per if t == target]
+            longs = [ln["max"] for ln in got if ln and "long" in (ln.get("bad") or [])]
+            return f"切到{target} {len(got)} 次里 long {len(longs)} 次" + (f"（{'/'.join(str(m) for m in longs)} ms）" if longs else "")
+        maxes = [ln["max"] for _, ln in per if ln]
+        self.note = (f"负载 {load0:.1f}→{load1:.1f}；{say('终末地')}；{say('鸣潮')}；"
+                     f"记下的 {len(maxes)}/{len(per)} 次里最长一帧 {max(maxes) if maxes else '—'} ms"
+                     f"（其余没命中规则，≤100 ms）；同段 gfxinfo 帧 p50 {pct.get('50th', '?')} / p90 {pct.get('90th', '?')} / p99 {pct.get('99th', '?')} ms")
+        self.ctx["fluency"] = per
+        if load1 >= 8:
+            raise StepFail(f"量完 Mac 1 分钟负载 {load1:.1f} ≥ 8，这组数不作数")
+
+    def app_posts(self, since, until):
+        """The app's own send log: 诊断记录 (DiagLog, key ark-diag-events) fetch events with method POST to the mailbox
+        (url ntfy.sh/<信箱>) between since and until (epoch s). DiagLog saves at most every 5 s, on the next event, so
+        this waits until the saved log reaches past `until`. Returns [(t, status or error)], or None if the log
+        never caught up (诊断记录 off?)."""
+        deadline = time.time() + 20
+        while True:
+            raw = self.drv.read_default("ark-diag-events")
+            try:
+                ev = json.loads(raw) if raw else []
+            except ValueError:
+                ev = []
+            newest = max((e.get("t", 0) for e in ev if isinstance(e, dict)), default=0) / 1000
+            if newest >= until:
+                return [(e["t"] / 1000, e.get("status") or e.get("error") or "?") for e in ev
+                        if isinstance(e, dict) and e.get("kind") == "fetch" and e.get("method") == "POST"
+                        and "<信箱>" in (e.get("url") or "") and since * 1000 <= e.get("t", 0) <= until * 1000 + 2000]
+            if time.time() > deadline:
+                return None
+            time.sleep(2)
+
+    def check_app_posts(self, want):
+        """want = {step id: 0 (no send) | n (at least n)}: the app's own send log during each of those steps' windows.
+        The log must be saved first (a step that opens 分享诊断记录 does that: DiagUI.prepareSheet -> persist)."""
+        posts = self.app_posts(min(self.windows[k][0] for k in want if k in self.windows) - 1, time.time() - 1)
+        if posts is None:
+            raise StepFail("App 的诊断记录没有跟上（诊断记录没开？）")
+        bad, said = [], []
+        for k, n in want.items():
+            if k not in self.windows:
+                bad.append(f"{k} 没跑")
+                continue
+            a, b = self.windows[k]
+            got = [p for p in posts if a - 1 <= p[0] <= b + 2]
+            said.append(f"{k} {len(got)} 条" + (f"（{', '.join(str(s) for _, s in got)}）" if got else ""))
+            if (n == 0 and got) or (n > 0 and len(got) < n):
+                bad.append(f"{k} 应为 {'0' if n == 0 else '≥' + str(n)} 条，实际 {len(got)} 条")
+        self.note = "App 自己的发送记录：" + "；".join(said)
+        if bad:
+            raise StepFail("；".join(bad))
 
     @staticmethod
     def cmd_action(m):
@@ -295,27 +484,26 @@ class Runner:
             return n["kind"] == "EditText"
         return n["kind"] in ("TextField", "SecureTextField", "TextView")
 
-    def toggle(self, sel, opts):
-        n = self.locate(sel, scroll=opts.get("scroll", True))
-        nodes = self.dump(False)["nodes"]
+    def switch_on_row(self, n, nodes):
+        """The switch on the row of node n (iOS: Switch / Toggle element; Android: the checkable node), or None."""
         if self.drv.platform == "ios":
             if n["kind"] in ("Switch", "Toggle"):
-                sw = n
-            else:
-                cands = [s for s in nodes if s["kind"] in ("Switch", "Toggle") and abs(s["y"] - n["y"]) <= max(n["h"], 44)]
-                if not cands:
-                    raise StepFail(f"「{sel_text(sel)}」那行没有开关")
-                sw = min(cands, key=lambda s: abs(s["y"] - n["y"]))
-            # a SwiftUI Toggle's element spans the row: tap the knob at its right end
-            x = sw["x"] + sw["w"] // 2 - 30 if sw["w"] > 100 else sw["x"]
-            self.drv.tap(x, sw["y"])
+                return n
+            cands = [s for s in nodes if s["kind"] in ("Switch", "Toggle") and abs(s["y"] - n["y"]) <= max(n["h"], 44)]
         else:
             cands = [s for s in nodes if s["checked"] is not None and abs(s["y"] - n["y"]) <= max(n["h"], 110) and s["x"] >= n["x"] - 10]
             if not cands:
                 cands = [s for s in nodes if s["checked"] is not None and abs(s["y"] - n["y"]) <= max(n["h"], 110)]
-            if not cands:
-                raise StepFail(f"「{sel_text(sel)}」那行没有开关")
-            sw = min(cands, key=lambda s: abs(s["y"] - n["y"]))
+        return min(cands, key=lambda s: abs(s["y"] - n["y"])) if cands else None
+
+    def toggle(self, sel, opts):
+        n = self.locate(sel, scroll=opts.get("scroll", True))
+        sw = self.switch_on_row(n, self.dump(False)["nodes"])
+        if sw is None:
+            raise StepFail(f"「{sel_text(sel)}」那行没有开关")
+        if self.drv.platform == "ios" and sw["w"] > 100:
+            self.drv.tap(sw["x"] + sw["w"] // 2 - 30, sw["y"])   # a SwiftUI Toggle's element spans the row: tap the knob
+        else:
             self.drv.tap(sw["x"], sw["y"])
 
     def hide_keyboard(self):
@@ -361,6 +549,13 @@ class Runner:
                 raise StepFail("App 不在前台（闪退？）")
             miss = [f"缺「{sel_text(s)}」" + (f" ×{norm_sel(s)['count']}" if norm_sel(s).get("count") else "")
                     for s in exp if len(self.find(s, dump)) < norm_sel(s).get("count", 1)]
+            for s, want in (step.get("switch") or {}).items():
+                rows = [n for n in self.find(s, dump) if self.on_screen(n)]
+                sw = self.switch_on_row(rows[0], dump["nodes"]) if rows else None
+                if sw is None:
+                    miss.append(f"「{sel_text(s)}」那行没有开关")
+                elif sw["checked"] != want:
+                    miss.append(f"「{sel_text(s)}」开关是{'开' if sw['checked'] else '关'}，应为{'开' if want else '关'}")
             for s in step.get("visible", []):
                 top, bottom = self.drv.content_box(dump["nodes"])
                 if not [n for n in self.find(s, dump) if top - 40 <= n["y"] <= bottom]:
@@ -421,6 +616,7 @@ class Runner:
         t0 = time.time()
         marker = self.drv.log_marker()
         err = None
+        self.note = None
         try:
             for a in step.get("do", []):
                 self.act(a, step)
@@ -448,6 +644,7 @@ class Runner:
             self.drv.terminate()
             raise Abort(f"安全检查失败，已停 App：{e}")
         dt = time.time() - t0
+        self.__dict__.setdefault("windows", {})[step["id"]] = (t0, time.time())
         ok = err is None
         shot = None
         if not ok:
@@ -456,9 +653,11 @@ class Runner:
                 self.drv.screenshot(shot)
             except Exception:
                 shot = None
-        line = f"{i:3d} {step['say']} → {'对' if ok else '不对'}  ({dt:.1f}s)" + ("" if ok else f"  {err}")
+        line = (f"{i:3d} {step['say']} → {'对' if ok else '不对'}  ({dt:.1f}s)" + ("" if ok else f"  {err}")
+                + (f"  [{self.note}]" if self.note else ""))
         print(line, flush=True)
-        self.results.append({"n": i, "id": step["id"], "say": step["say"], "ok": ok, "err": err, "sec": round(dt, 1), "shot": shot})
+        self.results.append({"n": i, "id": step["id"], "say": step["say"], "ok": ok, "err": err, "sec": round(dt, 1), "shot": shot,
+                             "note": self.note})
         if crash and step.get("relaunch_on_crash", True):
             self.drv.terminate()
             self.drv.launch()
@@ -467,9 +666,9 @@ class Runner:
 
 
 ACTIONS = {"tap", "tab", "toggle", "field", "type", "enter", "hidekb", "swipe", "top", "back", "wait", "relaunch", "state",
-           "receipt", "clear_receipts", "hb", "remember", "gate", "shot", "clipboard"}
+           "receipt", "clear_receipts", "hb", "remember", "gate", "gate_trials", "app_posts", "shot", "clipboard", "forget_config", "restore_config", "fluency"}
 STEP_KEYS = {"id", "page", "say", "do", "on", "expect", "absent", "visible", "keyboard", "cmd", "nocmd", "timeout", "cmd_timeout",
-             "ios", "android", "always", "settle", "pause", "relaunch_on_crash"}
+             "ios", "android", "always", "settle", "pause", "relaunch_on_crash", "switch"}
 
 
 def validate(all_steps):

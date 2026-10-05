@@ -20,6 +20,9 @@ Each step is a dict:
              ("hb", n)                 heartbeat "hb n" (the app counts the machine on for 2n+30 s)
              ("remember", sel, key)    keep the element's centre for ("gate", ...)
              ("gate", key1, key2, gap_ms, hold_ms)   tap key1, after gap_ms press key2 for hold_ms (the 400 ms guard)
+             ("gate_trials", n, gap_ms, hold_ms)     Android: n timed raw-touch trials of the guard (run.py gate_trials)
+             ("app_posts", {step id: n})  the app's own send log (诊断记录 on): 0 = no POST to the mailbox during that
+                                       step, n = at least n (the log must have been saved: open 分享诊断记录 first)
   expect   selectors that must be present (polled until timeout)
   absent   selectors that must be gone
   visible  selectors that must be on screen inside the content area (D39 scroll-to-top)
@@ -109,13 +112,26 @@ step("status.skip.think", "status", "再想想 → 关单，改动还在",
      [("remember", "寄出 1 项", "send"), ("wait", 0.3), tap("再想想")], absent=["确认这次修改"], expect=["~待保存 1 项"], nocmd=2)
 
 # ------------------------------------------------------------------ 400 ms confirmation guard
+# Android: judged by the app's own send log (诊断记录, turned on for this block only) and the mailbox; each early press is
+# timed against the sheet window's first frame (gate_trials). iOS: 寄出 is .disabled for 400 ms, one early press.
+step("gate.diag.on", "gate", "手机 · 诊断记录打开（门测试用 App 自己的发送记录判断）→ 回状态",
+     [("tab", "手机"), ("toggle", "诊断记录"), ("tab", "状态")], expect=[STATUS_ROOT, "~待保存 1 项"], on="android")
 step("gate.early", "gate", "400 ms 门：✓ 后 150 ms 按下「寄出」按住 0.9 秒 → 不寄出、单子还在",
-     [("gate", "save", "send", 150, 900)], expect=["确认这次修改"], nocmd=3)
-step("gate.close", "gate", "再想想 → 关单", [tap("再想想")], absent=["确认这次修改"])
-step("gate.late", "gate", "✓ 后 900 ms 再点「寄出」→ 寄出 skip_today",
-     [("gate", "save", "send", 900, 60)], absent=["确认这次修改"], cmd={"action": "skip_today"}, timeout=6)
+     [("gate", "save", "send", 150, 900)], expect=["确认这次修改"], nocmd=3,
+     android={"say": "400 ms 门：✓ 后马上按住「寄出」1.5 秒（按下早于门开、松手晚于门开）× 6 → 一次都不寄出",
+              "do": [("gate_trials", 6, 150, 1500)], "expect": ["~待保存 1 项"], "absent": ["确认这次修改"],
+              "nocmd": 1, "timeout": 12})
+step("gate.close", "gate", "再想想 → 关单", [tap("再想想")], absent=["确认这次修改"], on="ios")
+step("gate.late", "gate", "✓ 等单子停稳再点「寄出」→ 寄出 skip_today",
+     [tap(SAVE, region="top"), tap("寄出 1 项", stable=True)], absent=["确认这次修改"], cmd={"action": "skip_today"},
+     timeout=10)
 step("gate.clear", "gate", "不等了，清掉 → 早班开关回到开",
      [tap(CLEAR)], absent=[CLEAR], expect=["~今天照常"])
+step("gate.diag.check", "gate", "App 自己的发送记录（打开分享诊断记录让它存盘）：门测试 0 条、停稳后寄出 ≥1 条",
+     [("tab", "手机"), tap("~分享诊断记录"), ("wait", 1.5), ("back",), ("app_posts", {"gate.early": 0, "gate.late": 1})],
+     expect=["运行自检"], on="android")
+step("gate.diag.off", "gate", "手机 · 诊断记录关掉 → 回状态",
+     [("toggle", "诊断记录"), ("tab", "状态")], expect=[STATUS_ROOT], on="android")
 
 # ------------------------------------------------------------------ heartbeat / machine off
 step("status.off", "status", "心跳过期 → 设备卡「关机」",
@@ -206,6 +222,17 @@ step("ef.protocol", "endfield", "协议空间 选「武器养成」→ 待保存
      absent=["~待保存"], nocmd=2)
 step("ef.collect.more", "endfield", "自动采集 · 更多设置 → 推入页 → 返回",
      [tap({"t": "更多设置", "after": "自动采集"}), ("wait", 1.0), ("back",)], expect=["库存"], timeout=10)
+step("ef.ticket.open", "endfield", "再进「更多设置」→ 执行周期「已选 7/7」、使用刻写券关（机器值）",
+     [("tab", "终末地"), ("top", 3), tap("更多设置")], expect=["已选 7/7", "使用刻写券"], switch={"使用刻写券": False})
+step("ef.ticket.on", "endfield", "打开「使用刻写券」→ 那行出现小字「待保存」",
+     [("toggle", "使用刻写券")], expect=["待保存", "~待保存 1 项"], switch={"使用刻写券": True})
+step("ef.ticket.days", "endfield", "执行周期去掉周日 → 「已选 6/7」「待保存 2 项」",
+     [tap("~执行周期"), tap("周日"), tap(SAVE, region="top")], expect=["~6/7", "~待保存 2 项"])
+step("ef.ticket.discard", "endfield", "保存条 ✕ → 控件回到机器值（7/7、刻写券关），还在更多设置页（e17db83）",
+     [tap(DISCARD, region="top")], expect=["已选 7/7", "使用刻写券"], absent=["待保存", "~待保存 2 项", "库存"],
+     switch={"使用刻写券": False}, nocmd=2)
+step("d39.ef.top", "d39", "D39：终末地根页滑到底再点「终末地」→ 回顶",
+     [("tab", "终末地"), ("wait", 0.8), ("swipe", "up", 4), ("tab", "终末地"), ("wait", 1.2)], visible=["库存"])
 
 # ------------------------------------------------------------------ 鸣潮
 step("ww.open", "wuwa", "鸣潮标签 → 无音区 / 周本", [("tab", "鸣潮")], expect=["~无音区", "周本打第几个"])
@@ -236,15 +263,20 @@ step("ph.selftest", "phone", "运行自检 → 结果单「通过 N / 6」",
 step("ph.selftest.close", "phone", "关掉自检结果", [tap(["关闭", "好"], last=True)], absent=["re:通过 \\d+ ?/ ?\\d+"])
 step("ph.clear.ask", "phone", "清空诊断记录 → 弹确认 → 取消", [tap("清空诊断记录"), ("wait", 0.8), tap("取消", last=True)],
      absent=["清空诊断记录？"])
-step("ph.share", "phone", "分享诊断记录 → 系统分享面板 → 关掉",
-     [tap("~分享诊断记录"), ("wait", 2.0), ("back",)], expect=["运行自检"], timeout=10,
-     ios={"do": [tap("~分享诊断记录"), ("wait", 2.0), tap(["关闭", "Close"], last=True)]})
+step("ph.share", "phone", "分享诊断记录 → 「诊断记录已生成」单（复制 / 分享 / 关闭）",
+     [tap("~分享诊断记录")], expect=["诊断记录已生成", "分享", "关闭"], timeout=10)
+step("ph.share.sys", "phone", "单里「分享」→ 系统分享面板 → 取消 → 不闪退、单还在（62ba009）",
+     [tap("分享", last=True), ("wait", 2.5), ("back",), ("wait", 5)], expect=["诊断记录已生成"], timeout=10,
+     ios={"do": [tap("分享", last=True), ("wait", 2.5), tap(["Close", "关闭", "取消", "Cancel"], last=True), ("wait", 5)]})
+step("ph.share.close", "phone", "关闭 → 回手机页", [tap("关闭", last=True)], absent=["诊断记录已生成"], expect=["运行自检"])
 step("ph.copylink", "phone", "复制免输入链接 → 「链接已复制」", [tap("复制免输入链接")], expect=["~链接已复制"], timeout=5)
 step("ph.paste.bad", "phone", "粘贴密钥串 填乱码 → 存 → 「没存上」",
      [tap("粘贴密钥串"), ("wait", 1.0), ("field", {"t": "", "kind": ["TextField", "EditText"]}, "zzz"), tap("存")],
      expect=["没存上"], timeout=6)
 step("ph.paste.close", "phone", "关掉提示和粘贴单", [tap("好", last=True), ("wait", 0.6), tap("取消")], expect=["页面版本"])
 step("ph.diag.off", "phone", "诊断记录关掉 → 多出的行收起", [("toggle", "诊断记录")], absent=["运行自检", "就是这里"])
+step("d39.ph.top", "d39", "D39：手机页滑到底再点「手机」→ 回顶",
+     [("swipe", "up", 4), ("tab", "手机"), ("wait", 1.2)], visible=["页面版本"])
 
 # ------------------------------------------------------------------ shift change while on a gone tab (pass-1 item 6, fix 5)
 step("noef.jump", "layout", "人在终末地，机器发来早班不含终末地的状态（实时分片，不刷新）→ 终末地标签消失、跳到状态",
@@ -258,5 +290,33 @@ step("dup.status", "receipts", "同一分钟两条一样的回执 → 状态页�
 step("dup.page", "receipts", "查看全部 → 回执页也有这两行（不是旧数据）",
      [tap("~查看全部")], expect=["回执", {"t": "周本：打第 2 个", "count": 2}], timeout=10)
 step("dup.done", "receipts", "回状态，发回原状态", [("tab", "状态"), ("state", "base")], expect=[STATUS_ROOT])
+
+# ------------------------------------------------------------------ fluency (Android; the Mac must be idle)
+step("flu.tabs", "fluency", "五个标签各切 3 次（间隔 1.5 秒）→ FluencyRec 记下的 long 次数和最长一帧（Mac 1 分钟负载 < 8）",
+     [("tab", "状态"), ("wait", 2), ("fluency", 3)], expect=[STATUS_ROOT], on="android", timeout=10)
+
+# ------------------------------------------------------------------ clipboard on launch (iOS; fix b79c5d4)
+# The old crash (detectPatterns' callback on a background queue) came 5-20 s after a launch with any string on the
+# pasteboard, so each launch is watched 22 s. The link is a 免输入链接 for the THROWAWAY mailbox (run.py own_link).
+CLIP_WAIT = 22
+step("clip.after.link", "clip", "已配置：剪贴板里是免输入链接 → 冷启动 22 秒不闪退",
+     [("clipboard", "@link"), ("relaunch",), ("wait", CLIP_WAIT)], expect=[STATUS_ROOT], timeout=20, on="ios")
+step("clip.after.hello", "clip", "已配置：剪贴板里是「hello」→ 冷启动 22 秒不闪退",
+     [("clipboard", "hello"), ("relaunch",), ("wait", CLIP_WAIT)], expect=[STATUS_ROOT], timeout=20, on="ios")
+step("clip.after.empty", "clip", "已配置：剪贴板是空的 → 冷启动 22 秒不闪退",
+     [("clipboard", ""), ("relaunch",), ("wait", CLIP_WAIT)], expect=[STATUS_ROOT], timeout=20, on="ios")
+step("clip.first.empty", "clip", "没配置：剪贴板空 → 「第一次使用」页，22 秒不闪退",
+     [("forget_config",), ("clipboard", ""), ("relaunch",), ("wait", CLIP_WAIT)],
+     expect=["第一次使用", "开始使用", "粘贴免输入链接"], timeout=20, on="ios")
+step("clip.first.pin", "clip", "第一次使用 · PIN 框弹数字键盘 → 键盘上的「完成」收起键盘",
+     [("field", "PIN", "1234"), ("hidekb",)], expect=["第一次使用"], keyboard=False, timeout=6, on="ios")
+step("clip.first.hello", "clip", "没配置：剪贴板里是「hello」→ 「第一次使用」页，22 秒不闪退",
+     [("forget_config",), ("clipboard", "hello"), ("relaunch",), ("wait", CLIP_WAIT)],
+     expect=["第一次使用", "开始使用"], timeout=20, on="ios")
+step("clip.first.link", "clip", "没配置：剪贴板里是（一次性信箱的）免输入链接 → 自动配好进标签页，22 秒不闪退",
+     [("forget_config",), ("clipboard", "@link"), ("relaunch",), ("wait", CLIP_WAIT)],
+     expect=[STATUS_ROOT], absent=["第一次使用"], timeout=20, on="ios")
+step("clip.restore", "clip", "清剪贴板、写回一次性信箱 → 冷启动回状态页",
+     [("clipboard", ""), ("restore_config",), ("relaunch",)], expect=[STATUS_ROOT], timeout=30, on="ios", always=True)
 
 STEPS = S

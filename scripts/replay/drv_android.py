@@ -222,6 +222,95 @@ class AndroidDriver:
         self.sh(f"input tap {x1} {y1}; sleep {gap_ms / 1000:.3f}; input motionevent DOWN {x2} {y2}; "
                 f"sleep {hold_ms / 1000:.3f}; input motionevent UP {x2} {y2}")
 
+    # ---- the 400 ms gate, measured (raw touches + the app's own frame stats)
+    def touch_dev(self):
+        """/dev/input/eventN of the touchscreen InputReader maps to the main display (Touch Input Mapper mode DIRECT)."""
+        if getattr(self, "_touch_dev", None):
+            return self._touch_dev
+        text = self.sh("dumpsys input")
+        path = None
+        # InputReader lists "  Device N: <name>" blocks with their mappers; EventHub lists "    N: <name>" then "Path:"
+        for block in re.split(r"\n  Device \d+: ", text)[1:]:
+            if "Touch Input Mapper (mode - DIRECT)" in block:
+                name = block.split("\n", 1)[0].strip()
+                m = re.search(r"\n\s+\d+: " + re.escape(name) + r"\n(?:[^\n]*\n){0,12}?\s+Path: (/dev/input/event\d+)", text)
+                if m:
+                    path = m.group(1)
+                    break
+        if not path:
+            raise RuntimeError("no DIRECT touchscreen in dumpsys input")
+        self._touch_dev = path
+        return path
+
+    def _touch_blob(self, path, events):
+        """Write raw input_event structs (arm64: timeval 16 bytes, type u16, code u16, value s32) to a device file; one
+        `cat blob > /dev/input/eventN` is then one write, so a press lands within a millisecond (six sendevent calls
+        took 150-450 ms)."""
+        import struct
+        data = b"".join(struct.pack("<qqHHi", 0, 0, t, c, v) for t, c, v in events)
+        local = os.path.join(self.out, os.path.basename(path))
+        with open(local, "wb") as f:
+            f.write(data)
+        self.adb("push", local, path, timeout=30)
+
+    def _down_events(self, x, y, tid):
+        w, h = self.size
+        return [(3, 47, 0), (3, 57, tid), (3, 53, x * 32767 // w), (3, 54, y * 32767 // h), (3, 58, 60), (0, 0, 0)]
+
+    def gate_trial(self, x1, y1, x2, y2, gap_ms, hold_ms):
+        """Raw touches: tap (x1, y1), wait gap_ms, press (x2, y2) for hold_ms. Returns the kernel times (ms, CLOCK_MONOTONIC,
+        the clock of the frame stats) of [tap down, tap up, press down, press up], read from a getevent -t running alongside."""
+        d = self.touch_dev()
+        self._touch_blob("/data/local/tmp/replay-a.bin", self._down_events(x1, y1, 11))
+        self._touch_blob("/data/local/tmp/replay-b.bin", self._down_events(x2, y2, 12))
+        self._touch_blob("/data/local/tmp/replay-u.bin", [(3, 47, 0), (3, 57, -1), (0, 0, 0)])
+        self.sh("dumpsys gfxinfo %s reset > /dev/null" % PKG)
+        t = "/data/local/tmp/replay-"
+        script = (f"D={d}; rm -f {t}ge.txt; getevent -t $D > {t}ge.txt & GP=$!; sleep 0.4; "
+                  f"cat {t}a.bin > $D; sleep 0.06; cat {t}u.bin > $D; sleep {gap_ms / 1000:.3f}; cat {t}b.bin > $D; "
+                  f"sleep {hold_ms / 1000:.3f}; cat {t}u.bin > $D; sleep 0.3; kill $GP; cat {t}ge.txt")
+        out = self.sh(script, timeout=30)
+        syn = [float(m.group(1)) * 1000 for m in re.finditer(r"\[\s*([\d.]+)\]\s+0000 0000 00000000", out)]
+        return syn[:4]
+
+    def frame_windows(self):
+        """dumpsys gfxinfo framestats: [{"name", "frames": [{column: ns}, ...]}] per window of the app (a sheet is its own window)."""
+        text = self.sh(f"dumpsys gfxinfo {PKG} framestats")
+        wins, cur, hdr, inprof = [], None, None, False
+        for ln in text.splitlines():
+            if ln.startswith("Window: "):
+                cur = {"name": ln[8:], "frames": []}
+                wins.append(cur)
+            elif ln.startswith("---PROFILEDATA---"):
+                inprof, hdr = not inprof, None
+            elif inprof and cur is not None:
+                if ln.startswith("Flags,"):
+                    hdr = ln.rstrip(",").split(",")
+                elif hdr:
+                    v = ln.rstrip(",").split(",")
+                    if len(v) >= len(hdr):
+                        try:
+                            cur["frames"].append(dict(zip(hdr, map(int, v))))
+                        except ValueError:
+                            pass
+        return wins
+
+    def sheet_frames(self, after_ms):
+        """Frames of the window that first drew after after_ms (the sheet's dialog window), as
+        (first frame traversal start ms, first frame completed ms, number of frames); None if no such window."""
+        best = None
+        for i, w in enumerate(self.frame_windows()):
+            fr = [f for f in w["frames"] if f.get("PerformTraversalsStart", 0) > 0]
+            if i == 0 or not fr or not (fr[0].get("Flags", 0) & 1):
+                continue      # window 0 is the activity; a new window's first frame carries flag 1
+            t0 = fr[0]["PerformTraversalsStart"] / 1e6
+            if t0 < after_ms - 50:
+                continue
+            cand = (t0, fr[0]["FrameCompleted"] / 1e6, len(fr))
+            if best is None or cand[0] < best[0]:
+                best = cand
+        return best
+
     # ---- crash check
     def log_marker(self):
         return self.sh("date '+%m-%d %H:%M:%S.000'").strip()
