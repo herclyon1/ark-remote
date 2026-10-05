@@ -297,9 +297,24 @@ struct PinScan: Sendable, Equatable {
     /// The `at` of the snapshot (seconds), or nil.
     var snapAt: Int? { snap?["at"]?.number.map { Int($0) } }
 
-    /// view.js save_cache().
+    /// Bumped by each saveCache; only the newest one's text is written.
+    @ObservationIgnored private var cacheGen = 0
+
+    /// view.js save_cache(). The whole state is encoded off the main thread (it ran on the main actor inside every adopt,
+    /// on the refresh path of the 423 ms 状态 stall, see cosState) and written back on it. An encode that finishes after a
+    /// newer adopt's is dropped, so the stored state is never older than the newest one. The write lands a few ms after
+    /// adopt; only init reads this key (a process killed in between starts from the state before).
     func saveCache() {
-        UserDefaults.standard.set((snap ?? .null).encodedString(), forKey: Self.snapKey)
+        let s = snap ?? .null
+        cacheGen &+= 1
+        let gen = cacheGen
+        Task.detached(priority: .utility) { [self] in
+            let text = s.encodedString()
+            await MainActor.run {
+                guard self.cacheGen == gen else { return }
+                UserDefaults.standard.set(text, forKey: Relay.snapKey)
+            }
+        }
     }
 
     /// Takes a newer state (view.js: `if (!snap || s.at > snap.at) { snap = s; save_cache(); render(); }`).
@@ -428,14 +443,24 @@ struct PinScan: Sendable, Equatable {
     /// (an older relay, a machine without COS), the PIN does not match, or the network fails.
     func cosState() async -> JSONValue? {
         guard let cfg = config, !cfg.topic.isEmpty else { return nil }
-        guard let (data, status) = try? await httpFetch(Self.stateURL(topic: cfg.topic)),
-              status == 200, let m = try? JSONValue.parse(data),
-              m["kind"]?.string == "state" else { return nil }
-        if m["pin"]?.jsString != cfg.pin {
-            pinScan = PinScan(seen: 1, matched: 0)
-            return nil
-        }
-        return try? Self.unwrap(m)
+        guard let (data, status) = try? await httpFetch(Self.stateURL(topic: cfg.topic)), status == 200 else { return nil }
+        // Decoded off the main thread: the whole state (base64 → the Swift inflater below → JSONValue's try-each-type
+        // decoder) ran on the main actor after the GET, the first thing a pull to refresh does (Live.ping → pingInner).
+        // The fluency audit (10-05) puts the 423 ms stall on the user's Android phone (0.4.0 状态 page, starting 381 ms
+        // after a drag was released) most likely here; on Android the main actor runs on the UI thread's Looper. Same
+        // result, only computed elsewhere.
+        let pin = cfg.pin
+        let got = await Task.detached(priority: .userInitiated) { Relay.decodeCosState(data, pin: pin) }.value
+        if got.wrongPin { pinScan = PinScan(seen: 1, matched: 0) }
+        return got.state
+    }
+
+    /// cosState's decoding: the envelope, its PIN, then `body` / `gz` (unwrap). wrongPin: a state for another PIN.
+    nonisolated static func decodeCosState(_ data: Data, pin: String) -> (state: JSONValue?, wrongPin: Bool) {
+        guard let m = try? JSONValue.parse(data), m["kind"]?.string == "state" else { return (nil, false) }
+        if m["pin"]?.jsString != pin { return (nil, true) }
+        let state = try? unwrap(m)
+        return (state, false)
     }
 
     /// Reads the state object once and takes it when it is newer. Called on open, on refresh and on the
