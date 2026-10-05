@@ -9,6 +9,8 @@ struct PhoneDiagRows: View {
     @State var checking = false
     @State var checkShown = false
     @State var recordShown = false
+    /// 「清空诊断记录」 asks first: right under 「分享诊断记录」, one stray tap wiped the record that was to be sent (edge audit 40).
+    @State var clearAsk = false
 
     var body: some View {
         // the count is observed so the row below is redrawn after each new event
@@ -30,7 +32,13 @@ struct PhoneDiagRows: View {
                 recordShown = true
             }
             .sheet(isPresented: $recordShown) { DiagRecordSheet { recordShown = false } }
-            Button("清空诊断记录", role: .destructive) { DiagLog.shared.clear() }
+            Button("清空诊断记录", role: .destructive) { clearAsk = true }
+                .alert("清空诊断记录？", isPresented: $clearAsk) {   // as PhonePage's 「清除密钥？」
+                    Button("清空", role: .destructive) { DiagLog.shared.clear() }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("这台手机记下的 \(count) 条都会删掉，还没分享的就找不回来了。")
+                }
             // view.js:602 #selfcheck is hidden while 诊断记录 is off
             Button(checking ? "正在自检…" : "运行自检") {
                 guard !checking else { return }

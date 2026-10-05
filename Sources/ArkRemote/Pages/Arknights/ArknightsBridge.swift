@@ -88,7 +88,7 @@ enum ArknightsField: CaseIterable {
             return .int(n)
         }
         switch self {
-        case .stage: return data.stage.map { .string($0) }
+        case .stage: return data.stage.map { .string($0.trimmingCharacters(in: .whitespacesAndNewlines)) }   // edge audit 30
         case .medicineNumb: return number(data.medicineNumb)
         case .ifFight: return data.ifFight.map { .bool($0) }
         case .ifActivityFirst: return data.ifActivityFirst.map { .bool($0) }
@@ -104,7 +104,7 @@ enum ArknightsField: CaseIterable {
     /// Puts a JSON value (machine or pending) into the page's typed field.
     func apply(_ v: JSONValue, to data: inout ArknightsPageData) {
         // view.js:503: null shows as an empty box.
-        let n = v.isNull ? "" : (v.number.map { String(Int($0)) } ?? v.jsString)
+        let n = v.isNull ? "" : (safeInt(v.number).map { String($0) } ?? v.jsString)
         switch self {
         case .stage: data.stage = v.isNull ? "" : v.jsString
         case .medicineNumb: data.medicineNumb = n
@@ -304,12 +304,23 @@ struct ArknightsBridge {
 
     /// The machine's value of every 方舟 field, for Pending.reconcile (the web's render fills liveVals,
     /// from the last good copy too when that is what it draws: view.js:435 then :460).
+    /// Not the fields drawn from a last good copy (configStale / masterStale): that copy is older than any send, so a
+    /// change the machine took read as 「没生效」 against it (edge audit 32); they wait for a real read (staleIDs).
     var liveVals: [String: JSONValue] {
         var out: [String: JSONValue] = [:]
         for f in ArknightsField.allCases {
-            if let ref = f.ref, let raw = ref.rawValue(in: snap) { out[ref.id] = raw }
+            if let ref = f.ref, !isStale(f), let raw = ref.rawValue(in: snap) { out[ref.id] = raw }
         }
         return out
+    }
+
+    /// The ids liveVals leaves out this time; the tab drops them from Pending.liveVals, where an earlier read's value stays.
+    var staleIDs: [String] {
+        ArknightsField.allCases.compactMap { f in isStale(f) ? f.ref?.id : nil }
+    }
+
+    private func isStale(_ f: ArknightsField) -> Bool {
+        f.src == "mas" ? configStale : masterStale
     }
 
     /// The edits between what the page shows and `base` (view.js note(): an edit back to the old value is dropped).

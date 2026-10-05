@@ -32,12 +32,15 @@ struct StatusTab: View {
                         relay.adopt(s)
                         Pending.shared.reconcile()
                     }
-                    if relay.snap == nil && relay.pinScan.seen > 0 && relay.pinScan.matched == 0 {
-                        relay.setStatus("信箱里有 \(relay.pinScan.seen) 条消息但 PIN 对不上——检查设置里的 PIN", "off")
+                    if relay.snap == nil, let note = relay.pinMismatchNote() {
+                        relay.setStatus(note, "off")
                     }
                 } catch {
-                    Live.shared.netOk = false
-                    relay.setStatus("读不到信箱 · " + Live.why(error) + "，先看看你这边有没有网", "")
+                    // leaving the tab cancels this .task: that is no network failure (edge audit 8)
+                    if Live.isCancel(error) { return }
+                    let net = Live.isNetwork(error)
+                    if net { Live.shared.netOk = false }
+                    relay.setStatus("读不到信箱 · " + Live.why(error) + (net ? "，先看看你这边有没有网" : ""), "")
                 }
                 _ = await StaminaStore.shared.refresh()
             }
@@ -48,13 +51,17 @@ struct StatusTab: View {
                         Button(a.ok, role: .cancel) {}
                     } else {
                         Button(a.ok, role: a.destructive ? .destructive : nil) {
-                            if a.isEstop { estopAt = nowSec() }
+                            let pressed = nowSec()
                             Task {
                                 // view.js oneShot: a send that fails is the 「发不出去」 alert with the reason, not a toast
                                 if let why = await StatusCommands.send(a) {
                                     // an instant failure (no mailbox set) must not land while this alert is still closing
                                     try? await Task.sleep(nanoseconds: 400_000_000)
                                     ask = StatusAsk.notice("发不出去", why)
+                                } else if a.isEstop {
+                                    // only an order that went out waits for its receipt: written before the send, a
+                                    // failed one still read 「已下令停止 · 等机器回执」 for 6 hours (edge audit 4)
+                                    estopAt = pressed
                                 }
                             }
                         }

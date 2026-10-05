@@ -41,8 +41,8 @@ enum DiagUpload {
         req.httpBody = data
         #if !os(Android) && canImport(UIKit)
         // fetch keepalive (fluency-rec.js flush on hide): going to the background must not cut the PUT off
-        let bg = await MainActor.run { UIApplication.shared.beginBackgroundTask(withName: "diag-upload", expirationHandler: nil) }
-        defer { Task { @MainActor in UIApplication.shared.endBackgroundTask(bg) } }
+        let bg = await MainActor.run { BackgroundGrace("diag-upload") }
+        defer { Task { @MainActor in bg.end() } }
         #endif
         do {
             let (_, resp) = try await URLSession.shared.data(for: req)   // the same call as Net.swift httpFetch (corelibs has it)
@@ -56,3 +56,27 @@ enum DiagUpload {
         }
     }
 }
+
+#if !os(Android) && canImport(UIKit)
+/// Background time for one piece of work that must not be cut off when the app goes to the background (an upload, a
+/// save's orders). The expiration handler ends the task: beginBackgroundTask(withName:expirationHandler:) docs, "If you
+/// don't call endBackgroundTask(_:) for each task before time expires, the system kills the app" - with a nil handler
+/// a slow request outliving the grace time got the app killed, and the unsaved changes (memory only) with it.
+@MainActor final class BackgroundGrace {
+    private var id: UIBackgroundTaskIdentifier = .invalid
+
+    init(_ name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            // called on the main thread (the same docs)
+            MainActor.assumeIsolated { self?.end() }
+        }
+    }
+
+    /// Ends the task once; later calls do nothing.
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+    }
+}
+#endif

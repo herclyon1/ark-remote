@@ -81,6 +81,12 @@ struct EWChoice: Hashable, Sendable, Decodable {
     }
 }
 
+/// A value that decodes to nil instead of failing the container it sits in (EWMaster's per-key option lists).
+struct EWLossy<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws { value = try? T(from: decoder) }
+}
+
 /// Mirror of `snap.master[game]` in the web page: the relay's read of the game's master config.
 struct EWMaster: Sendable, Decodable {
     var values: [String: EWValue] = [:]
@@ -109,11 +115,13 @@ struct EWMaster: Sendable, Decodable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         values = (try? c.decode([String: EWValue].self, forKey: .values)) ?? [:]
-        options = (try? c.decode([String: [EWChoice]].self, forKey: .options)) ?? [:]
+        // per key: one malformed list (a pair missing its value) failed the whole dictionary and emptied every picker of the
+        // game (edge audit 34); now only that list is left out
+        options = (try? c.decode([String: EWLossy<[EWChoice]>].self, forKey: .options))?.compactMapValues { $0.value } ?? [:]
         labels = (try? c.decode([String: String].self, forKey: .labels)) ?? [:]
         roots = (try? c.decode([String: [String]].self, forKey: .roots)) ?? [:]
         children = (try? c.decode([String: [String: [String]]].self, forKey: .children)) ?? [:]
-        inputs = (try? c.decode([String: [EWChoice]].self, forKey: .inputs)) ?? [:]
+        inputs = (try? c.decode([String: EWLossy<[EWChoice]>].self, forKey: .inputs))?.compactMapValues { $0.value } ?? [:]
         readonly = (try? c.decode([String: EWValue].self, forKey: .readonly)) ?? [:]
         subs = (try? c.decode([String: [String]].self, forKey: .subs)) ?? [:]
         untranslated = (try? c.decode([String].self, forKey: .untranslated)) ?? []

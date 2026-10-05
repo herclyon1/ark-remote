@@ -140,6 +140,13 @@ func jsNumberString(_ d: Double) -> String {
     return String(d)
 }
 
+/// `Int(d)` traps on a value that is infinite or outside Int's range; a number from the machine, COS or a game's API
+/// that big is no usable number, so it reads as missing (edge audit 18: an `at` of 1e20 ended the app).
+func safeInt(_ d: Double?) -> Int? {
+    guard let d, d.isFinite, d >= Double(Int.min), d < Double(Int.max) else { return nil }
+    return Int(d)
+}
+
 /// Two-digit zero pad, `String(x).padStart(2, "0")`.
 func pad2(_ x: Int) -> String { x < 10 ? "0\(x)" : String(x) }
 
@@ -190,8 +197,22 @@ struct AppError: LocalizedError, Sendable {
 /// The `e.message` of a thrown error.
 func errorMessage(_ error: Error) -> String {
     if let e = error as? AppError { return e.message }
+    if let e = error as? NtfyLimit { return e.errorDescription ?? "" }
     if let e = error as? URLError { return "URLError \(e.code.rawValue): \(e.localizedDescription)" }
     return error.localizedDescription
+}
+
+/// ntfy refused a send with 429. Its body says which limit (maa-automation relay/ark_relay/phone.py _ntfy_code, ntfy
+/// server/errors.go): 42901 the request burst, back in seconds; 42908 the day's messages per IP, back at UTC midnight
+/// ("every day at midnight (UTC)", docs.ntfy.sh/config visitor-message-daily-limit). 「歇几秒再点」 was wrong for the
+/// second, the one usually hit (edge audit 26); and a limit is not a lost network (edge audit 12).
+struct NtfyLimit: LocalizedError, Sendable {
+    let daily: Bool
+    var errorDescription: String? {
+        guard daily else { return "太频繁了，歇几秒再点（429）" }
+        let next = (nowSec() / 86400 + 1) * 86400   // the next UTC midnight, said on this phone's clock
+        return "今天信箱的发送额度用完了，\(clockHHMM(ms: Double(next) * 1000)) 恢复（429）"
+    }
 }
 
 // MARK: - HTTP
@@ -266,6 +287,16 @@ struct PinScan: Sendable, Equatable {
     var alert: AlertNote?
     /// net.js pinScan.
     var pinScan = PinScan()
+    /// The state on COS carries another PIN (cosState). Kept apart from pinScan, which latestState() zeroes and counts
+    /// from ntfy alone: a normal state is on COS and the topic holds only `state <ts> <bytes>` notices (not envelopes),
+    /// so a wrong PIN read as 「还没有过心跳」 (edge audit 24).
+    @ObservationIgnored var cosPinBad = false
+    /// ntfy's clock minus this phone's (ms), from the `time` ntfy stamps on the open / keepalive events of a stream (its
+    /// own now; Live.onLiveEvent / onPingEvent). The age of a machine or ntfy stamp is taken against serverNowMs(): with
+    /// the phone's clock, a phone 90 s off showed 「关机」 for a running machine, one behind kept 「开机中」 after a power
+    /// cut, and a receipt check took a state from before the send as the answer (edge audit 3). 0 until the first event.
+    @ObservationIgnored var clockSkewMs: Double = 0
+    func serverNowMs() -> Double { nowMs() + clockSkewMs }
 
     /// Called after `adopt` takes a newer snapshot. view.js render() does
     /// `if (Stamina.fromSnapshot(snap)) Stamina.refresh(true)`; the stamina port hooks that in here.
@@ -295,7 +326,7 @@ struct PinScan: Sendable, Equatable {
     }
 
     /// The `at` of the snapshot (seconds), or nil.
-    var snapAt: Int? { snap?["at"]?.number.map { Int($0) } }
+    var snapAt: Int? { safeInt(snap?["at"]?.number) }
 
     /// Bumped by each saveCache; only the newest one's text is written.
     @ObservationIgnored private var cacheGen = 0
@@ -349,12 +380,13 @@ struct PinScan: Sendable, Equatable {
     /// net.js send(body).
     func send(_ body: JSONValue) async throws {
         guard let cfg = config else { throw AppError("还没设置信箱") }
+        // ts on ntfy's clock (clockSkewMs): the relay drops an order whose ts is more than 24 h off its own clock
+        // (phone.py MAX_AGE), so a phone clock that far off had every order dropped with no receipt (edge audit 3)
         let msg: JSONValue = .object(["v": .int(1), "kind": .string("cmd"), "pin": .string(cfg.pin),
-                                      "ts": .int(nowSec()), "body": body])
-        let (_, status) = try await httpFetch("\(ntfyBase)/\(cfg.topic)", method: "POST", body: msg.encoded())
-        if !(200..<300).contains(status) {
-            throw AppError(status == 429 ? "太频繁了，歇几秒再点（429）" : "HTTP \(status)")
-        }
+                                      "ts": .int(safeInt(serverNowMs() / 1000) ?? nowSec()), "body": body])
+        let (data, status) = try await httpFetch("\(ntfyBase)/\(cfg.topic)", method: "POST", body: msg.encoded())
+        if status == 429 { throw NtfyLimit(daily: (try? JSONValue.parse(data))?["code"]?.number == 42908) }
+        if !(200..<300).contains(status) { throw AppError("HTTP \(status)") }
     }
 
     /// net.js readMessages(since): the `message` events of the topic. `cache: no-store` plus a changing
@@ -388,8 +420,9 @@ struct PinScan: Sendable, Equatable {
     func joinChunks(_ m: JSONValue) throws -> JSONValue? {
         guard let slice = m["gzp"] else { return nil }
         let sid = m["sid"]?.jsString ?? ""
-        let i = Int(m["i"]?.number ?? 0)
-        let n = Int(m["n"]?.number ?? 0)
+        let i = safeInt(m["i"]?.number) ?? 0
+        let n = safeInt(m["n"]?.number) ?? 0
+        guard n > 0 else { return nil }   // `0..<n` traps on a negative count
         var got = chunkBox[sid] ?? [:]
         got[i] = slice.string ?? slice.jsString
         chunkBox[sid] = got
@@ -454,8 +487,10 @@ struct PinScan: Sendable, Equatable {
         guard let pinOK = got.pinOK else { return nil }   // not a state envelope
         if !pinOK {
             pinScan = PinScan(seen: 1, matched: 0)
+            cosPinBad = true
             return nil
         }
+        cosPinBad = false
         return got.state
     }
 
@@ -466,6 +501,16 @@ struct PinScan: Sendable, Equatable {
         if m["pin"]?.jsString != pin { return (nil, false) }
         let state = try? unwrap(m)
         return (state, true)
+    }
+
+    /// The status line when the PIN cannot be right (no state matched it on ntfy, or the one on COS carries another),
+    /// else nil. It points at what the App has: there is no settings screen; a 免输入链接 pasted in 「手机 › 粘贴密钥串」
+    /// replaces the mailbox and PIN (PhoneTab pasteTokens → PhoneLink.open → saveConfig).
+    func pinMismatchNote() -> String? {
+        let ntfyBad = pinScan.seen > 0 && pinScan.matched == 0
+        guard ntfyBad || cosPinBad else { return nil }
+        return (ntfyBad ? "信箱里有 \(pinScan.seen) 条消息但 PIN 对不上" : "机器存的状态 PIN 对不上")
+            + "——到「手机」页点「粘贴密钥串」，粘贴免输入链接重设"
     }
 
     /// Reads the state object once and takes it when it is newer. Called on open, on refresh and on the

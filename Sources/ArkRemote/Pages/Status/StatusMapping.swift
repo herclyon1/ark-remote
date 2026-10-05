@@ -138,7 +138,12 @@ extension StatusData {
         if d.nextAt.isEmpty, let first = blocks.first { d.nextAt = first.time }
         for i in blocks.indices {
             let owners = blocks[i].games.compactMap { statusOwnerOf[$0.name] }.sorted().joined(separator: "|")
-            if let q = d.queues.first(where: { $0.scripts.sorted().joined(separator: "|") == owners }) {
+            // the plan names no shift, only its games: two shifts running the same games both matched and the first won,
+            // so the second time row's switch sent skip_today for the first shift (edge audit 29). A tie is broken by
+            // 定时 (only scheduled shifts have time rows); one still tied gets no switch rather than the wrong one.
+            var hits = d.queues.filter { $0.scripts.sorted().joined(separator: "|") == owners }
+            if hits.count > 1 { hits = hits.filter { $0.scheduled } }
+            if hits.count == 1, let q = hits.first {
                 let id = StatusSwitchID.queue(q.name)
                 let on = !skipped.contains(q.name)
                 if record { pending.liveVals[id] = .bool(on) }
@@ -182,6 +187,13 @@ extension StatusData {
             StatusReceipt(ok: r["ok"]?.truthy ?? false, text: r["text"]?.jsString ?? "", at: r["at"]?.jsString ?? "",
                           sent: r["sent"]?.jsString ?? "", action: r["action"]?.jsString ?? "")
         }
+        var idSeen: [String: Int] = [:]   // StatusReceipt.dup: equal minute + text must not give equal ForEach ids
+        for i in d.receipts.indices {
+            let k = d.receipts[i].at + d.receipts[i].text
+            let n = idSeen[k] ?? 0
+            d.receipts[i].dup = n
+            idSeen[k] = n + 1
+        }
         // view.js:418-438: a skip receipt is the machine's answer at that moment, not what holds now. Per day and queue only
         // the last successful skip / unskip stays; earlier ones go grey with what replaced them, and a today's one that the
         // snapshot's 「今天跳过队列」 contradicts goes grey with what holds now. The queue is the first 「…」 in the text.
@@ -217,9 +229,12 @@ extension StatusData {
             f.locale = Locale(identifier: "en_US_POSIX")
             f.timeZone = TimeZone(identifier: "Asia/Shanghai")
             f.dateFormat = "MM-dd HH:mm"
-            let pressed = f.string(from: Date(timeIntervalSince1970: TimeInterval(estopAt)))
+            // the press on ntfy's clock (Relay.clockSkewMs): a phone running fast stamped it after the machine's receipt
+            let pressed = f.string(from: Date(timeIntervalSince1970: TimeInterval(estopAt) + relay.clockSkewMs / 1000))
             let rc = rcs.reversed().first { r in
-                r["action"]?.jsString == "estop" && (r["at"]?.jsString ?? "") >= pressed
+                let at = r["at"]?.jsString ?? ""
+                // "MM-dd" has no year: a receipt in January answers a press on 12-31 (the window is 6 hours)
+                return r["action"]?.jsString == "estop" && (at >= pressed || (pressed.hasPrefix("12-") && at.hasPrefix("01-")))
             }
             let head = rc == nil ? "已下令停止 · 等机器回执"
                 : (rc?["ok"]?.truthy ?? false) ? "已停止 · 下一趟\(d.nextAt.isEmpty ? "" : " " + d.nextAt) 照常" : "没停干净 · 见下方回执"

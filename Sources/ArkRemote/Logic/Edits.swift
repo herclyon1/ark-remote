@@ -15,4 +15,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
 
     /// key -> change waiting in 「待保存」.
     var items: [String: EWEdit] = [:]
+    /// A send of this pool is out (EWSaveBar.go). One flag for every tab: a per-page @State let the ✓ of another tab send
+    /// the same changes again while the first send was still going (edge audit 1b).
+    var saving = false
 }

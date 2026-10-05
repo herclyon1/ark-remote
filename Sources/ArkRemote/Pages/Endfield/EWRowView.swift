@@ -235,6 +235,8 @@ struct EWChoiceList: View {
     /// icons rows: each echo set's icon before the label, 28 pt (view.js:1215 `.pico`, index.html:379 --ios-row2-icon).
     var icons = false
     var commit: ([String]) -> Void
+    /// What the row showed when the page opened.
+    let initial: [String]
     @State var draft: [String]
     @Environment(\.dismiss) var dismiss
 
@@ -245,6 +247,7 @@ struct EWChoiceList: View {
         self.multi = multi
         self.icons = icons
         self.commit = commit
+        self.initial = initial
         _draft = State(initialValue: initial)
     }
 
@@ -297,8 +300,16 @@ struct EWChoiceList: View {
     }
 
     /// view.js:1146-1149: written back in the option table's order; none at all is refused (MaaEnd ends the task).
+    /// A value the option table does not list (any more) stays, after the listed ones: it has no row here to untick, and
+    /// dropping it on ✓ deleted it from the machine. The same set in another order is no change (edge audit 33): the
+    /// machine's order differing from the table's made a bare ✓ a 「待保存」 edit.
     private func done() {
-        let next = choices.map { $0.value }.filter { draft.contains($0) }
+        let listed = choices.map { $0.value }
+        let next = listed.filter { draft.contains($0) } + draft.filter { !listed.contains($0) }
+        if multi && Set(next) == Set(initial) {
+            dismiss()
+            return
+        }
         if next.isEmpty {
             if multi { Relay.shared.showToast("至少要留一个") }   // view.js:1399 toast("至少要留一个")
             return

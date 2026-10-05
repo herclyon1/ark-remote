@@ -298,6 +298,11 @@ enum EWSave {
     /// when something did not go out, the message of the 「有改动没发出去」 alert (view.js:3005-3009).
     static func send(_ edits: [String: EWEdit]) async -> (left: [String: EWEdit], failure: String?) {
         let relay = Relay.shared
+        #if !os(Android) && canImport(UIKit)
+        // the orders go one after another: leaving the app mid-send must not suspend the rest (edge audit 15)
+        let grace = BackgroundGrace("save")
+        defer { grace.end() }
+        #endif
         var left = edits
         var sent = 0
         var failed: Error? = nil
@@ -319,7 +324,13 @@ enum EWSave {
             } catch { failed = error; break }
         }
         for k in ordered(edits) {
-            guard let e = edits[k], e.src == "relay", let body = e.body else { continue }
+            guard let e = edits[k], e.src == "relay", var body = e.body else { continue }
+            // a skip's day is the Beijing day it goes out on, as the review just said 「今天不跑」: stamped when the switch
+            // was flipped, one flipped at 23:59 and saved at 00:01 carried yesterday and the relay refused it (edge audit 17)
+            if body["action"]?.string == "skip_today", case .object(var o) = body {
+                o["day"] = .string(statusBeijingToday())
+                body = .object(o)
+            }
             do {
                 try await relay.send(body)
                 sent += 1
@@ -374,7 +385,6 @@ enum EWSave {
 struct EWSaveBar: ViewModifier {
     var title: String? = nil
     @State var reviewing = false
-    @State var saving = false
     /// The 「有改动没发出去」 alert's message after a send that left changes unsent (view.js:3007 ask(..., { single: true })).
     @State var failNote: String? = nil
     /// view.js:1619 goArmedAt: while the review lists a 今天不跑 / 今天照常跑, a tap on 寄出 in its first 400 ms is not a
@@ -403,7 +413,7 @@ struct EWSaveBar: ViewModifier {
                             reviewing = true
                         } label: { Image(systemName: "checkmark") }
                             .accessibilityLabel("完成")
-                            .disabled(saving)
+                            .disabled(EWEdits.shared.saving)
                     }
                 }
             }
@@ -440,7 +450,7 @@ struct EWSaveBar: ViewModifier {
                         ToolbarItem(placement: .confirmationAction) {
                             // doSave (view.js:1617) names the button by how many orders go out: 「寄出 N 项」
                             Button("寄出 \(edits.count) 项") { go() }
-                                .disabled(saving || !armed)
+                                .disabled(EWEdits.shared.saving || !armed)
                         }
                     }
                 }
@@ -466,13 +476,18 @@ struct EWSaveBar: ViewModifier {
     /// #go (view.js:2954-3016): a tap in the first 400 ms while a skip is listed does nothing and the sheet stays.
     private func go() {
         guard armed else { return }
-        guard !saving else { return }   // 2026-09-01: three taps sent three times
-        saving = true
+        let pool = EWEdits.shared
+        guard !pool.saving else { return }   // 2026-09-01: three taps sent three times; one flag across the tabs
+        pool.saving = true
         reviewing = false
         Task {
-            let r = await EWSave.send(EWEdits.shared.items)
-            EWEdits.shared.items = r.left   // view.js:3003: the sent ones go, the unsent stay on the page
-            saving = false
+            let sent = pool.items
+            let r = await EWSave.send(sent)
+            // view.js:3003: the sent ones go, the unsent stay on the page. Only a key that went out and still holds the
+            // value sent is dropped: a send takes up to a minute per order, and writing back the copy taken at the start
+            // lost a change made meanwhile on any tab, and the new value of a row changed again (edge audit 1a).
+            pool.items = pool.items.filter { k, v in r.left[k] != nil || sent[k] != v }
+            pool.saving = false
             failNote = r.failure
         }
     }

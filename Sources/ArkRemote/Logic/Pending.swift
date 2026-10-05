@@ -35,6 +35,9 @@ struct PendingEdit: Codable, Sendable, Equatable {
     var resentAt: Int? = nil
     /// The `at` of the state that still reported another value.
     var mismatchAt: Int? = nil
+    /// That value was neither the one sent nor the one it replaced (`from`): changed after it, by another phone or the
+    /// machine. Optional so a record stored before it still decodes.
+    var elsewhere: Bool? = nil
     /// relay switches and 周本: the command body as sent, resent as is.
     var body: JSONValue? = nil
 }
@@ -78,6 +81,8 @@ struct PendingBar: Sendable, Equatable {
     var liveVals: [String: JSONValue] = [:]
 
     @ObservationIgnored let relay: Relay
+    /// Keys whose 「再发一次」 is out: a second tap meanwhile sent a 周本 / skip twice (edge audit 16).
+    @ObservationIgnored private var resending: Set<String> = []
 
     init(relay: Relay = .shared) {
         self.relay = relay
@@ -148,12 +153,16 @@ struct PendingBar: Sendable, Equatable {
     func tag(for key: String, editing: Bool = false) -> PendingTag? {
         if let p = items[key] {
             if let mm = p.mismatchAt {
+                // no 「再发一次」 here: a tap put this older change back over the newer one (edge audit 13)
+                if p.elsewhere == true {
+                    return .sent(text: "机器 \(Self.hhmm(mm)) 报的是「\(valueLabel(p, liveVals[key]))」，别处改过")
+                }
                 return .mismatch(text: "没生效 · 机器 \(Self.hhmm(mm)) 报的还是「\(valueLabel(p, liveVals[key]))」", key: key)
             }
             let at = p.resentAt ?? p.sentAt
             // pending.js:58-59: past 10 h the mailbox (12 h) may have dropped it; resent only by a tap, never automatically
             if Self.isStale(p) { return .sent(text: "没回执 · 已寄出 \(Self.hhmm(at))") }
-            let fresh = relay.snapAt.map { Double(nowSec() - $0) < Live.freshMs / 1000 } ?? false
+            let fresh = relay.snapAt.map { relay.serverNowMs() / 1000 - Double($0) < Live.freshMs / 1000 } ?? false
             return .sent(text: "已寄出 \(Self.hhmm(at)) · \(fresh ? "几秒内回执" : "机器开机后生效")")
         }
         if editing { return nil }
@@ -202,10 +211,12 @@ struct PendingBar: Sendable, Equatable {
 
     /// The machine reported a state newer than the send: check each item against it.
     func reconcile() {
+        pruneAcked()   // nothing else called it: acked only grew, and every save wrote all of it (edge audit 27)
         guard let at = relay.snapAt, at != 0 else { return }
         var changed = false
         for (key, p) in items {
-            if at <= (p.resentAt ?? p.sentAt) { continue }
+            // sentAt is this phone's clock, `at` the machine's: compare on ntfy's (Relay.clockSkewMs, edge audit 3)
+            if Double(at) <= Double(p.resentAt ?? p.sentAt) + relay.clockSkewMs / 1000 { continue }
             guard let live = liveVals[key] else { continue }   // this state does not carry the field; wait for the next
             if Self.sameVal(live, p.to) {
                 items[key] = nil
@@ -217,6 +228,7 @@ struct PendingBar: Sendable, Equatable {
                 relay.showToast(t.count <= 13 ? t : "改动已生效")
             } else if p.mismatchAt != at {
                 items[key]?.mismatchAt = at
+                items[key]?.elsewhere = p.from.map { !Self.sameVal(live, $0) }
                 changed = true
             }
         }
@@ -225,7 +237,18 @@ struct PendingBar: Sendable, Equatable {
 
     /// 「再发一次」.
     func resend(_ key: String) async {
-        guard let p = items[key] else { return }
+        guard let p = items[key], !resending.contains(key) else { return }
+        // a skip carries its Beijing day and the relay refuses another day's (commands.py _skip_today): resent the next
+        // day it could only be refused again, after 「又发了一次」 (edge audit 17)
+        if p.body?["action"]?.string == "skip_today", let day = p.body?["day"]?.string, !day.isEmpty,
+           day != statusBeijingToday() {
+            items[key] = nil
+            savePending()
+            relay.showAlert("不再发", "这是 \(day) 那天的跳过，那天已经过了，机器不会再收。要跳过今天，重新关一次开关再保存。")
+            return
+        }
+        resending.insert(key)
+        defer { resending.remove(key) }
         let body: JSONValue
         if p.src == "relay" || p.src == "wb" {
             body = p.body ?? .null
@@ -240,6 +263,7 @@ struct PendingBar: Sendable, Equatable {
             try await relay.send(body)
             items[key]?.resentAt = nowSec()
             items[key]?.mismatchAt = nil
+            items[key]?.elsewhere = nil
             savePending()
             relay.showToast("又发了一次")   // pending.js:117
         } catch {

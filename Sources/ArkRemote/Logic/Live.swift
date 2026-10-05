@@ -83,7 +83,14 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     /// "I have no network", and in a weak-signal spot shows a flat 「关机」.
     var netOk = true
     /// navigator.onLine; the page sets it from the system's network state.
-    var deviceOnline = true { didSet { if deviceOnline != oldValue { netOk = deviceOnline; updateLive() } } }
+    var deviceOnline = true {
+        didSet {
+            guard deviceOnline != oldValue else { return }
+            netOk = deviceOnline
+            updateLive()
+            if deviceOnline { backOnline() }
+        }
+    }
     /// The current verdict (the 「现在在跑」 card follows it).
     var alive = false
     /// The refresh button's busy state while `ping` runs.
@@ -128,6 +135,9 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
 
     /// live.js why(err): the browser's English error text means nothing to the user.
     nonisolated static func why(_ error: Error) -> String {
+        if let l = error as? NtfyLimit { return l.errorDescription ?? "发得太频繁，被限流了" }
+        // an answer that is not the JSON asked for (a 5xx page): DecodingError's text is English (edge audit 7)
+        if error is DecodingError { return "对方回的不是能读的数据" }
         if let u = error as? URLError {
             switch u.code {
             case .timedOut, .cancelled: return "等太久没回应"
@@ -145,6 +155,18 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         return m.isEmpty ? "原因不明" : m
     }
 
+    /// The request ended because its task was cancelled (a page's .task when the page goes away), not by the network.
+    nonisolated static func isCancel(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
+    /// The failure is this side's network (why() says 「网络不通」 / 「等太久没回应」), not a refusal by ntfy (429, 5xx):
+    /// only then is the line 「先看看你这边有没有网」 (edge audit 8, 12).
+    nonisolated static func isNetwork(_ error: Error) -> Bool {
+        let w = why(error)
+        return w == "网络不通" || w == "等太久没回应"
+    }
+
     // MARK: ping
 
     /// The 刷新 action: ask the machine for a fresh state and give a verdict with its basis.
@@ -153,6 +175,10 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             relay.setStatus("还没设置信箱，先去设置里填", "off")
             return
         }
+        // one ping at a time (刷新 tile, pull to refresh, the ping 2 s after a save): two at once each sent `refresh` twice
+        // (four states out of ntfy's 250 a day), the later one cleared pingLatest under the first, and the first to end
+        // set busy false while the other still ran (edge audit 9). The running one answers this tap too.
+        guard !busy else { return }
         relay.setStatus("正在问机器…", "")
         busy = true
         // stamina: asked at the same time as the machine (an action repeated within a minute reuses the last answer)
@@ -181,20 +207,22 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         defer { es.close() }
 
         do { try await relay.send(.object(["action": .string("refresh")])) } catch {
-            relay.setStatus("发不出去：" + errorMessage(error), "off")
+            relay.setStatus("发不出去：" + Self.why(error), "off")
             return
         }
 
         let t0 = nowMs()
         var resent = false, polled = false
-        while nowMs() - t0 < 11000 {
-            try? await Task.sleep(nanoseconds: 500_000_000)
+        // a cancelled task (pull to refresh left mid-way) gets no sleep: `try?` returned at once and the loop spun on the
+        // main actor for the whole 11 s (edge audit 10)
+        while nowMs() - t0 < 11000 && !Task.isCancelled {
+            do { try await Task.sleep(nanoseconds: 500_000_000) } catch { break }   // still say what is known (below)
             if let s = pingLatest, let sAt = Self.atOf(s), best == nil || sAt > (Self.atOf(best) ?? 0) { best = s }
-            if let b = best, let bAt = Self.atOf(b), bAt >= floor, nowMs() - bAt * 1000 < Self.freshMs,
+            if let b = best, let bAt = Self.atOf(b), bAt >= floor, relay.serverNowMs() - bAt * 1000 < Self.freshMs,
                relay.snapAt == nil || bAt > Double(relay.snapAt ?? 0) {
                 relay.adopt(b)
-                let a = nowMs() - bAt * 1000
-                relay.setStatus(a < Self.justMs ? "开机中 · 刚刚更新" : "开机中 · 在忙 · 状态 \(ago(Int(bAt)))", "on")
+                let a = relay.serverNowMs() - bAt * 1000
+                relay.setStatus(a < Self.justMs ? "开机中 · 刚刚更新" : "开机中 · 在忙 · 状态 \(ago(safeInt(bAt) ?? 0))", "on")
                 return
             }
             if !resent && nowMs() - t0 > 4000 {
@@ -219,24 +247,24 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         if let b = best, let bAt = Self.atOf(b), relay.snapAt == nil || bAt > Double(relay.snapAt ?? 0) { relay.adopt(b) }
         guard let b = best, let bAt = Self.atOf(b) else {
             _ = try? await relay.latestState(since: "2h")
-            if relay.pinScan.seen > 0 && relay.pinScan.matched == 0 {
-                relay.setStatus("信箱里有 \(relay.pinScan.seen) 条消息但 PIN 对不上——检查设置里的 PIN", "off")
+            if let note = relay.pinMismatchNote() {
+                relay.setStatus(note, "off")
                 return
             }
             let lb = lastBeat()
             relay.setStatus(lb.isEmpty ? "关机 · 还没有过心跳" : "关机 · 最后心跳 \(lb)", "off")
             return
         }
-        let age = nowMs() - bAt * 1000
+        let age = relay.serverNowMs() - bAt * 1000
         if age < Self.justMs { relay.setStatus("开机中 · 刚刚更新", "on"); return }
-        if age < Self.freshMs { relay.setStatus("开机中 · 在忙 · 状态 \(ago(Int(bAt)))", "on"); return }
+        if age < Self.freshMs { relay.setStatus("开机中 · 在忙 · 状态 \(ago(safeInt(bAt) ?? 0))", "on"); return }
         sawHb(bAt * 1000)
         relay.setStatus("关机 · 没应答刷新 · 最后心跳 \(lastBeat())", "off")
     }
 
     /// The ping stream's onmessage: keep the newest state whose PIN matches (chunked states are joined).
     private func onPingEvent(_ d: JSONValue, pin: String) {
-        if let ev = d["event"]?.string, ev != "message" { return }
+        if let ev = d["event"]?.string, ev != "message" { tookServerTime(d); return }
         if Relay.isStateNotice(d["message"]?.string) {
             // the reply is on COS: fetch it and keep it like a state that came in the message
             Task { @MainActor [weak self] in
@@ -257,7 +285,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     /// live.js updateLive(): the status line from the heartbeat verdict. Local clock only.
     func updateLive() {
         guard relay.config != nil else { return }
-        let isAlive = lastHb > 0 && (nowMs() - lastHb < hbWindowMs())
+        let isAlive = lastHb > 0 && (relay.serverNowMs() - lastHb < hbWindowMs())
         if alive != isAlive { alive = isAlive }
         if isAlive {
             // 「 · 」 separates: the status card's second line = 「实时 · 配置 1 分钟前」
@@ -279,7 +307,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     /// 「我在看」: the machine beats at once on receipt. No answer within 8 s counts as off.
     func askWatch() {
         guard let cfg = relay.config, !cfg.topic.isEmpty, !cfg.pin.isEmpty else { return }
-        if !(lastHb > 0 && nowMs() - lastHb < hbWindowMs()) {
+        if !(lastHb > 0 && relay.serverNowMs() - lastHb < hbWindowMs()) {
             pendingUntil = nowMs() + (cosHbSeen ? Self.confirmCosMs : Self.confirmMs)
         }
         updateLive()   // show 「正在确认…」 at once, so the old 「关机」 does not hang 5 more seconds
@@ -300,7 +328,8 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
                     if me.lastHb > before { break }
                 }
             } catch {
-                self?.netOk = false
+                // a 429 is ntfy's quota, not our network: the verdict stays with the beats (the one on COS goes on)
+                if Self.isNetwork(error) { self?.netOk = false }
                 self?.updateLive()
             }
         }
@@ -340,7 +369,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     func readCosHb(show: Bool = true) async {
         guard let b = await relay.cosHb(), let atS = b["at"]?.number, atS > 0 else { return }
         cosHbSeen = true
-        let at = atS * 1000
+        let at = min(atS * 1000, relay.serverNowMs())   // a machine clock ahead must not keep 「开机中」 past a power cut
         sawHb(at)
         if b["bye"]?.bool == true {
             if at >= lastHb {
@@ -349,9 +378,9 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             }
         } else {
             let cosEvery = b["cos_every"]?.number ?? 30
-            if nowMs() - at < cosEvery * 2000 + 30000 && at > lastHb {
+            if relay.serverNowMs() - at < cosEvery * 2000 + 30000 && at > lastHb {
                 lastHb = at
-                if let n = b["every"]?.number, n > 0 { hbEvery = Int(n) }
+                if let n = safeInt(b["every"]?.number), n > 0 { hbEvery = n }
             }
         }
         if show { updateLive() }
@@ -360,8 +389,8 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     /// A state the machine stored is proof of life too (like a state on the stream), by the same 90-s rule.
     private func stateIsLife() {
         guard let a = relay.snapAt else { return }
-        let at = Double(a) * 1000
-        if nowMs() - at < Self.hbFreshMs && at > lastHb { lastHb = at }
+        let at = min(Double(a) * 1000, relay.serverNowMs())   // a stamp in the future counts as now (readCosHb)
+        if relay.serverNowMs() - at < Self.hbFreshMs && at > lastHb { lastHb = at }
         sawHb(at)
     }
 
@@ -390,16 +419,26 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         liveStream = nil
     }
 
+    /// ntfy stamps an open / keepalive event with its own now: the clock the stamps are judged against (Relay.clockSkewMs).
+    private func tookServerTime(_ d: JSONValue) {
+        guard let ev = d["event"]?.string, ev == "open" || ev == "keepalive", let t = d["time"]?.number, t > 0 else { return }
+        relay.clockSkewMs = t * 1000 - nowMs()
+    }
+
     private func onLiveEvent(_ d: JSONValue, cfg: RelayConfig) {
-        if let ev = d["event"]?.string, ev != "message" { return }
+        if let ev = d["event"]?.string, ev != "message" { tookServerTime(d); return }
         let t = (d["time"]?.number ?? 0) * 1000
         if d["topic"]?.string == cfg.topic + "-hb" {
             sawHb(t)
+            // by time, not by arrival (edge audit 25): an older beat must not undo a later bye, nor a bye an older beat
+            // (probeHb and readCosHb merge the same way)
             if d["message"]?.string == "bye" {
-                lastHb = 0
-                pendingUntil = 0
+                if t >= lastHb {
+                    lastHb = 0
+                    pendingUntil = 0
+                }
             } else {
-                lastHb = t
+                lastHb = max(lastHb, t)
                 if let n = Self.hbPace(d["message"]) { hbEvery = n }
             }
             updateLive()
@@ -426,9 +465,34 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         updateLive()
     }
 
+    /// The network came back: after a spell off (a subway ride) longer than the machine's 10-minute watch lease it beats
+    /// no more, and the line read 「关机」 until the 8-minute renewal (edge audit 5). Ask at once, and read the beat on COS.
+    private func backOnline() {
+        guard foreground, relay.config != nil else { return }
+        askWatch()
+        Task { [weak self] in await self?.readCosHb() }
+    }
+
+    /// Another mailbox was taken (a pasted / opened 免输入链接, AppShell): what was shown and waited for belongs to the old
+    /// machine. Its state is no longer newer-than-checked against (Relay.adopt), its sent changes no longer wait for
+    /// a receipt, and its last beat is not this machine's (edge audit 6).
+    func mailboxChanged() {
+        relay.snap = nil
+        relay.saveCache()
+        relay.pinScan = PinScan()
+        relay.cosPinBad = false
+        pending.clearAll()
+        lastHb = 0
+        hbSeen = 0
+        UserDefaults.standard.removeObject(forKey: Self.hbSeenKey)
+    }
+
     /// live.js visibilitychange handler (also the boot sequence): stream, heartbeat history, watch.
+    /// Checks `foreground` before and after each wait: the call is queued (AppGlue.enterForeground), and a quick switch
+    /// away ran enterBackground's stop() first, so this reopened the stream and sent `watch` in the background, where
+    /// Android keeps the process and the machine kept beating into ntfy's daily quota (edge audit 20).
     func becameVisible() async {
-        guard relay.config != nil else { return }
+        guard relay.config != nil, foreground else { return }
         startLive()
         // the newest state the machine stored, once per open (no timer)
         let r = relay
@@ -439,7 +503,9 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             }
         }
         await probeHb()
+        guard foreground else { stopLive(); return }
         await readCosHb(show: false)   // after probeHb, which sets lastHb from ntfy's last 90 s
+        guard foreground else { stopLive(); return }
         updateLive()
         askWatch()
     }
@@ -525,7 +591,8 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         if events.contains(where: { $0["event"]?.string == "open" }) { DiagLog.shared.record("stream", ["state": "open"]) }
         if isClosed { return }
         let f = onEvent
-        for e in events { Task { @MainActor in f(e) } }
+        // one task for the batch, so its events are handled in the order they came (edge audit 25)
+        Task { @MainActor in for e in events { f(e) } }
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {

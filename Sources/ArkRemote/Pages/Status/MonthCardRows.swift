@@ -14,6 +14,10 @@ private func monthCardTone(_ e: MonthCardEntry?) -> Color {
 /// The card at the top of the 状态 page while a card has 0–5 days left (spec §4; monthcard.js banner(), drawn with view.js
 /// notice(): caption, title, body). Nothing when no card is that close. Goes right after the 刷声骸 card (view.js:362).
 struct MonthCardReminder: View {
+    /// MonthCardStore.today(), passed in: 还剩 X 天 counts from it, and a view with no input that changes was not redrawn by
+    /// the page's 30-s tick, so past midnight it kept yesterday's count (edge audit 22).
+    var today: String
+
     var body: some View {
         let soon = MonthCardStore.shared.soon()
         // listSection, not `if`: a bare `if` leaves an empty grey section on Android (Pages/Shell/SkipFixes.swift)
@@ -33,6 +37,9 @@ struct MonthCardReminder: View {
 /// The 状态 page's 月卡 group: one row per game pushing its registration page (monthcard.js section()). Goes right after
 /// the 机器 section, before 明日安排 (view.js:404).
 struct MonthCardRows: View {
+    /// MonthCardStore.today(), passed in so the rows recount past midnight (MonthCardReminder.today).
+    var today: String
+
     var body: some View {
         let store = MonthCardStore.shared
         let _ = Live.shared.alive   // the sync note follows the heartbeat verdict
