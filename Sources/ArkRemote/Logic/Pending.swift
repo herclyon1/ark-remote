@@ -251,8 +251,9 @@ struct PendingBar: Sendable, Equatable {
     /// before the backlog runs (boot_stages.py:688, then 689-694 one state after it), so every change made while the machine
     /// was off read 「没生效」 for that first state — and stayed red when the second did not get out; a state pushed while
     /// the order still waits (an order sent during a run) is the same. The receipt is written before the state after the
-    /// order (boot_stages.py:615, then :621). `sent` is the envelope's ts, the phone's clock taken just before the POST
-    /// (Net.send), while sentAt is taken after it, so the minute compared is that of sentAt − 60 s. A receipt without
+    /// order (boot_stages.py:615, then :621). `sent` is the envelope's ts, taken just before the POST on ntfy's clock
+    /// (Net.send), while sentAt is taken after it on the phone's, so the minute compared is that of sentAt moved to ntfy's
+    /// clock (clockSkewMs) − 60 s. A receipt without
     /// `sent` (an older relay) counts by `at`, which is never before its send. A match only ever clears an item, so a
     /// matching value is taken as applied without a receipt, as before.
     func machineActed(on p: PendingEdit) -> Bool {
