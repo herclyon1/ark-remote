@@ -199,7 +199,8 @@ extension StatusData {
                 StatusStamina(label: "终末地 理智", value: ef.current, cap: ef.max, sub: full(ef), error: ef.error),
                 StatusStamina(label: "鸣潮 波片", value: ww.waveplates, cap: ww.max, sub: wwSub, error: ww.error),
             ]
-            d.staminaSource = r.takenAt
+            // with the day when it is not today's (审查 C2)
+            d.staminaSource = stamina.takenMs > 0 ? localClockWithDay(Date(timeIntervalSince1970: stamina.takenMs / 1000)) : r.takenAt
         } else if stamina.tokens != nil || stamina.loadTokens() != nil {
             d.stamina = []
         }
