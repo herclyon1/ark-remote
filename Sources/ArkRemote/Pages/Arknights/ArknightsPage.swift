@@ -375,11 +375,14 @@ struct ArknightsPickerRow: View {
     @Binding var selection: String
 
     /// view.js:559: a null value gets a hidden, disabled 「未设」 option, selected, so the select reads 「未设」 until another
-    /// item is picked; it is listed here only while nothing is set. A value the list does not have reads as the first item,
-    /// as a <select> with no selected option does.
+    /// item is picked; it is listed here only while nothing is set. A value the list does not have is listed as
+    /// 「未知：<value>」 and selected: as the web's <select> it read as the first item, a value the machine does not have
+    /// (审查 B13; mastercfg.py:569-570 passes gui.new.json's value as is).
     private var shown: [ArknightsOption] {
         let unset = selection.isEmpty && !options.contains { $0.value.isEmpty }
-        return (unset ? [ArknightsOption(label: "未设", value: "")] : []) + options
+        let unknown = !selection.isEmpty && !options.contains { $0.value == selection }
+        return (unset ? [ArknightsOption(label: "未设", value: "")] : [])
+            + (unknown ? [ArknightsOption(label: "未知：\(selection)", value: selection)] : []) + options
     }
 
     var body: some View {
