@@ -75,7 +75,7 @@ enum StatusCommands {
         }
         a.selectQueue = { storedQueue.wrappedValue = $0 }
         a.setRunsToday = { name, on in
-            let label = data.plan.first(where: { $0.queueName == name }).map { "\(name) · \($0.time)" } ?? name
+            let label = data.plan.first(where: { $0.queueName == name && !$0.time.isEmpty }).map { "\(name) · \($0.time)" } ?? name
             let body: JSONValue = on
                 ? .object(["action": .string("unskip_today"), "queue": .string(name)])
                 : .object(["action": .string("skip_today"), "queue": .string(name), "day": .string(statusBeijingToday())])

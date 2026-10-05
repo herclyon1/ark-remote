@@ -25,6 +25,8 @@ struct StatusPlanBlock: Hashable, Identifiable {
     var queueName: String?    // the shift this block belongs to, nil when none matches
     var runsToday: Bool       // switch on = 今天照常, off = 今天跳过
     var games: [StatusPlanGame]
+    /// The block's 「⏻ 跑完自动关机」 line (plan.py:674-675), without the mark; "" when the shift does not shut down.
+    var after: String = ""
     var id: String { (queueName ?? "") + time }
 }
 

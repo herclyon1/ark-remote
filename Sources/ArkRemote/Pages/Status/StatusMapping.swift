@@ -128,6 +128,14 @@ extension StatusData {
                                               queueName: nil, runsToday: true, games: []))
                 continue
             }
+            // plan.py:674-675 ends a shift's block with 「⏻ 跑完自动关机」: it belongs to the block, not to its last game's
+            // hints, where it read as that game's setting (审查 C3)
+            if l.hasPrefix("⏻") {
+                if let b = blocks.indices.last {
+                    blocks[b].after = l.replacingOccurrences(of: "⏻", with: "").trimmingCharacters(in: .whitespaces)
+                }
+                continue
+            }
             if l.hasPrefix("▸") {
                 guard !blocks.isEmpty else { continue }
                 blocks[blocks.count - 1].games.append(
@@ -137,7 +145,6 @@ extension StatusData {
             if let b = blocks.indices.last, let g = blocks[b].games.indices.last { blocks[b].games[g].hints.append(l) }
             else if blocks.isEmpty { foot.append(l) }   // view.js:229 `else if (!cur) foot.push(l)`
         }
-        if d.nextAt.isEmpty, let first = blocks.first { d.nextAt = first.time }
         for i in blocks.indices {
             let owners = blocks[i].games.compactMap { statusOwnerOf[$0.name] }.sorted().joined(separator: "|")
             if let q = d.queues.first(where: { $0.scripts.sorted().joined(separator: "|") == owners }) {
@@ -148,6 +155,22 @@ extension StatusData {
                 blocks[i].runsToday = pending.shownValue(for: id)?.truthy ?? on
                 if let t = tag(pending, id) { d.switchTags[id] = t }
             }
+        }
+        // 审查 B2: a skip engaged turns the shift's timer off (modes.py:393-396, queues.py:59-60) and plan.next_plan lists
+        // only timed shifts (plan.py:136), so the row went from the plan with its switch — the one way to undo the skip here
+        // (unskip_today, modes.py:467-501). A shift skipped today with no row gets one, without a time (the plan no longer
+        // gives it), so it can be switched back on.
+        for q in d.queues where skipped.contains(q.name) && !blocks.contains(where: { $0.queueName == q.name }) {
+            let id = StatusSwitchID.queue(q.name)
+            if record { pending.liveVals[id] = .bool(false) }
+            blocks.append(StatusPlanBlock(time: "", tokyo: "", queueName: q.name,
+                                          runsToday: pending.shownValue(for: id)?.truthy ?? false, games: []))
+            if let t = tag(pending, id) { d.switchTags[id] = t }
+        }
+        // 审查 B3: the tile reads 「<shift> · 下一趟 <time>」, so the time is that shift's own row (blocks.first was the plan's
+        // first row whatever the shift: 「晚班 · 下一趟 09:00」), on the phone's clock (the 东京 time the plan gives, B4)
+        if d.nextAt.isEmpty, let mine = blocks.first(where: { $0.queueName == d.currentQueue && !$0.time.isEmpty }) {
+            d.nextAt = mine.tokyo.isEmpty ? mine.time : mine.tokyo
         }
         d.plan = blocks
         d.planFoot = foot
@@ -223,8 +246,13 @@ extension StatusData {
             let rc = rcs.reversed().first { r in
                 r["action"]?.jsString == "estop" && (r["at"]?.jsString ?? "") >= pressed
             }
+            // 「下一趟」 here is the next run whatever the shift: the first timed row still to come today on the machine's
+            // clock, else tomorrow's first (审查 B3), on the phone's clock (B4)
+            let timed = d.plan.filter { !$0.time.isEmpty && $0.runsToday }
+            let now = machineNowHHMM()
+            let next = (timed.first(where: { $0.time > now }) ?? timed.first).map { $0.tokyo.isEmpty ? $0.time : $0.tokyo } ?? ""
             let head = rc == nil ? "已下令停止 · 等机器回执"
-                : (rc?["ok"]?.truthy ?? false) ? "已停止 · 下一趟\(d.nextAt.isEmpty ? "" : " " + d.nextAt) 照常" : "没停干净 · 见下方回执"
+                : (rc?["ok"]?.truthy ?? false) ? "已停止 · 下一趟\(next.isEmpty ? "" : " " + next) 照常" : "没停干净 · 见下方回执"
             d.estopNote = StatusEstopNote(title: head,
                                           receipt: rc.map { "回执 \($0["at"]?.jsString ?? "")：\($0["text"]?.jsString ?? "")" }
                                               ?? "等机器回执：停干净没有以回执为准")
