@@ -105,6 +105,8 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     @ObservationIgnored let pending: Pending
     @ObservationIgnored private var liveStream: NtfyStream?
     @ObservationIgnored private var pingLatest: JSONValue?
+    /// The live stream's half-arrived chunked states: sid -> (index -> slice) (Relay.joinChunks).
+    @ObservationIgnored private var liveChunks: [String: [Int: String]] = [:]
     @ObservationIgnored private var timers: [Task<Void, Never>] = []
 
     init(relay: Relay = .shared, pending: Pending = .shared) {
@@ -459,7 +461,25 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         }
         guard let text = d["message"]?.string, let m = try? JSONValue.parse(text) else { return }
         guard m["kind"]?.string == "state", m["pin"]?.jsString == cfg.pin else { return }
-        guard let body = try? Relay.unwrap(m) else { return }
+        // a state too big for one message comes as gzp slices (phone.py:93-112 pack_chunks: same sid, own i of n), as
+        // the ping stream and latestState already join them; only a complete set is adopted. Before, every slice failed
+        // unwrap and a chunked state waited for a pull or a tab switch (test pass 1, 问题 8)
+        let body: JSONValue?
+        if m["gzp"] != nil {
+            // a set that never completes (a slice lost) must not pile up: keep the newest few sids
+            if liveChunks[m["sid"]?.jsString ?? ""] == nil && liveChunks.count >= 4 { liveChunks.removeAll() }
+            body = try? Relay.joinChunks(m, box: &liveChunks)
+            if body == nil {
+                // a slice is the machine talking: proof of life like a state
+                lastHb = max(lastHb, t)
+                sawHb(t)
+                updateLive()
+                return
+            }
+        } else {
+            body = try? Relay.unwrap(m)
+        }
+        guard let body else { return }
         relay.adopt(body)
         lastHb = max(lastHb, t)   // a state is proof of life too
         sawHb(t)

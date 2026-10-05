@@ -420,6 +420,12 @@ struct PinScan: Sendable, Equatable {
     /// net.js joinChunks(m): a large state arrives as several messages with the same sid and their own i/n;
     /// only a complete set is restored, never half a state.
     func joinChunks(_ m: JSONValue) throws -> JSONValue? {
+        try Self.joinChunks(m, box: &chunkBox)
+    }
+
+    /// joinChunks into a box of the caller's: the live stream keeps its own (Live.liveChunks), as latestState empties
+    /// this one on every read and would drop a set half-arrived on the stream.
+    nonisolated static func joinChunks(_ m: JSONValue, box chunkBox: inout [String: [Int: String]]) throws -> JSONValue? {
         guard let slice = m["gzp"] else { return nil }
         let sid = m["sid"]?.jsString ?? ""
         let i = safeInt(m["i"]?.number) ?? 0
