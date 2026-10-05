@@ -53,13 +53,24 @@ let bosses: [(index: Int, name: String)] = [
     (4, "无铭探索者"),
 ]
 
-/// 凝素领域 index (梦州 group; full table in docs/WUWA-TACET-INDEX.md).
+/// 凝素领域 index, all 15 of relay/ark_relay/wuwa_forgery.py FORGERY (27-43): 1–5 梦州, 6–10 拉海洛, 11–15 黎那汐塔. Only
+/// 1–5 were listed, so a machine set to 6–15 showed a blank choice and the change list a bare number (审查 B12).
 let forge: [Choice] = [
     Choice(label: "1 · 迅刀（陨翼云渊）", value: .int(1)),
     Choice(label: "2 · 音感仪（静灭云渊）", value: .int(2)),
     Choice(label: "3 · 长刃（裂斩云渊）", value: .int(3)),
     Choice(label: "4 · 臂铠（碎蚀云渊）", value: .int(4)),
     Choice(label: "5 · 佩枪（沉熄云渊）", value: .int(5)),
+    Choice(label: "6 · 迅刀（荒蓁旧殿）", value: .int(6)),
+    Choice(label: "7 · 音感仪（残照终课）", value: .int(7)),
+    Choice(label: "8 · 长刃（灾逆旧殿）", value: .int(8)),
+    Choice(label: "9 · 臂铠（虚诞终课）", value: .int(9)),
+    Choice(label: "10 · 佩枪（余烬终课）", value: .int(10)),
+    Choice(label: "11 · 迅刀（赦罪庭园）", value: .int(11)),
+    Choice(label: "12 · 音感仪（浸礼海渊）", value: .int(12)),
+    Choice(label: "13 · 长刃（赞颂庭园）", value: .int(13)),
+    Choice(label: "14 · 臂铠（祝祭海渊）", value: .int(14)),
+    Choice(label: "15 · 佩枪（告解海渊）", value: .int(15)),
 ]
 
 /// Fixed option lists by path; the pending list names the change, so 无音区 gives the set names here.
