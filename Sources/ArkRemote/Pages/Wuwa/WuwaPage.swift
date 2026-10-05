@@ -35,13 +35,24 @@ enum WuwaSchema {
         "茜染怀想之花": "echo-set-11",
     ]
 
-    /// 凝素领域: the 梦州 row only, fixed order 迅刀 / 音感仪 / 长刃 / 臂铠 / 佩枪 (schema.js:75).
+    /// 凝素领域: all 15 of relay wuwa_forgery.py FORGERY (27-43), three regions in the order 迅刀 / 音感仪 / 长刃 / 臂铠 / 佩枪
+    /// (schema.js:75 had the 梦州 five only; a machine set to 6–15 showed no choice, 审查 B12).
     static let forge: [EWChoice] = [
         EWChoice("1 · 迅刀（陨翼云渊）", "1"),
         EWChoice("2 · 音感仪（静灭云渊）", "2"),
         EWChoice("3 · 长刃（裂斩云渊）", "3"),
         EWChoice("4 · 臂铠（碎蚀云渊）", "4"),
         EWChoice("5 · 佩枪（沉熄云渊）", "5"),
+        EWChoice("6 · 迅刀（荒蓁旧殿）", "6"),
+        EWChoice("7 · 音感仪（残照终课）", "7"),
+        EWChoice("8 · 长刃（灾逆旧殿）", "8"),
+        EWChoice("9 · 臂铠（虚诞终课）", "9"),
+        EWChoice("10 · 佩枪（余烬终课）", "10"),
+        EWChoice("11 · 迅刀（赦罪庭园）", "11"),
+        EWChoice("12 · 音感仪（浸礼海渊）", "12"),
+        EWChoice("13 · 长刃（赞颂庭园）", "13"),
+        EWChoice("14 · 臂铠（祝祭海渊）", "14"),
+        EWChoice("15 · 佩枪（告解海渊）", "15"),
     ]
 
     static let group = EWGroupSpec(title: "鸣潮", fields: [

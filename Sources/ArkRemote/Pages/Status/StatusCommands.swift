@@ -63,6 +63,12 @@ enum StatusCommands {
         }
         a.refresh = { Task { await Live.shared.ping() } }
         a.stopAll = {
+            // the relay drops an estop read from the boot backlog (boot_stages.py:534-546 LIVE_ONLY_ACTIONS): sent while the
+            // machine is off it never runs, and the page waited 6 h for its receipt (审查 B8)
+            if data.machineOff {
+                ask.wrappedValue = StatusAsk.notice("机器关着", "现在没有在跑的东西。关机时按的「停止一切」开机后也不会执行，所以这次没有发。")
+                return
+            }
             ask.wrappedValue = StatusAsk(
                 title: "停止一切？", message: "停掉现在在跑的：队列、脚本和游戏。不动排班、不动任何设置，下一趟照常。回执会告诉你停干净没有。",
                 ok: "停止", destructive: true,
@@ -71,7 +77,8 @@ enum StatusCommands {
         }
         a.selectQueue = { storedQueue.wrappedValue = $0 }
         a.setRunsToday = { name, on in
-            let label = data.plan.first(where: { $0.queueName == name }).map { "\(name) · \($0.time)" } ?? name
+            // the time as the row shows it (StatusPlanBlock.shownTime), so the review's 「今天不跑：早班（10:00）」 matches the row
+            let label = data.plan.first(where: { $0.queueName == name && !$0.time.isEmpty }).map { "\(name) · \($0.shownTime)" } ?? name
             let body: JSONValue = on
                 ? .object(["action": .string("unskip_today"), "queue": .string(name)])
                 : .object(["action": .string("skip_today"), "queue": .string(name), "day": .string(statusBeijingToday())])
@@ -88,8 +95,17 @@ enum StatusCommands {
                 return
             }
             let nm = statusBosses.first(where: { $0.index == boss })?.name ?? "第 \(boss) 个"
+            // sent while the machine is off it ran at the next boot, with the time resolved at that moment: 08:30 asked at
+            // 23:00 became the next day's 08:30, a farm of ~24 h over the morning shift (审查 A3; boot_stages.py:692-694,
+            // echofarm.py:329 → 114-124). The relay is to refuse a stale one; the App does not send it at all.
+            if data.machineOff {
+                ask.wrappedValue = StatusAsk.notice("机器关着", "刷声骸要机器开着才能开始：关机时发出的要等开机才执行，所以这次没有发。开机后再按。")
+                return
+            }
             ask.wrappedValue = StatusAsk(
-                title: "开始刷？", message: "刷「\(nm)」到机器时间 \(t) 为止？期间脚本会一直在打，别的任务不跑。", ok: "开始刷",
+                // the relay holds no queue back for a farm (审查 B14: echofarm is read only by commands / engine tick / shutdown /
+                // phone, relay grep): a shift that comes due runs as usual
+                title: "开始刷？", message: "刷「\(nm)」到机器时间 \(t) 为止？期间脚本会一直在打；到点的班次照常跑，可能和它抢游戏。", ok: "开始刷",
                 body: .object(["action": .string("echo_farm"), "confirmed": .bool(true), "boss": .int(boss),
                                "until": .string(t), "name": .string(nm)]),
                 okText: "已派：刷到 \(t)")   // view.js:1230
@@ -99,8 +115,13 @@ enum StatusCommands {
                 relay.showToast("时刻填成 08:30 这种")   // view.js:1239
                 return
             }
+            // echofarm.py retime → resolve_until (114-124): a time not after the machine's clock now is tomorrow's (审查 A2)
+            let past = v <= machineNowHHMM()
             ask.wrappedValue = StatusAsk(
-                title: "改收工时刻？", message: "把收工时刻改成 \(v)（机器时间）？", ok: "改",
+                title: "改收工时刻？",
+                message: past ? "机器时间现在已过 \(v)，会算成明天 \(v) 才收工。要马上停，按「提前收工」。"
+                    : "把收工时刻改成 \(v)（机器时间）？",
+                ok: "改",
                 body: .object(["action": .string("echo_farm_until"), "until": .string(v)]), okText: "收工时刻已改")
         }
         a.stopEchoFarm = {

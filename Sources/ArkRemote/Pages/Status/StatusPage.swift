@@ -142,7 +142,8 @@ struct StatusPage: View {
             Section("刷声骸") {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("正在刷「\(ef.name)」")
-                    Text(ef.from.isEmpty ? "刷到 \(ef.until) 为止" : "刷到 \(ef.until) 为止，\(ef.from) 开始")
+                    // the phone's clock, with the machine's 到 the 改收工 field below uses (审查 B4)
+                    Text("刷到 \(ef.untilLocal) 为止（机器时间 \(ef.until)）" + (ef.fromLocal.isEmpty ? "" : "，\(ef.fromLocal) 开始"))
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Button("改收工时刻") { actions.changeEchoFarmUntil(echoNewUntil.isEmpty ? ef.until : echoNewUntil) }
@@ -264,8 +265,9 @@ struct StatusPage: View {
             if let q = b.queueName {
                 Toggle(isOn: Binding(get: { b.runsToday }, set: { actions.setRunsToday(q, $0) })) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(q) · \(b.time)")
-                        Text([b.tokyo.isEmpty ? "" : "东京 \(b.tokyo)", b.runsToday ? "今天照常" : "今天跳过，明天照常"]
+                        // a skipped shift's row has no time (StatusMapping, 审查 B2); the lead time is 东京, as the tile (B4)
+                        Text(b.shownTime.isEmpty ? q : "\(q) · \(b.shownTime)")
+                        Text([b.machineNote, b.runsToday ? "今天照常" : "今天跳过，明天照常", b.after]
                                 .filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(.footnote).foregroundStyle(.secondary)
                         tagLine(StatusSwitchID.queue(q))
@@ -274,8 +276,9 @@ struct StatusPage: View {
                 .listRowBackground(rowGround(StatusSwitchID.queue(q)))
             } else {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(b.time)
-                    if !b.tokyo.isEmpty { Text("东京 \(b.tokyo)").font(.footnote).foregroundStyle(.secondary) }
+                    Text(b.shownTime)
+                    let sub = [b.machineNote, b.after].filter { !$0.isEmpty }.joined(separator: " · ")
+                    if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(.secondary) }
                 }
             }
             // ids carry the block: the same game sits in several blocks (这一趟 and 明日安排), and skip-ui keys a List's
@@ -332,7 +335,9 @@ struct StatusPage: View {
                 // view.js:396-398: the field sits beside its title, the explanation under the title (web .row: label + .hint left,
                 // input.short right, index.html:488 72–120 px wide)
                 HStack(spacing: 12) {
-                    rowTitle("改成刷到几点", "提前或延后都行，填 21:00 这种。已经过了的时刻＝立刻收工")
+                    // echofarm.py retime (363-384) resolves the time like a start: one already past is tomorrow's (审查 A2: the
+                    // old 「已经过了的时刻＝立刻收工」 sent a farm on for another day); stopping now is 「提前收工」
+                    rowTitle("改成刷到几点（机器时间）", "提前或延后都行，填 21:00 这种。已经过了的时刻算明天；要马上停按「提前收工」")
                     // view.js:398 #efnew value = the current 到; :1235 data-time: a bad entry rolls back with a toast when it is left
                     TextField(ef.until, text: $echoNewUntil)
                         .onAppear { if echoNewUntil.isEmpty { echoNewUntil = ef.until } }
@@ -406,7 +411,7 @@ struct StatusPage: View {
             Toggle(isOn: Binding(get: { data.debugModeUntil != nil }, set: { actions.setDebugMode($0) })) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("调试模式")
-                    Text(data.debugModeUntil.flatMap { $0.isEmpty ? nil : "开着，到 \($0)——这期间跑完不关机" } ?? "开着的 90 分钟里跑完不关机，到点自动关掉")
+                    Text(data.debugModeUntil.flatMap { $0.isEmpty ? nil : "开着，到 \($0)——这期间跑完不关机" } ?? debugModeRule)
                         .font(.footnote).foregroundStyle(.secondary)
                     tagLine(StatusSwitchID.debugMode)
                 }
@@ -418,7 +423,8 @@ struct StatusPage: View {
             // view.js:322-325 cfgNote, placed right after the 机器 section (view.js:402): a bare footnote line in --warn
             // (systemOrange, index.html:102/477), no card; AUTO-MAS unreadable, and whether a last good config stands in
             if data.configUnreadable {
-                warningLabel(data.configIsStale ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的，改了也要等它开着才生效"
+                // set_config fails at once when AUTO-MAS does not answer (commands.py:338-341), it is not held (审查 B16)
+                warningLabel(data.configIsStale ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的；它没在运行时改的会失败，看回执"
                                                 : "读不到 AUTO-MAS 的配置（它没在运行？）")
                     .font(.footnote)
                     .foregroundStyle(.orange)
@@ -435,7 +441,7 @@ struct StatusPage: View {
             Section {
                 // view.js:458 nowRow sits above the newest three
                 if let actual = data.todayActual { todayActualRow(actual) }
-                ForEach(data.receipts.prefix(3)) { r in receiptRow(r, at: r.at) }
+                ForEach(data.receipts.prefix(3)) { r in receiptRow(r, at: r.shownAt) }
                 if data.receipts.count > 3 {
                     // by value (StatusRoute.receipts; the page is built in body's navigationDestination), so a reselect can pop it
                     NavigationLink(value: StatusRoute.receipts) {
@@ -539,7 +545,7 @@ struct StatusReceiptsPage: View {
 
     private var days: [String] {
         var seen: [String] = []
-        for r in receipts { let d = String(r.at.prefix(5)); if !seen.contains(d) { seen.append(d) } }
+        for r in receipts { let d = String(r.shownAt.prefix(5)); if !seen.contains(d) { seen.append(d) } }
         return seen
     }
 
@@ -554,7 +560,7 @@ struct StatusReceiptsPage: View {
             ForEach(days, id: \.self) { d in
                 Section(dayName(d)) {
                     if d == today, let actual = todayActual { todayActualRow(actual) }
-                    ForEach(receipts.filter { $0.at.hasPrefix(d) }) { r in receiptRow(r, at: String(r.at.dropFirst(6))) }
+                    ForEach(receipts.filter { $0.shownAt.hasPrefix(d) }) { r in receiptRow(r, at: String(r.shownAt.dropFirst(6))) }
                 }
             }
         }

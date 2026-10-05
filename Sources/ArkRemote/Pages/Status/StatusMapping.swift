@@ -7,6 +7,12 @@ import Foundation
 /// view.js OWNER_OF: game name in the plan text → script name in a shift's 脚本.
 let statusOwnerOf = ["明日方舟": "MAA", "终末地": "MaaEnd", "鸣潮": "OK-WW"]
 
+/// relay config.py GAME_PROCS / SCRIPT_PROCS (401-413) without .exe → what the user knows them as.
+let statusProcName = [
+    "Endfield": "终末地", "Client-Win64-Shipping": "鸣潮", "Wuthering Waves": "鸣潮启动器",
+    "dnplayer": "雷电模拟器（明日方舟）", "MAA": "MAA（明日方舟）", "MaaEnd": "MaaEnd（终末地）", "ok-ww": "OK-WW（鸣潮）",
+]
+
 /// view.js timeHHMM(s): "8:30" / "08:30" → "08:30", anything else nil.
 func statusTimeHHMM(_ s: String) -> String? {
     let p = s.trimmingCharacters(in: .whitespaces).split(separator: ":", omittingEmptySubsequences: false)
@@ -83,14 +89,29 @@ extension StatusData {
         }
         d.online = live.alive
         d.dotOn = relay.statusState == "on"   // view.js setStatus(text, state) → #dot2 class (live.js:65-66), not the heartbeat alone
+        // "off" also marks the PIN-mismatch line (StatusTab); only the 「关机 · …」 lines are the machine being off
+        d.machineOff = relay.statusState == "off" && st.hasPrefix("关机")
         d.refreshing = live.busy
 
         // notices
-        d.busy = (snap?["run"]?["在跑的"]?.array ?? []).compactMap { $0.string }
+        // 审查 B7: run.在跑的 is the process table at the moment of the push (phone.py:1052-1053), so it holds only while the
+        // machine is on and the state is fresh (Live.freshMs): a 2-hour-old list kept 「现在跑一趟」 refused as 「正在跑别的」
+        // after the machine was off. Its names are exe names (config.py:401-413, .exe dropped by snapshot.py:181): shown as
+        // the games and scripts they are.
+        let fresh = relay.snapAt.map { relay.serverNowMs() - Double($0) * 1000 < Live.freshMs } ?? false   // ntfy's clock (edge audit 3)
+        if live.alive && fresh {
+            for n in (snap?["run"]?["在跑的"]?.array ?? []).compactMap({ $0.string }) {
+                let name = statusProcName[n] ?? n
+                if !d.busy.contains(name) { d.busy.append(name) }
+            }
+        }
         if let ef = relayObj?["刷声骸"], let until = ef["到"]?.string, !until.isEmpty {
+            let from = ef["从"]?.string ?? ""
             d.echoFarm = StatusEchoFarm(name: ef["名字"]?.string ?? "?",
-                                        from: String((ef["从"]?.string ?? "").dropFirst(11)),
-                                        until: String(until.dropFirst(11)))
+                                        from: String(from.dropFirst(11)),
+                                        until: String(until.dropFirst(11)),
+                                        fromLocal: from.isEmpty ? "" : localClock(fromMachineFull: from),
+                                        untilLocal: localClock(fromMachineFull: until))
         }
 
         // shifts
@@ -126,6 +147,14 @@ extension StatusData {
                                               queueName: nil, runsToday: true, games: []))
                 continue
             }
+            // plan.py:674-675 ends a shift's block with 「⏻ 跑完自动关机」: it belongs to the block, not to its last game's
+            // hints, where it read as that game's setting (审查 C3)
+            if l.hasPrefix("⏻") {
+                if let b = blocks.indices.last {
+                    blocks[b].after = l.replacingOccurrences(of: "⏻", with: "").trimmingCharacters(in: .whitespaces)
+                }
+                continue
+            }
             if l.hasPrefix("▸") {
                 guard !blocks.isEmpty else { continue }
                 blocks[blocks.count - 1].games.append(
@@ -135,7 +164,6 @@ extension StatusData {
             if let b = blocks.indices.last, let g = blocks[b].games.indices.last { blocks[b].games[g].hints.append(l) }
             else if blocks.isEmpty { foot.append(l) }   // view.js:229 `else if (!cur) foot.push(l)`
         }
-        if d.nextAt.isEmpty, let first = blocks.first { d.nextAt = first.time }
         for i in blocks.indices {
             let owners = blocks[i].games.compactMap { statusOwnerOf[$0.name] }.sorted().joined(separator: "|")
             // the plan names no shift, only its games: two shifts running the same games both matched and the first won,
@@ -151,6 +179,22 @@ extension StatusData {
                 blocks[i].runsToday = pending.shownValue(for: id)?.truthy ?? on
                 if let t = tag(pending, id) { d.switchTags[id] = t }
             }
+        }
+        // 审查 B2: a skip engaged turns the shift's timer off (modes.py:393-396, queues.py:59-60) and plan.next_plan lists
+        // only timed shifts (plan.py:136), so the row went from the plan with its switch — the one way to undo the skip here
+        // (unskip_today, modes.py:467-501). A shift skipped today with no row gets one, without a time (the plan no longer
+        // gives it), so it can be switched back on.
+        for q in d.queues where skipped.contains(q.name) && !blocks.contains(where: { $0.queueName == q.name }) {
+            let id = StatusSwitchID.queue(q.name)
+            if record { pending.liveVals[id] = .bool(false) }
+            blocks.append(StatusPlanBlock(time: "", tokyo: "", queueName: q.name,
+                                          runsToday: pending.shownValue(for: id)?.truthy ?? false, games: []))
+            if let t = tag(pending, id) { d.switchTags[id] = t }
+        }
+        // 审查 B3: the tile reads 「<shift> · 下一趟 <time>」, so the time is that shift's own row (blocks.first was the plan's
+        // first row whatever the shift: 「晚班 · 下一趟 09:00」), on the phone's clock (the 东京 time the plan gives, B4)
+        if d.nextAt.isEmpty, let mine = blocks.first(where: { $0.queueName == d.currentQueue && !$0.time.isEmpty }) {
+            d.nextAt = mine.shownTime
         }
         d.plan = blocks
         d.planFoot = foot
@@ -176,7 +220,8 @@ extension StatusData {
                 StatusStamina(label: "终末地 理智", value: ef.current, cap: ef.max, sub: full(ef), error: ef.error),
                 StatusStamina(label: "鸣潮 波片", value: ww.waveplates, cap: ww.max, sub: wwSub, error: ww.error),
             ]
-            d.staminaSource = r.takenAt
+            // with the day when it is not today's (审查 C2)
+            d.staminaSource = stamina.takenMs > 0 ? localClockWithDay(Date(timeIntervalSince1970: stamina.takenMs / 1000)) : r.takenAt
         } else if stamina.tokens != nil || stamina.loadTokens() != nil {
             d.stamina = []
         }
@@ -185,7 +230,9 @@ extension StatusData {
         let rcs = relayObj?["最近指令"]?.array ?? []
         d.receipts = rcs.reversed().map { r in
             StatusReceipt(ok: r["ok"]?.truthy ?? false, text: r["text"]?.jsString ?? "", at: r["at"]?.jsString ?? "",
-                          sent: r["sent"]?.jsString ?? "", action: r["action"]?.jsString ?? "")
+                          sent: r["sent"]?.jsString ?? "", action: r["action"]?.jsString ?? "",
+                          atLocal: phoneStamp(fromMachine: r["at"]?.jsString ?? ""),
+                          sentLocal: (r["sent"]?.jsString).map { phoneStamp(fromMachine: $0) } ?? "")
         }
         var idSeen: [String: Int] = [:]   // StatusReceipt.dup: equal minute + text must not give equal ForEach ids
         for i in d.receipts.indices {
@@ -208,7 +255,7 @@ extension StatusData {
             if day == todayMD { skipToday = true }
             if !r.ok { continue }
             if let later = lastOk[key] {
-                d.receipts[i].note = "已被 \(String(later.at.dropFirst(6))) 的「\(later.action == "skip_today" ? "跳过" : "取消跳过")\(q)」取代"
+                d.receipts[i].note = "已被 \(String(later.shownAt.dropFirst(6))) 的「\(later.action == "skip_today" ? "跳过" : "取消跳过")\(q)」取代"
                 continue
             }
             lastOk[key] = r
@@ -220,7 +267,9 @@ extension StatusData {
         if (skipToday || !skipped.isEmpty) && !d.queues.isEmpty {
             d.todayActual = d.queues.map { "\($0.name) \(skipped.contains($0.name) ? "跳过" : "照常")" }.joined(separator: " · ")
         }
-        d.receiptsToday = todayMD
+        // the 回执 page groups by the phone's day (shownAt), so today's group is the phone's today
+        let md = Calendar.current.dateComponents([.month, .day], from: Date())
+        d.receiptsToday = "\(pad2(md.month ?? 0))-\(pad2(md.day ?? 0))"
 
         // 停止一切 note for 6 hours
         if estopAt > 0, nowSec() - estopAt < 6 * 3600 {
@@ -236,10 +285,15 @@ extension StatusData {
                 // "MM-dd" has no year: a receipt in January answers a press on 12-31 (the window is 6 hours)
                 return r["action"]?.jsString == "estop" && (at >= pressed || (pressed.hasPrefix("12-") && at.hasPrefix("01-")))
             }
+            // 「下一趟」 here is the next run whatever the shift: the first timed row still to come today on the machine's
+            // clock, else tomorrow's first (审查 B3), on the phone's clock (B4)
+            let timed = d.plan.filter { !$0.time.isEmpty && $0.runsToday }
+            let now = machineNowHHMM()
+            let next = (timed.first(where: { $0.time > now }) ?? timed.first).map { $0.shownTime } ?? ""
             let head = rc == nil ? "已下令停止 · 等机器回执"
-                : (rc?["ok"]?.truthy ?? false) ? "已停止 · 下一趟\(d.nextAt.isEmpty ? "" : " " + d.nextAt) 照常" : "没停干净 · 见下方回执"
+                : (rc?["ok"]?.truthy ?? false) ? "已停止 · 下一趟\(next.isEmpty ? "" : " " + next) 照常" : "没停干净 · 见下方回执"
             d.estopNote = StatusEstopNote(title: head,
-                                          receipt: rc.map { "回执 \($0["at"]?.jsString ?? "")：\($0["text"]?.jsString ?? "")" }
+                                          receipt: rc.map { "回执 \(phoneStamp(fromMachine: $0["at"]?.jsString ?? ""))：\($0["text"]?.jsString ?? "")" }
                                               ?? "等机器回执：停干净没有以回执为准")
         }
 
@@ -251,7 +305,9 @@ extension StatusData {
         let dbgLive = dbg?.truthy ?? false
         if record { pending.liveVals[StatusSwitchID.debugMode] = .bool(dbgLive) }
         let dbgShown = pending.shownValue(for: StatusSwitchID.debugMode)?.truthy ?? dbgLive
-        d.debugModeUntil = dbgShown ? (dbgLive ? (dbg?.jsString ?? "") : "") : nil   // "" = on, until not reported yet
+        // "" = on, until not reported yet. The relay's "YYYY-MM-DD HH:MM" is Beijing (modes.py:217): shown on the phone's
+        // clock with the day (「明天 09:30」), as the page's other times (审查 A1 / B4)
+        d.debugModeUntil = dbgShown ? (dbgLive ? localClock(fromMachineFull: dbg?.jsString ?? "") : "") : nil
         for id in [StatusSwitchID.skipShutdown, StatusSwitchID.debugMode] {
             if let t = tag(pending, id) { d.switchTags[id] = t }
         }

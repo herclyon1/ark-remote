@@ -109,8 +109,9 @@ struct ArknightsPage: View {
         Section {
             // view.js:309-311: AUTO-MAS not running → the last config read, said so in yellow.
             if data.configUnreadable {
+                // set_config fails at once when AUTO-MAS does not answer (commands.py:338-341), it is not held (审查 B16)
                 ArknightsWarningRow(text: data.configStale
-                    ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的，改了也要等它开着才生效"
+                    ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的；它没在运行时改的会失败，看回执"
                     : "读不到 AUTO-MAS 的配置（它没在运行？）")
                     .id("ark-stage-warn")   // a reselect's scroll target (topID)
             }
@@ -251,7 +252,8 @@ struct ArknightsPage: View {
                 Text("明日方舟 · 周常")
             } footer: {
                 // one row: the hint goes to the footer without the 「剿灭：」 prefix (view.js:989)
-                Text("打满本周剿灭后自动停掉，下周一 04:00 自动恢复")
+                // annihilation.py:56-65 counts the week from Monday 04:00 Beijing = 05:00 Tokyo (审查 B4)
+                Text("打满本周剿灭后自动停掉，下周一 05:00（东京时间）自动恢复")
             }
         }
     }
@@ -386,11 +388,14 @@ struct ArknightsPickerRow: View {
     @Binding var selection: String
 
     /// view.js:559: a null value gets a hidden, disabled 「未设」 option, selected, so the select reads 「未设」 until another
-    /// item is picked; it is listed here only while nothing is set. A value the list does not have reads as the first item,
-    /// as a <select> with no selected option does.
+    /// item is picked; it is listed here only while nothing is set. A value the list does not have is listed as
+    /// 「未知：<value>」 and selected: as the web's <select> it read as the first item, a value the machine does not have
+    /// (审查 B13; mastercfg.py:569-570 passes gui.new.json's value as is).
     private var shown: [ArknightsOption] {
         let unset = selection.isEmpty && !options.contains { $0.value.isEmpty }
-        return (unset ? [ArknightsOption(label: "未设", value: "")] : []) + options
+        let unknown = !selection.isEmpty && !options.contains { $0.value == selection }
+        return (unset ? [ArknightsOption(label: "未设", value: "")] : [])
+            + (unknown ? [ArknightsOption(label: "未知：\(selection)", value: selection)] : []) + options
     }
 
     var body: some View {

@@ -162,12 +162,23 @@ struct PendingBar: Sendable, Equatable {
             let at = p.resentAt ?? p.sentAt
             // pending.js:58-59: past 10 h the mailbox (12 h) may have dropped it; resent only by a tap, never automatically
             if Self.isStale(p) { return .sent(text: "没回执 · 已寄出 \(Self.hhmm(at))") }
-            let fresh = relay.snapAt.map { relay.serverNowMs() / 1000 - Double($0) < Live.freshMs / 1000 } ?? false
-            return .sent(text: "已寄出 \(Self.hhmm(at)) · \(fresh ? "几秒内回执" : "机器开机后生效")")
+            return .sent(text: "已寄出 \(Self.hhmm(at)) · \(waitNote)")
         }
         if editing { return nil }
         guard let a = acked[key], nowSec() - a.at <= 24 * 3600 else { return nil }
         return .applied(text: "已应用 \(Self.hhmm(a.at))")
+    }
+
+    /// What happens to a sent change now (审查 B9: the bar always said 「机器开机后生效」, the row 「几秒内回执」 on any state
+    /// younger than 3 min, running or not). Machine on (heartbeat, or a state younger than Live.freshMs) and the fresh state
+    /// lists a script or game running → the relay holds the order until the run ends (relay change by 中继二, the 现在在跑
+    /// card's 「推迟到跑完再生效」); on and idle → a receipt within seconds; else → at the next boot.
+    var waitNote: String {
+        // the machine's `at` against ntfy's clock, not the phone's (Relay.serverNowMs, edge audit 3)
+        let fresh = relay.snapAt.map { relay.serverNowMs() / 1000 - Double($0) < Live.freshMs / 1000 } ?? false
+        guard Live.shared.alive || fresh else { return "机器开机后生效" }
+        let running = fresh && !(relay.snap?["run"]?["在跑的"]?.array ?? []).isEmpty
+        return running ? "机器在跑，跑完再生效" : "几秒内回执"
     }
 
     /// pending.js:58: no receipt for more than 10 h since the last send (the resend when there is one).
@@ -197,7 +208,7 @@ struct PendingBar: Sendable, Equatable {
         let bad = items.values.filter { $0.mismatchAt != nil }.count
         let text = bad > 0
             ? "\(bad) 项改动机器没接受（见红字）" + (n - bad > 0 ? "，另 \(n - bad) 项还在等回执" : "")
-            : "\(n) 项改动已寄出 · 机器开机后生效"
+            : "\(n) 项改动已寄出 · \(waitNote)"
         return PendingBar(text: text, hasMismatch: bad > 0)
     }
 
@@ -226,13 +237,44 @@ struct PendingBar: Sendable, Equatable {
                 // pending.js:101: one line ≤ 13 at 28 pt (the native HUD never wraps); the value is on the row
                 let t = "「\(p.label)」已生效"
                 relay.showToast(t.count <= 13 ? t : "改动已生效")
-            } else if p.mismatchAt != at {
+            } else if p.mismatchAt != at && machineActed(on: p) {
                 items[key]?.mismatchAt = at
                 items[key]?.elsewhere = p.from.map { !Self.sameVal(live, $0) }
                 changed = true
             }
         }
         if changed { savePending() }
+    }
+
+    /// Whether this state can say a change did not take: the machine has a receipt of the change's action sent at or after
+    /// its (re)send (relay.最近指令, modes.py add_receipt). A newer state alone is no proof (审查 B5): the boot state goes out
+    /// before the backlog runs (boot_stages.py:688, then 689-694 one state after it), so every change made while the machine
+    /// was off read 「没生效」 for that first state — and stayed red when the second did not get out; a state pushed while
+    /// the order still waits (an order sent during a run) is the same. The receipt is written before the state after the
+    /// order (boot_stages.py:615, then :621). `sent` is the envelope's ts, the phone's clock taken just before the POST
+    /// (Net.send), while sentAt is taken after it, so the minute compared is that of sentAt − 60 s. A receipt without
+    /// `sent` (an older relay) counts by `at`, which is never before its send. A match only ever clears an item, so a
+    /// matching value is taken as applied without a receipt, as before.
+    func machineActed(on p: PendingEdit) -> Bool {
+        let action: String
+        switch p.src {
+        case "relay": action = p.body?["action"]?.string ?? ""
+        case "wb": action = "weekly_boss"
+        case "master": action = "set_master"
+        default: action = "set_config"
+        }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = machineZone
+        f.dateFormat = "MM-dd HH:mm"   // modes.py:584-587
+        // sentAt is this phone's clock, `sent` ntfy's (Net.send) and `at` the machine's: compare on ntfy's (edge audit 3)
+        let from = f.string(from: Date(timeIntervalSince1970: Double(p.resentAt ?? p.sentAt) + relay.clockSkewMs / 1000 - 60))
+        let rcs = relay.snap?["relay"]?["最近指令"]?.array ?? []
+        return rcs.contains { r in
+            guard r["action"]?.jsString == action else { return false }
+            let s = r["sent"]?.jsString ?? ""
+            return (s.isEmpty ? (r["at"]?.jsString ?? "") : s) >= from
+        }
     }
 
     /// 「再发一次」.
@@ -251,7 +293,7 @@ struct PendingBar: Sendable, Equatable {
         defer { resending.remove(key) }
         let body: JSONValue
         if p.src == "relay" || p.src == "wb" {
-            body = p.body ?? .null
+            body = Self.skipDayNow(p.body ?? .null)   // a skip's day is today's when it goes again (审查 B10)
         } else if p.src == "master" {
             body = .object(["action": .string("set_master"), "confirmed": .bool(true), "game": .string(p.owner),
                             "path": .string(p.path), "value": p.to])
@@ -262,6 +304,7 @@ struct PendingBar: Sendable, Equatable {
         do {
             try await relay.send(body)
             items[key]?.resentAt = nowSec()
+            if p.src == "relay" { items[key]?.body = body }
             items[key]?.mismatchAt = nil
             items[key]?.elsewhere = nil
             savePending()
@@ -270,6 +313,15 @@ struct PendingBar: Sendable, Equatable {
             // pending.js:118: a reason is a sentence: alert, not the one-line HUD
             relay.showAlert("发不出去", Live.why(error))
         }
+    }
+
+    /// A skip_today carries the Beijing day it means, and the relay refuses one for another day (commands.py:944-950): the
+    /// day was taken when the switch was flipped, so one flipped at 23:59 and saved at 00:01, or 「再发一次」 the next day, came
+    /// back 「指令在收件箱里过期了」 (审查 B10). It is taken when the order goes out instead.
+    nonisolated static func skipDayNow(_ body: JSONValue) -> JSONValue {
+        guard case .object(var o) = body, o["action"]?.string == "skip_today" else { return body }
+        o["day"] = .string(statusBeijingToday())
+        return .object(o)
     }
 
     // No automatic resend (web 188a5339, 09-30, pending.js:121-124): the old resendStale re-sent every change without

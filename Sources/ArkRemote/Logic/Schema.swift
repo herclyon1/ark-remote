@@ -53,13 +53,24 @@ let bosses: [(index: Int, name: String)] = [
     (4, "无铭探索者"),
 ]
 
-/// 凝素领域 index (梦州 group; full table in docs/WUWA-TACET-INDEX.md).
+/// 凝素领域 index, all 15 of relay/ark_relay/wuwa_forgery.py FORGERY (27-43): 1–5 梦州, 6–10 拉海洛, 11–15 黎那汐塔. Only
+/// 1–5 were listed, so a machine set to 6–15 showed a blank choice and the change list a bare number (审查 B12).
 let forge: [Choice] = [
     Choice(label: "1 · 迅刀（陨翼云渊）", value: .int(1)),
     Choice(label: "2 · 音感仪（静灭云渊）", value: .int(2)),
     Choice(label: "3 · 长刃（裂斩云渊）", value: .int(3)),
     Choice(label: "4 · 臂铠（碎蚀云渊）", value: .int(4)),
     Choice(label: "5 · 佩枪（沉熄云渊）", value: .int(5)),
+    Choice(label: "6 · 迅刀（荒蓁旧殿）", value: .int(6)),
+    Choice(label: "7 · 音感仪（残照终课）", value: .int(7)),
+    Choice(label: "8 · 长刃（灾逆旧殿）", value: .int(8)),
+    Choice(label: "9 · 臂铠（虚诞终课）", value: .int(9)),
+    Choice(label: "10 · 佩枪（余烬终课）", value: .int(10)),
+    Choice(label: "11 · 迅刀（赦罪庭园）", value: .int(11)),
+    Choice(label: "12 · 音感仪（浸礼海渊）", value: .int(12)),
+    Choice(label: "13 · 长刃（赞颂庭园）", value: .int(13)),
+    Choice(label: "14 · 臂铠（祝祭海渊）", value: .int(14)),
+    Choice(label: "15 · 佩枪（告解海渊）", value: .int(15)),
 ]
 
 /// Fixed option lists by path; the pending list names the change, so 无音区 gives the set names here.
@@ -253,13 +264,20 @@ struct RelaySwitch: Sendable {
     var hintOn: (@Sendable (String) -> String)? = nil
 }
 
+/// 调试模式's rule as the relay applies it (modes.py set_debug); the end moment itself is shown once the machine reports it
+/// (relay.调试模式, in the phone's time: StatusMapping).
+let debugModeRule = "打开后跑完都不关机，一直到下一次预定开机前 10 分钟才自动关掉（两个半小时内就要到的那次开机不算），可能开十几个小时"
+
 let relaySwitches: [RelaySwitch] = [
     RelaySwitch(id: "relay|skip_shutdown", key: "下次别关机", tab: "状态", label: "下次跑完不关机",
                 hint: "只跳过下一次关机，再下一趟照常关",
                 on: .object(["action": .string("skip_shutdown")]),
                 off: .object(["action": .string("skip_shutdown"), "off": .bool(true)])),
     RelaySwitch(id: "relay|debug_mode", key: "调试模式", tab: "状态", label: "调试模式",
-                hint: "开着的 90 分钟里跑完不关机，到点自动关掉",
+                // relay modes.py set_debug (183-222): `minutes` is not read; the mode holds until 10 min before the next
+                // scheduled power-on (BOOT_TIMES 08:40 / 21:20 Beijing, :54-56) more than 150 min away (CURRENT_CYCLE_MIN,
+                // :58-65) — up to ~13 h, not 90 min (审查 A1). The body is left as it was; the text says what happens.
+                hint: debugModeRule,
                 on: .object(["action": .string("debug_mode"), "minutes": .int(90), "confirmed": .bool(true)]),
                 off: .object(["action": .string("debug_mode"), "off": .bool(true), "confirmed": .bool(true)]),
                 hintOn: { v in "开着，到 \(v)——这期间跑完不关机" }),

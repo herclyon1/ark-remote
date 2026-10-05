@@ -124,10 +124,11 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         }
     }
 
-    /// 「HH:MM」 of the last sign of life, else of the snapshot, else "".
+    /// 「HH:MM」 of the last sign of life, else of the snapshot, else "". With the day in front when it is not today
+    /// (「昨天 22:34」): a bare time read the next morning did not say which day (审查 C2).
     func lastBeat() -> String {
-        if hbSeen > 0 { return clockHHMM(ms: hbSeen) }
-        if let at = relay.snapAt, at != 0 { return clockHHMM(ms: Double(at) * 1000) }
+        if hbSeen > 0 { return localClockWithDay(Date(timeIntervalSince1970: hbSeen / 1000)) }
+        if let at = relay.snapAt, at != 0 { return localClockWithDay(Date(timeIntervalSince1970: TimeInterval(at))) }
         return ""
     }
 

@@ -85,6 +85,17 @@ import SwiftUI
         if let n = safeInt((relay?["周常"]?["周本"] ?? relay?["周本"])?["第几个周本"]?.number) {
             Pending.shared.liveVals["wb|OK-WW|第几个周本"] = .int(n)
         }
+        // 审查 B6: the 终末地 / 鸣潮 / 方舟 fields were filled only by their own tab's sync, so a state that came while another
+        // tab was up was checked against the values from before the change (「没生效 · 报的还是「A」」 until that tab was opened
+        // again). Filled here from the same state, as each tab's sync does (EndfieldTab / WuwaTab sync, ArknightsTab.refresh).
+        let snap = Relay.shared.snap
+        for game in [EndfieldTab.game, WuwaTab.game] {   // EWMaster.live: decoded once per snapshot, shared with the tabs
+            for (path, v) in EWMaster.live(game).values { Pending.shared.liveVals["master|\(game)|\(path)"] = v.json }
+        }
+        Pending.shared.liveVals[WuwaTab.tacetKey] = .bool(relay?["无音区截图"]?.truthy ?? false)
+        let ark = ArknightsBridge(snap: snap, queue: d.string(forKey: "ark-remote-cfg-queue") ?? "",
+                                  lastGoodMaster: ArknightsBridge.lastGoodMaster(), lastGoodConfig: ArknightsBridge.lastGoodConfig())
+        Pending.shared.liveVals.merge(ark.liveVals) { _, new in new }
     }
 
     /// visibilitychange → visible (also the boot sequence).

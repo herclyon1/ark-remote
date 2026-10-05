@@ -315,9 +315,11 @@ struct PinScan: Sendable, Equatable {
         }
     }
 
-    /// The setup screen's 「开始使用」: topic lower-cased and trimmed, PIN trimmed.
+    /// The setup screen's 「开始使用」: topic and PIN trimmed. The topic keeps its case: ntfy topic names are case-sensitive
+    /// and the relay posts / listens on ARK_PHONE_TOPIC as written in .env (phone.py:576 strips only, config.py:137), so a
+    /// lower-cased copy of a name with capitals would send every command to another mailbox (审查 A6).
     func saveConfig(topic: String, pin: String) {
-        let c = RelayConfig(topic: topic.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+        let c = RelayConfig(topic: topic.trimmingCharacters(in: .whitespacesAndNewlines),
                             pin: pin.trimmingCharacters(in: .whitespacesAndNewlines))
         config = c
         if let data = try? JSONEncoder().encode(c) {
@@ -444,7 +446,8 @@ struct PinScan: Sendable, Equatable {
     // MARK: the state on COS
 
     /// phone.py state_key(topic): `state/` + the first 32 hex digits of sha256(topic) + `.json`. The topic is
-    /// stored lower-cased and trimmed (saveConfig), the relay lower-cases too, so both name the same object.
+    /// lower-cased here for the hash only (the stored topic keeps its case, saveConfig); the relay lower-cases too, so both
+    /// name the same object.
     nonisolated static func stateURL(topic: String) -> String {
         let t = topic.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let h = Hash.hex(Hash.sha256(Array(t.utf8)))

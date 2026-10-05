@@ -23,7 +23,7 @@ struct SetupScreen: View {
                             .setupNumberInput()
                     }
                     Button("开始使用") {
-                        let t = topic.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        let t = topic.trimmingCharacters(in: .whitespacesAndNewlines)   // case kept: ntfy topics are case-sensitive (Relay.saveConfig)
                         let p = pin.trimmingCharacters(in: .whitespacesAndNewlines)
                         if t.isEmpty || p.isEmpty {
                             Relay.shared.showToast("两样都要填")   // view.js:126 toast, not an alert

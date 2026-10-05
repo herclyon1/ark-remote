@@ -145,6 +145,9 @@ func stampFrom(_ epoch: Double?) -> String {
 
     var data: StaminaReading?
     var at: Double = 0
+    /// When `data` was read (ms), also for the stored one (`at` is 0 then, so it is read again): 取自 is a bare "HH:MM",
+    /// and a reading from yesterday said only 「08:10 读取」 (审查 C2). 0 = unknown.
+    var takenMs: Double = 0
     var busy = false
     /// A forced read asked for while one was running (new tokens from a link): run again when it ends.
     @ObservationIgnored private var again = false
@@ -267,6 +270,7 @@ func stampFrom(_ epoch: Double?) -> String {
               let d = c["data"], d.truthy, let r = try? JSONDecoder().decode(StaminaReading.self, from: d.encoded()) else { return }
         data = r
         at = 0
+        takenMs = c["at"]?.number ?? 0
         cached = true
     }
 
@@ -476,6 +480,7 @@ func stampFrom(_ epoch: Double?) -> String {
         let reading = StaminaReading(arknights: s.0, endfield: s.1, wuwa: ww, takenAt: "\(pad2(c.hour ?? 0)):\(pad2(c.minute ?? 0))")
         data = reading
         at = nowMs()
+        takenMs = at
         cached = false
         // a read where every game failed (no network, a server error page) does not replace the last good one stored
         // for the next open (edge audit 7)
