@@ -88,6 +88,21 @@ struct WuwaPage: View {
     @State var values: [String: EWValue]
     @State var tacetShots: Bool
     @State var bossIndex: String
+    /// A reselect of the 鸣潮 tab at its root (ContentView.reselect, D39): scroll to the top.
+    @Environment(\.tabReselect) var reselect
+
+    private static let tacetID = "wuwa-tacet"
+    private static let unreadableID = "wuwa-unreadable"
+
+    /// The first row drawn in the 鸣潮 card (its title header stays above it, scrolled off on Android: skip-ui's
+    /// ScrollViewProxy finds ids of rows only, LazySupport.swift:250-288, a section header is a count, :283). The card's
+    /// rows come and go with the 母本 and the 体力 choice: the one warning line when nothing is readable, else the first
+    /// of `gameRows` (a ForEach row's id is its EWRow.id, LazySupport objectItems), else the 无音区结算截图 switch.
+    private var topID: String {
+        let (m, notes) = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster)
+        guard m != nil else { return Self.unreadableID }
+        return gameRows(m, notes).first?.id ?? Self.tacetID
+    }
 
     init(data: WuwaPageData,
          onChange: @escaping (String, EWValue) -> Void = { _, _ in },
@@ -105,15 +120,19 @@ struct WuwaPage: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         List {
             gameCard
             weeklyCard
         }
+        // skip-ui animates scrollTo only inside withAnimation (List.swift:242) and ignores the anchor (ScrollView.swift:163)
+        .onChange(of: reselect) { withAnimation { proxy.scrollTo(topID, anchor: .top) } }
         .onChange(of: data.master.values) { _, _ in
             values = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:]
         }
         .onChange(of: data.tacetShots) { _, v in tacetShots = v }
         .onChange(of: data.weeklyBossIndex) { _, v in bossIndex = String(v) }
+        }
     }
 
     /// OK-WW declares which sub-items belong to which 「体力刷什么」 choice (sub_configs); the others are hidden (view.js:436-443).
@@ -145,10 +164,12 @@ struct WuwaPage: View {
                         EWRowTitle(label: "无音区结算截图", hint: nil)
                     }
                 }
+                .id(Self.tacetID)   // a reselect's scroll target when the card has no other row (topID)
             } else {
                 // view.js:478-480: no 母本 and no earlier copy → the card is only this line; the switch is not drawn either
                 warningLabel("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改")
                     .foregroundStyle(.orange)
+                    .id(Self.unreadableID)   // the reselect's scroll target in this case (topID)
             }
         } header: {
             Text(WuwaSchema.group.title)

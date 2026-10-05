@@ -31,10 +31,63 @@ struct ContentView: View {
         }
     }
 
+    /// Each tab's pushed pages, bound to its NavigationStack so a reselect can pop them (D39). One @State per tab rather
+    /// than a dictionary of paths: a binding into a dictionary element is not one Skip is known to transpile safely.
+    @State private var statusPath = NavigationPath()
+    @State private var arknightsPath = NavigationPath()
+    @State private var endfieldPath = NavigationPath()
+    @State private var wuwaPath = NavigationPath()
+    @State private var phonePath = NavigationPath()
+    /// Bumped by a reselect of a tab at its root; the root page scrolls to its top on the change (\.tabReselect).
+    @State private var statusTop = 0
+    @State private var arknightsTop = 0
+    @State private var endfieldTop = 0
+    @State private var wuwaTop = 0
+    @State private var phoneTop = 0
+
     /// The selection: a tab that has just gone (the shift changed while it was open) reads as 状态, like the web
-    /// page falling back to its first tab.
+    /// page falling back to its first tab (view.js:998; the stored tab is set back in `dropGoneTabs`).
+    ///
+    /// D39, tapping the tab that is already selected: view.js:2626-2632 reselectTab (called at :2742) pops the tab's pushed
+    /// page if one is up, else scrolls its root page to the top - one of the two per tap - after UITabBarController: "User
+    /// taps always display the root view of the tab, regardless of which tab was previously selected. This is true even if
+    /// the tab was already selected." skip-ui does neither: TabView.swift:391-398 onItemClick only writes the tag back to
+    /// the selection even for the tab already shown, so this `set` sees the same value and does it here. iOS scrolled the
+    /// 状态 root to the top natively on the simulator; doing it here as well is a second scroll to the same place.
     private var selection: Binding<ContentTab> {
-        Binding(get: { shown(tab) ? tab : .status }, set: { tab = $0 })
+        Binding(get: { shown(tab) ? tab : .status }, set: { new in
+            let current = shown(tab) ? tab : .status
+            tab = new   // first: a tap on 状态 while the stored tab is a gone one must stick
+            if new == current { reselect(new) }
+        })
+    }
+
+    /// The pushed page goes (the path back to empty pops skip-ui's back stack: Navigation.swift:1111-1161 navigateToPath,
+    /// run from didCompose :947-956 on every recompose), else the root page is told to scroll to its top.
+    private func reselect(_ t: ContentTab) {
+        switch t {
+        case .status: if statusPath.isEmpty { statusTop += 1 } else { statusPath = NavigationPath() }
+        case .arknights: if arknightsPath.isEmpty { arknightsTop += 1 } else { arknightsPath = NavigationPath() }
+        case .endfield: if endfieldPath.isEmpty { endfieldTop += 1 } else { endfieldPath = NavigationPath() }
+        case .wuwa: if wuwaPath.isEmpty { wuwaTop += 1 } else { wuwaPath = NavigationPath() }
+        case .phone: if phonePath.isEmpty { phoneTop += 1 } else { phonePath = NavigationPath() }
+        }
+    }
+
+    /// Which game tabs the shown shift has; its change is when a tab can go.
+    private var shiftTabs: String {
+        "\(inShift("MAA"))|\(inShift("MaaEnd"))|\(inShift("OK-WW"))"
+    }
+
+    /// view.js:997-998 after every render: `dropTabPages(present)` drops the pages a gone tab had pushed, and
+    /// `if (!present.has(curTab)) curTab = "状态"` makes 状态 the remembered tab. Without the second line the App only
+    /// showed 状态 for the time being and went back to the old tab on its own when its game came back to the shift.
+    /// The first keeps a tab that comes back from re-pushing the page it had (NavigationStack(path:) pushes what the path holds).
+    private func dropGoneTabs() {
+        if !shown(.arknights) && !arknightsPath.isEmpty { arknightsPath = NavigationPath() }
+        if !shown(.endfield) && !endfieldPath.isEmpty { endfieldPath = NavigationPath() }
+        if !shown(.wuwa) && !wuwaPath.isEmpty { wuwaPath = NavigationPath() }
+        if !shown(tab) { tab = .status }
     }
 
     var body: some View {
@@ -64,38 +117,39 @@ struct ContentView: View {
         // Tab images are view.js TAB_ICONS / TAB_IMAGES exported as-is (Resources/Module.xcassets): the game icons keep
         // their colors; tab-status / tab-phone are template images. tabIconFrame() sizes them for the tab icon slot.
         TabView(selection: selection) {
-            NavigationStack {
-                StatusTab().noticed()
+            NavigationStack(path: $statusPath) {
+                StatusTab().noticed().environment(\.tabReselect, statusTop)
             }
             .tabItem { Label { Text("状态") } icon: { Image("tab-status", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.status)
 
             if inShift("MAA") {
-            NavigationStack {
-                ArknightsTab().noticed()
+            NavigationStack(path: $arknightsPath) {
+                ArknightsTab().noticed().environment(\.tabReselect, arknightsTop)
             }
             .tabItem { Label { Text("方舟") } icon: { Image("tab-arknights", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.arknights)
             }
 
             if inShift("MaaEnd") {
-            NavigationStack {
-                EndfieldTab().noticed()
+            NavigationStack(path: $endfieldPath) {
+                EndfieldTab().noticed().environment(\.tabReselect, endfieldTop)
             }
             .tabItem { Label { Text("终末地") } icon: { Image("tab-endfield", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.endfield)
             }
 
             if inShift("OK-WW") {
-            NavigationStack {
-                WuwaTab().noticed()
+            NavigationStack(path: $wuwaPath) {
+                WuwaTab().noticed().environment(\.tabReselect, wuwaTop)
             }
             .tabItem { Label { Text("鸣潮") } icon: { Image("tab-wuwa", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.wuwa)
             }
 
-            NavigationStack {
+            NavigationStack(path: $phonePath) {
                 PhoneTab()
+                    .environment(\.tabReselect, phoneTop)
                     // the pull to refresh (view.js:1150-1153 pullRefresh → ping) is on PhonePage's List, so the
                     // 「粘贴密钥串」 sheet does not inherit it
                     // the one top bar of the web page (index.html:921, view.js:1551-1556 updateBar) is over 手机 as well:
@@ -112,6 +166,8 @@ struct ContentView: View {
         // skip-ui README "tabViewTransitions": NavDisplayTransitionOptions(.none).
         .tabViewTransitions { _ in .init(.none) }   // SkipUI.NavDisplayTransitionOptions; importing SkipUI here clashes with SwiftUI.View
         #endif
+        // on a shift change, and once at the start for a stored tab that is already out of the shift (view.js:998)
+        .onChange(of: shiftTabs, initial: true) { dropGoneTabs() }
         .overlay { DiagOverlay() }   // seg-frames-logger.js #diagmark / #diagline over every tab (Pages/Phone/PhoneDiagRows.swift)
         .overlay { ToastLayer() }   // view.js toast(): one layer over all five tabs (Pages/Shell/ToastLayer.swift)
         // view.js ask(title, why, "好", false, { single: true }) for a note raised outside a page's own flow:
@@ -122,6 +178,20 @@ struct ContentView: View {
         } message: {
             Text(verbatim: Relay.shared.alert?.message ?? "")
         }
+    }
+}
+
+/// The reselect count of the tab a root page is in (ContentView.reselect): a change means "scroll to your top". Shaped as
+/// skip-ui's own custom-key test (Tests/SkipUITests/SkipUITests.swift:1126-1135); EnvironmentValues.swift:145 reads
+/// `defaultValue` from the key's companion object.
+struct TabReselectKey: EnvironmentKey {
+    static let defaultValue = 0
+}
+
+extension EnvironmentValues {
+    var tabReselect: Int {
+        get { self[TabReselectKey.self] }
+        set { self[TabReselectKey.self] = newValue }
     }
 }
 

@@ -15,9 +15,17 @@ struct StatusPage: View {
     @FocusState var newTimeFocus: Bool
     /// Bumped every 30 s by a local timer so 「X 分钟前」 follows the clock (no network: view.js ago() redrawn on render).
     @State var tick = 0
+    /// A reselect of the 状态 tab at its root (ContentView.reselect, D39): scroll to the top.
+    @Environment(\.tabReselect) var reselect
+
+    /// The first row of the page, always drawn and in a section without a header. skip-ui's ScrollViewProxy finds ids of
+    /// rows only (LazySupport.swift:250-288; a section header is a count, :283), so this is the top it can reach: the
+    /// device card flush under the top bar, with the list's top inset and empty header item above it scrolled off.
+    static let topID = "status-top"
 
     var body: some View {
         let _ = tick
+        ScrollViewReader { proxy in
         List {
             deviceCard
             notices
@@ -53,6 +61,19 @@ struct StatusPage: View {
             tomorrow
             receiptsSection
         }
+        // 「查看全部」 and the 月卡 rows push by value (StatusRoute), so ContentView's path can pop them on a reselect (D39).
+        // On the List, not a Section or row: skip-ui's List finds its sections by type (MonthCardRows.swift), and SwiftUI
+        // wants navigationDestination outside lazy containers.
+        .navigationDestination(for: StatusRoute.self) { route in
+            switch route {
+            case .receipts:
+                StatusReceiptsPage(receipts: data.receipts, todayActual: data.todayActual, today: data.receiptsToday)
+            case .monthCard(let g):
+                MonthCardPage(game: g)
+            }
+        }
+        // skip-ui animates scrollTo only inside withAnimation (List.swift:242) and ignores the anchor (ScrollView.swift:163)
+        .onChange(of: reselect) { withAnimation { proxy.scrollTo(Self.topID, anchor: .top) } }
         // Android: a tap outside the time fields or back with the keyboard up checks them, as the web input's blur
         // (view.js:1235); without this the check waited for a tab switch
         .clearsFocusOnOutsideTap()
@@ -62,6 +83,7 @@ struct StatusPage: View {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
                 tick &+= 1
             }
+        }
         }
     }
 
@@ -101,6 +123,7 @@ struct StatusPage: View {
                     Text(data.deviceStatus).font(.footnote).foregroundStyle(.secondary)
                 }
             }
+            .id(Self.topID)   // the reselect's scroll target (topID)
         }
     }
 
@@ -414,9 +437,8 @@ struct StatusPage: View {
                 if let actual = data.todayActual { todayActualRow(actual) }
                 ForEach(data.receipts.prefix(3)) { r in receiptRow(r, at: r.at) }
                 if data.receipts.count > 3 {
-                    NavigationLink {
-                        StatusReceiptsPage(receipts: data.receipts, todayActual: data.todayActual, today: data.receiptsToday)
-                    } label: {
+                    // by value (StatusRoute.receipts; the page is built in body's navigationDestination), so a reselect can pop it
+                    NavigationLink(value: StatusRoute.receipts) {
                         HStack {
                             Text("查看全部")
                             Spacer()
@@ -496,6 +518,16 @@ func todayActualRow(_ actual: String) -> some View {
         Image(systemName: "xmark.circle.fill").foregroundStyle(Color.red).accessibilityLabel("失败")
         #endif
     }
+}
+
+/// The pages the 状态 tab pushes, as values on the tab's NavigationPath (ContentView), so a reselect of the tab can pop
+/// them (D39). On Android an enum with a payload is a sealed class: the destination lookup keyed by StatusRoute.self finds
+/// a case's subclass through its superclasses (skip-ui Navigation.swift:1163-1175).
+enum StatusRoute: Hashable {
+    /// 「查看全部」 → StatusReceiptsPage.
+    case receipts
+    /// A 月卡 row → MonthCardPage(game:).
+    case monthCard(String)
 }
 
 /// 「查看全部」: every receipt grouped by day (回执只带 月-日, so the header is 「9月17日」).

@@ -39,9 +39,8 @@ struct MonthCardRows: View {
         Section {
             ForEach(MonthCardStore.games, id: \.self) { g in
                 let e = store.entry(g)
-                NavigationLink {
-                    MonthCardPage(game: g)
-                } label: {
+                // by value (StatusRoute.monthCard; StatusPage's List builds the page), so a reselect of 状态 can pop it (D39)
+                NavigationLink(value: StatusRoute.monthCard(g)) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(g)
                         Text(MonthCardStore.line(e)).font(.footnote).foregroundStyle(monthCardTone(e))

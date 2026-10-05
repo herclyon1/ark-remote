@@ -22,6 +22,16 @@ struct EndfieldPage: View {
     var live: (() -> EndfieldPageData)?
 
     @State var values: [String: EWValue]
+    /// A reselect of the 终末地 tab at its root (ContentView.reselect, D39): scroll to the top.
+    @Environment(\.tabReselect) var reselect
+
+    /// The 库存 row: first on the page, always drawn, in a section without a header. skip-ui's ScrollViewProxy finds ids of
+    /// rows only (LazySupport.swift:250-288; a section header is a count, :283): the row lands flush under the top bar, the
+    /// list's top inset and empty header item above it scrolled off.
+    static let topID = "endfield-top"
+
+    /// The cards whose 「更多设置」 row pushes EndfieldRoute.more(title); the titles differ (EndfieldSchema.swift:5, 26, 60).
+    private static let cards = [EndfieldSchema.essence, EndfieldSchema.protocolSpace, EndfieldSchema.otherTasks]
 
     init(data: EndfieldPageData,
          live: (() -> EndfieldPageData)? = nil,
@@ -35,23 +45,40 @@ struct EndfieldPage: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         List {
             // 库存: a single-row card with no header, first on the page (D72, inventory-plan.md §2).
             Section {
-                // A plain NavigationLink, not navigationDestination(isPresented:): the user (10-03 01:11) could not get
-                // back in after returning once - a Bool that the pop did not reset leaves the next tap with nothing to change.
-                NavigationLink {
-                    EndfieldStockpilePage()
-                } label: {
+                // By value (EndfieldRoute, built in the navigationDestination below), so the tab's NavigationPath holds it
+                // and a reselect of the tab can pop it (D39). Still not navigationDestination(isPresented:): the user
+                // (10-03 01:11) could not get back in after returning once - a Bool that the pop did not reset leaves the
+                // next tap with nothing to change.
+                NavigationLink(value: EndfieldRoute.stockpile) {
                     Text("库存")
                 }
+                .id(Self.topID)   // the reselect's scroll target (topID)
             }
             card(EndfieldSchema.essence)
             card(EndfieldSchema.protocolSpace)
             card(EndfieldSchema.otherTasks)
         }
+        // On the List, not a Section or row (skip-ui's List finds its sections by type, MonthCardRows.swift; SwiftUI wants
+        // navigationDestination outside lazy containers); in body so $values, onChange, onResend and live stay in scope.
+        .navigationDestination(for: EndfieldRoute.self) { route in
+            switch route {
+            case .stockpile:
+                EndfieldStockpilePage()
+            case .more(let title):
+                if let g = Self.cards.first(where: { $0.title == title }) {
+                    EndfieldMorePage(group: g, data: live ?? { [data] in data }, values: $values, onChange: onChange, onResend: onResend)
+                }
+            }
+        }
+        // skip-ui animates scrollTo only inside withAnimation (List.swift:242) and ignores the anchor (ScrollView.swift:163)
+        .onChange(of: reselect) { withAnimation { proxy.scrollTo(Self.topID, anchor: .top) } }
         .onChange(of: data.master.values) { _, _ in
             values = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:]
+        }
         }
     }
 
@@ -69,12 +96,10 @@ struct EndfieldPage: View {
                         EWRowView(row: row, values: $values, readonly: c.master.readonly, onChange: onChange,
                                   tag: data.tags[row.path], onResend: onResend, showHint: false)
                     }
-                    // The rest of the card one level down, as Settings does (HIG-CHECKLIST.maa.md:55). A plain NavigationLink,
-                    // not navigationDestination(isPresented:) - see the 库存 row above (7f89811).
+                    // The rest of the card one level down, as Settings does (HIG-CHECKLIST.maa.md:55). By value, so a reselect
+                    // can pop it (D39); not navigationDestination(isPresented:) - see the 库存 row above (7f89811).
                     if more {
-                        NavigationLink {
-                            EndfieldMorePage(group: g, data: live ?? { [data] in data }, values: $values, onChange: onChange, onResend: onResend)
-                        } label: {
+                        NavigationLink(value: EndfieldRoute.more(g.title)) {
                             Text("更多设置")
                         }
                         .listRowBackground(rowBackground(nil))   // same row shape as the EWRowView rows beside it (SkipFixes.swift)
@@ -95,6 +120,16 @@ struct EndfieldPage: View {
             }
         }
     }
+}
+
+/// The pages the 终末地 tab pushes, as values on the tab's NavigationPath (ContentView), so a reselect of the tab can pop
+/// them (D39). On Android an enum with a payload is a sealed class: the destination lookup keyed by EndfieldRoute.self finds
+/// a case's subclass through its superclasses (skip-ui Navigation.swift:1163-1175).
+enum EndfieldRoute: Hashable {
+    /// 库存 → EndfieldStockpilePage.
+    case stockpile
+    /// A card's 「更多设置」 → EndfieldMorePage, by the card's title (EWGroupSpec.title).
+    case more(String)
 }
 
 /// What one card draws (view.js:409-512): the master its rows read from, the warnings above them, and every row in page
