@@ -278,7 +278,13 @@ enum EWSave {
             } catch { failed = error; break }
         }
         for k in ordered(edits) {
-            guard let e = edits[k], e.src == "relay", let body = e.body else { continue }
+            guard let e = edits[k], e.src == "relay", var body = e.body else { continue }
+            // a skip's day is the Beijing day it goes out on, as the review just said 「今天不跑」: stamped when the switch
+            // was flipped, one flipped at 23:59 and saved at 00:01 carried yesterday and the relay refused it (edge audit 17)
+            if body["action"]?.string == "skip_today", case .object(var o) = body {
+                o["day"] = .string(statusBeijingToday())
+                body = .object(o)
+            }
             do {
                 try await relay.send(body)
                 sent += 1

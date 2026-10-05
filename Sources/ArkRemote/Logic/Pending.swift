@@ -81,6 +81,8 @@ struct PendingBar: Sendable, Equatable {
     var liveVals: [String: JSONValue] = [:]
 
     @ObservationIgnored let relay: Relay
+    /// Keys whose 「再发一次」 is out: a second tap meanwhile sent a 周本 / skip twice (edge audit 16).
+    @ObservationIgnored private var resending: Set<String> = []
 
     init(relay: Relay = .shared) {
         self.relay = relay
@@ -234,7 +236,18 @@ struct PendingBar: Sendable, Equatable {
 
     /// 「再发一次」.
     func resend(_ key: String) async {
-        guard let p = items[key] else { return }
+        guard let p = items[key], !resending.contains(key) else { return }
+        // a skip carries its Beijing day and the relay refuses another day's (commands.py _skip_today): resent the next
+        // day it could only be refused again, after 「又发了一次」 (edge audit 17)
+        if p.body?["action"]?.string == "skip_today", let day = p.body?["day"]?.string, !day.isEmpty,
+           day != statusBeijingToday() {
+            items[key] = nil
+            savePending()
+            relay.showAlert("不再发", "这是 \(day) 那天的跳过，那天已经过了，机器不会再收。要跳过今天，重新关一次开关再保存。")
+            return
+        }
+        resending.insert(key)
+        defer { resending.remove(key) }
         let body: JSONValue
         if p.src == "relay" || p.src == "wb" {
             body = p.body ?? .null
