@@ -136,6 +136,8 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     /// live.js why(err): the browser's English error text means nothing to the user.
     nonisolated static func why(_ error: Error) -> String {
         if let l = error as? NtfyLimit { return l.errorDescription ?? "发得太频繁，被限流了" }
+        // an answer that is not the JSON asked for (a 5xx page): DecodingError's text is English (edge audit 7)
+        if error is DecodingError { return "对方回的不是能读的数据" }
         if let u = error as? URLError {
             switch u.code {
             case .timedOut, .cancelled: return "等太久没回应"

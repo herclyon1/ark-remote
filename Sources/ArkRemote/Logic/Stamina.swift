@@ -148,6 +148,11 @@ func stampFrom(_ epoch: Double?) -> String {
     var busy = false
     /// A forced read asked for while one was running (new tokens from a link): run again when it ends.
     @ObservationIgnored private var again = false
+    /// Bumped by clear(); a read records it when it starts (readGen). A read that was out when 「清除密钥」 was tapped
+    /// wrote the tokens back (skRefresh / kuro saveTokens) and the reading and its cache after it, so the clear did not
+    /// hold (edge audit 21): such a read now keeps nothing.
+    @ObservationIgnored private var gen = 0
+    @ObservationIgnored private var readGen = 0
     /// `{sk: {cred, token, dId, uid, efRole, efServer}, kuro: {token, did, roleId, serverId}}`, kept as JSON
     /// because the machine hands the 森空岛 part over as is.
     var tokens: JSONValue?
@@ -249,6 +254,7 @@ func stampFrom(_ epoch: Double?) -> String {
     }
 
     func clear() {
+        gen += 1
         tokens = nil
         data = nil
         cached = false
@@ -277,7 +283,7 @@ func stampFrom(_ epoch: Double?) -> String {
         if let t = j["timestamp"], t.truthy, let ts = t.number { skew = Int(ts) - nowSec() }
         let old = jsStr(sk["token"])
         let token = jsStr(j["data"]?["token"]).isEmpty ? old : jsStr(j["data"]?["token"])
-        if token != old {
+        if token != old && readGen == gen {
             var s = sk.object ?? [:]
             s["token"] = .string(token)
             saveTokens(merged(tokens, "sk", .object(s)))
@@ -307,7 +313,7 @@ func stampFrom(_ epoch: Double?) -> String {
     func skland(_ sk: JSONValue) async -> (GameStamina, GameStamina) {
         let ts: SkTokenSkew
         do { ts = try await skRefresh(sk) } catch {
-            let e = GameStamina(error: errorMessage(error))
+            let e = GameStamina(error: Live.why(error))
             return (e, e)
         }
         var ark: GameStamina
@@ -316,14 +322,14 @@ func stampFrom(_ epoch: Double?) -> String {
             let d = try await skGet(sk, ts, "/api/v1/game/player/info?uid=\(encodeURIComponent(jsStr(sk["uid"])))")
             let ap = d["status"]?["ap"] ?? .object([:])
             ark = Self.arknightsLive(ap, nowSec: Double(nowSec() + ts.skew))
-        } catch { ark = GameStamina(error: errorMessage(error)) }
+        } catch { ark = GameStamina(error: Live.why(error)) }
         var ef: GameStamina
         do {
             guard sk["efRole"]?.truthy == true else { throw AppError("密钥串里没有终末地的角色") }
             let server = jsStr(sk["efServer"]).isEmpty ? "1" : jsStr(sk["efServer"])
             let d = try await skGet(sk, ts, "/api/v1/game/endfield/card/detail?roleId=\(encodeURIComponent(jsStr(sk["efRole"])))&serverId=\(encodeURIComponent(server))")
             ef = Self.endfieldFromDungeon(d["detail"]?["dungeon"] ?? .object([:]))
-        } catch { ef = GameStamina(error: errorMessage(error)) }
+        } catch { ef = GameStamina(error: Live.why(error)) }
         return (ark, ef)
     }
 
@@ -405,7 +411,7 @@ func stampFrom(_ epoch: Double?) -> String {
                 var kk = k.object ?? [:]
                 kk["roleId"] = .string(roleId)
                 kk["serverId"] = .string(serverId)
-                saveTokens(merged(tokens, "kuro", .object(kk)))
+                if readGen == gen { saveTokens(merged(tokens, "kuro", .object(kk))) }
             }
             // getData is the widget's cached copy (cheap, never rate-limited); refresh makes 库街区 pull the game
             // again and answers 「操作频繁」 when asked a few times in a row. Read the cache; only if it is older
@@ -436,7 +442,7 @@ func stampFrom(_ epoch: Double?) -> String {
             if full > now && live < total { o.fullAt = stampFrom(full) }
             return o
         } catch {
-            return WuwaStamina(error: errorMessage(error))
+            return WuwaStamina(error: Live.why(error))
         }
     }
 
@@ -451,18 +457,30 @@ func stampFrom(_ epoch: Double?) -> String {
         // as the app came to the front, while the 森空岛-only read was out: 波片 stayed 「没配库街区」, ark37 10-03)
         if busy { if force { again = true }; return data }
         busy = true
+        readGen = gen
         let sk = t["sk"].flatMap { $0.truthy ? $0 : nil }
         let ku = t["kuro"].flatMap { $0.truthy ? $0 : nil }
         async let skPart: (GameStamina, GameStamina) = sk != nil ? skland(sk!)
             : (GameStamina(error: "没配森空岛"), GameStamina(error: "没配森空岛"))
         async let wwPart: WuwaStamina = ku != nil ? kuro(ku!) : WuwaStamina(error: "没配库街区")
         let (s, ww) = await (skPart, wwPart)
+        guard readGen == gen else {   // 「清除密钥」 while it was out
+            busy = false
+            if again {   // new tokens pasted after the clear asked for a read meanwhile
+                again = false
+                return await refresh(force: true)
+            }
+            return nil
+        }
         let c = Calendar.current.dateComponents([.hour, .minute], from: Date())
         let reading = StaminaReading(arknights: s.0, endfield: s.1, wuwa: ww, takenAt: "\(pad2(c.hour ?? 0)):\(pad2(c.minute ?? 0))")
         data = reading
         at = nowMs()
         cached = false
-        if let d = try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(reading)) {
+        // a read where every game failed (no network, a server error page) does not replace the last good one stored
+        // for the next open (edge audit 7)
+        let allFailed = s.0.error != nil && s.1.error != nil && ww.error != nil
+        if !allFailed, let d = try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(reading)) {
             let c: JSONValue = .object(["at": .double(at), "data": d])
             UserDefaults.standard.set(c.encodedString(), forKey: Self.cacheKey)
         }
