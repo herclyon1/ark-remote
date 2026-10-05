@@ -37,6 +37,9 @@ class Abort(Exception):
     pass
 
 
+DISCARD_SEL = ["放弃", "xmark"]       # the save bar's ✕ (steps.DISCARD)
+
+
 # ---------------------------------------------------------------- selectors
 def _match_one(sel, node):
     if sel == "":
@@ -139,12 +142,27 @@ class Runner:
             if region in ("top", "bottom"):
                 inside = hits
             else:
-                inside = [n for n in hits if top + 4 <= n["y"] <= bottom - 4]
+                # bar buttons (a sheet's 再想想 / 寄出 N 项 sit in its navigation bar, above the content area) count too
+                bars = [b for b in dump["nodes"] if b["kind"] == "NavigationBar" and b["h"] > 0]
+                inside = [n for n in hits if top + 4 <= n["y"] <= bottom - 4
+                          or any(abs(n["y"] - b["y"]) <= b["h"] / 2 and abs(n["x"] - b["x"]) <= b["w"] / 2 for b in bars)]
             sig = tuple((tuple(n["texts"]), n["y"]) for n in dump["nodes"] if n["texts"])[:80]
             near = None
             if not inside and hits:
                 near = "down" if hits[0]["y"] < top else "up"
             return (inside[nth] if len(inside) > nth else None), sig, near
+
+        def settled(n):
+            # after a scroll the list may still be gliding: hand back the place only once two reads agree
+            for _ in range(6):
+                time.sleep(0.3)
+                m, _, _ = look(True)
+                if m is None:
+                    return n
+                if (m["x"], m["y"]) == (n["x"], n["y"]):
+                    return m
+                n = m
+            return n
 
         n, sig, near = look(self.cache is None)
         if n:
@@ -155,7 +173,7 @@ class Runner:
             self.scroll(near, short=True)
             n, sig, near = look(True)
             if n:
-                return n
+                return settled(n)
         for direction in ("up", "down"):
             for _ in range(8 if direction == "up" else 12):
                 self.scroll(direction)
@@ -164,7 +182,7 @@ class Runner:
                     self.scroll(near, short=True)
                     n, sig2, near = look(True)
                 if n:
-                    return n
+                    return settled(n)
                 if sig2 == sig:
                     break        # this end of the page reached
                 sig = sig2
@@ -286,6 +304,23 @@ class Runner:
             self.drv.gate_press(x1, y1, x2, y2, rest[2], rest[3])
         elif kind == "gate_trials":
             self.gate_trials(*rest)
+        elif kind == "dismiss":
+            self.dismiss()
+        elif kind == "pick":
+            # ("pick", wheel index, value): iOS DatePicker wheels (the capsule opened first)
+            res = self.drv.call(f"pick {rest[0]} {rest[1]}")[0]
+            if not res.startswith("ok"):
+                raise StepFail(f"转盘 {rest[0]} 拨不到 {rest[1]}：{res}")
+        elif kind == "see":
+            # ("see", sel): scroll until sel is inside the content area, without tapping
+            self.locate(rest[0])
+        elif kind == "time":
+            # ("time", DatePicker label, hour, minute): open the compact capsule, turn both wheels, close by a tap outside
+            self.pick_time(rest[0], rest[1], rest[2])
+        elif kind == "tapout":
+            # close a popover (the DatePicker wheels) by a tap in the right margin beside the row of sel, outside the cards
+            n = self.locate(rest[0], scroll=False)
+            self.drv.tap(self.drv.size[0] - 8, n["y"])
         elif kind == "app_posts":
             self.check_app_posts(rest[0])
         elif kind == "clipboard":
@@ -310,6 +345,79 @@ class Runner:
         else:
             raise StepFail(f"未知动作 {kind}")
         self.invalidate()
+
+    def pick_time(self, label, hh, mm):
+        """iOS compact DatePicker (StatusPage.swift hhmmBinding): tap the capsule, wait for the two wheels, set
+        hour / minute (XCUIElement.adjust), then close the popover with a tap in the right margin at the capsule's
+        height (outside the cards: a tap on a row below would also hit that row, pass 7 doubt 3)."""
+        if self.drv.platform != "ios":
+            raise StepFail("time 只在 iOS 上跑")
+        sel = {"t": label, "kind": "DatePicker"}
+        for _ in range(2):
+            self.locate(sel)
+            self.invalidate()
+            n = self.locate(sel, scroll=False)      # where it is after the nudge
+            self.drv.tap(n["x"], n["y"])
+            time.sleep(0.9)
+            self.invalidate()
+            if any(x["kind"] == "PickerWheel" for x in self.dump(True)["nodes"]):
+                break
+        else:
+            raise StepFail(f"点「{label}」胶囊没出转盘")
+        self.turn_wheel(0, int(hh), 24)
+        self.turn_wheel(1, int(mm), 60)
+        self.drv.tap(self.drv.size[0] - 8, n["y"])
+        time.sleep(0.8)
+        self.invalidate()
+        if any(x["kind"] == "PickerWheel" for x in self.dump(True)["nodes"]):
+            raise StepFail("点外面没关掉转盘")
+
+    def turn_wheel(self, i, want, mod):
+        """Turn picker wheel i to the value want with synthesized touches (XCUIElement.adjust waits for the app to go
+        idle, 60 s per wait when it never does): a slow drag of about 32 pt per row for big moves (no fling: the finger
+        rests before it lifts), a tap on the neighbouring row for the last ones, reading the wheel back each time."""
+        for _ in range(16):
+            wheels = sorted([n for n in self.dump(True)["nodes"] if n["kind"] == "PickerWheel"], key=lambda n: n["x"])
+            if len(wheels) <= i:
+                raise StepFail(f"没有第 {i + 1} 个转盘")
+            w = wheels[i]
+            m = re.match(r"\s*(\d+)", w["value"] or "")
+            if not m:
+                raise StepFail(f"转盘值读不懂：{w['value']!r}")
+            d = (want - int(m.group(1))) % mod
+            if d > mod // 2:
+                d -= mod
+            if d == 0:
+                return
+            x, y = w["x"], w["y"]
+            if abs(d) <= 2:
+                self.drv.tap(x, y + (32 if d > 0 else -32))
+            else:
+                k = max(-6, min(6, d))
+                y0 = y + 80 if k > 0 else y - 80
+                y1 = y0 - 32 * k
+                self.drv.call(f"path {x},{y0},0|{x},{y0 + (y1 - y0) // 20},30|{x},{(y0 + y1) // 2},500|{x},{y1},500|{x},{y1},400")
+            time.sleep(0.9)
+        raise StepFail(f"转盘 {i + 1} 拨不到 {want}")
+
+    def dismiss(self):
+        """Close what a skipped send left open: a review sheet (再想想), a confirm alert (取消), a notice (好), then
+        throw the edits away (✕), so the next step starts from the page as it was."""
+        for _ in range(4):
+            dump = self.dump(True)
+            for sel in ("再想想", "取消", "好"):
+                hits = [h for h in self.find(sel, dump) if self.on_screen(h)]
+                if hits:
+                    self.drv.tap(hits[-1]["x"], hits[-1]["y"])
+                    time.sleep(0.8)
+                    break
+            else:
+                hits = self.find(DISCARD_SEL, dump, "top")
+                if hits:
+                    self.drv.tap(hits[0]["x"], hits[0]["y"])
+                    time.sleep(0.8)
+                    continue
+                return
 
     def gate_trials(self, n, gap_ms, hold_ms):
         """Android 400 ms gate (EWLive.swift go(): a press that began before armedAt does not send; armedAt is set 400 ms
@@ -561,6 +669,16 @@ class Runner:
                 if not [n for n in self.find(s, dump) if top - 40 <= n["y"] <= bottom]:
                     miss.append(f"「{sel_text(s)}」不在屏幕上")
             miss += [f"多了「{sel_text(s)}」" for s in absent if self.find(s, dump)]
+            for up, low in step.get("below", []):
+                # the lower element starts at or under the upper one's bottom edge (no overlap), and on screen
+                u = [n for n in self.find(up, dump) if self.on_screen(n)]
+                lo = [n for n in self.find(low, dump) if self.on_screen(n)]
+                if not u or not lo:
+                    miss.append(f"「{sel_text(up)}」/「{sel_text(low)}」不在屏幕上")
+                elif lo[0]["y"] - lo[0]["h"] / 2 < u[0]["y"] + u[0]["h"] / 2 - 1:
+                    miss.append(f"「{sel_text(low)}」（上边 {lo[0]['y'] - lo[0]['h'] / 2:g}）压着「{sel_text(up)}」（下边 {u[0]['y'] + u[0]['h'] / 2:g}）")
+            if step.get("last_above") or step.get("last_bottom"):
+                miss += self.check_last(step, dump)
             if kb is not None and self.drv.keyboard_up(dump["nodes"]) != kb:
                 miss.append("键盘还在" if not kb else "键盘没出来")
             if not miss or time.time() > deadline:
@@ -568,6 +686,36 @@ class Runner:
             time.sleep(0.3)
         if miss:
             raise StepFail("；".join(miss))
+
+    def content_bottom(self, dump):
+        """The lowest bottom edge of the page's own content: the nodes before the tab bar / toolbar in the tree (the
+        diagnostic button and strip float after them), without containers and scroll bars."""
+        nodes = dump["nodes"]
+        cut = next((k for k, n in enumerate(nodes) if n["kind"] in ("TabBar", "Toolbar")), len(nodes))
+        H = self.drv.size[1]
+        body = [n for n in nodes[:cut] if n["kind"] not in ("Application", "Window", "Other", "ScrollView", "Table",
+                                                              "CollectionView", "NavigationBar")
+                and n["h"] < H * 0.6 and 0 <= n["y"] <= H]
+        return max((n["y"] + n["h"] / 2 for n in body), default=None)
+
+    def check_last(self, step, dump):
+        """last_above: sel - scrolled to the bottom, the page's last line ends at or above sel's top edge (and within
+        60 pt of it, so the page really is at its end). last_bottom: [lo, hi] - that edge lies in this range."""
+        b = self.content_bottom(dump)
+        if b is None:
+            return ["页面内容为空"]
+        if step.get("last_above"):
+            hits = [n for n in self.find(step["last_above"], dump) if self.on_screen(n)]
+            if not hits:
+                return [f"没有「{sel_text(step['last_above'])}」"]
+            top = hits[0]["y"] - hits[0]["h"] / 2
+            if not (top - 60 <= b <= top + 1):
+                return [f"最后一行下边 {b:g}，「{sel_text(step['last_above'])}」上边 {top:g}"]
+        if step.get("last_bottom"):
+            lo, hi = step["last_bottom"]
+            if not (lo <= b <= hi):
+                return [f"最后一行下边 {b:g}，应在 {lo}–{hi}"]
+        return []
 
     def check_cmds(self, step, t0):
         want = step.get("cmd")
@@ -646,6 +794,13 @@ class Runner:
         dt = time.time() - t0
         self.__dict__.setdefault("windows", {})[step["id"]] = (t0, time.time())
         ok = err is None
+        verdict = "对" if ok else "不对"
+        if ok and step.get("skip"):
+            verdict = f"跳过（{step['skip']}）"
+        if step.get("nojudge_fail") and not ok and not crash:
+            verdict, ok, err = f"不判（{step['nojudge_fail']}：{err}）", True, None
+        if step.get("nojudge") and (ok or not crash):
+            verdict, ok, err = f"不判（{step['nojudge']}）", True, None
         shot = None
         if not ok:
             shot = os.path.join(self.out, f"{i:03d}-{step['id']}.png")
@@ -653,10 +808,11 @@ class Runner:
                 self.drv.screenshot(shot)
             except Exception:
                 shot = None
-        line = (f"{i:3d} {step['say']} → {'对' if ok else '不对'}  ({dt:.1f}s)" + ("" if ok else f"  {err}")
+        line = (f"{i:3d} {step['say']} → {verdict}  ({dt:.1f}s)" + ("" if ok else f"  {err}")
                 + (f"  [{self.note}]" if self.note else ""))
         print(line, flush=True)
-        self.results.append({"n": i, "id": step["id"], "say": step["say"], "ok": ok, "err": err, "sec": round(dt, 1), "shot": shot,
+        self.results.append({"n": i, "id": step["id"], "say": step["say"], "ok": ok, "verdict": verdict, "err": err,
+                             "sec": round(dt, 1), "shot": shot,
                              "note": self.note})
         if crash and step.get("relaunch_on_crash", True):
             self.drv.terminate()
@@ -666,9 +822,11 @@ class Runner:
 
 
 ACTIONS = {"tap", "tab", "toggle", "field", "type", "enter", "hidekb", "swipe", "top", "back", "wait", "relaunch", "state",
-           "receipt", "clear_receipts", "hb", "remember", "gate", "gate_trials", "app_posts", "shot", "clipboard", "forget_config", "restore_config", "fluency"}
+           "receipt", "clear_receipts", "hb", "remember", "gate", "gate_trials", "app_posts", "shot", "clipboard", "forget_config", "restore_config", "fluency",
+           "dismiss", "pick", "tapout", "time", "see"}
 STEP_KEYS = {"id", "page", "say", "do", "on", "expect", "absent", "visible", "keyboard", "cmd", "nocmd", "timeout", "cmd_timeout",
-             "ios", "android", "always", "settle", "pause", "relaunch_on_crash", "switch"}
+             "ios", "android", "always", "settle", "pause", "relaunch_on_crash", "switch", "offline",
+             "skip", "nojudge", "nojudge_fail", "below", "last_above", "last_bottom"}
 
 
 def validate(all_steps):
@@ -681,11 +839,11 @@ def validate(all_steps):
         for k in s:
             if k not in STEP_KEYS:
                 errs.append(f"{s['id']}: unknown key {k}")
-        for variant in (s, s.get("ios") or {}, s.get("android") or {}):
+        for variant in (s, s.get("ios") or {}, s.get("android") or {}, s.get("offline") or {}):
             for a in variant.get("do", []):
                 if not isinstance(a, tuple) or a[0] not in ACTIONS:
                     errs.append(f"{s['id']}: bad action {a!r}")
-                elif a[0] == "state" and len(a) > 1 and a[1] not in ("base", "dup", "noef"):
+                elif a[0] == "state" and len(a) > 1 and a[1] not in ("base", "dup", "noef", "farm", "times"):
                     errs.append(f"{s['id']}: unknown state variant {a[1]}")
         if s.get("on", "both") not in ("both", "ios", "android"):
             errs.append(f"{s['id']}: bad on")
@@ -693,7 +851,7 @@ def validate(all_steps):
         raise SystemExit("step table errors:\n  " + "\n  ".join(errs))
 
 
-def select_steps(all_steps, platform, only=None, start=None, stop=None):
+def select_steps(all_steps, platform, only=None, start=None, stop=None, offline=False):
     out = []
     started = start is None
     for s in all_steps:
@@ -710,6 +868,21 @@ def select_steps(all_steps, platform, only=None, start=None, stop=None):
         s.update(s.pop(platform, {}) or {})
         s.pop("ios", None)
         s.pop("android", None)
+        off = s.pop("offline", None)
+        if offline:
+            s.pop("cmd", None) if off is not None else None
+            if off is not None:
+                s.update(off.get(platform, off) if isinstance(off, dict) and platform in off else off)
+                s.pop("ios", None)
+                s.pop("android", None)
+            elif s.get("cmd") is not None:
+                # a send step: everything but its last tap, then close what is open (confirm / review sheet, edits)
+                s["do"] = list(s.get("do", []))[:-1] + [("dismiss",)]
+                s["skip"] = "额度"
+                for k in ("cmd", "expect", "absent"):
+                    s.pop(k, None)
+        if not offline:
+            s.pop("skip", None) if s.get("skip") == "额度" else None
         out.append(s)
         if stop and s["id"] == stop:
             break
@@ -736,6 +909,9 @@ def main():
     p.add_argument("--to", dest="stop", help="stop after this step id")
     p.add_argument("--timeout", type=float, default=8, help="default seconds to wait for a step's expected texts")
     p.add_argument("--port", type=int, help="iOS runner HTTP port (default derived from the UDID)")
+    p.add_argument("--offline", action="store_true",
+                   help="post nothing to ntfy (anonymous quota used up): states go into the app's cache, send steps stop "
+                        "at their confirm / review sheet and count as 跳过（额度）")
     p.add_argument("--dry-run", action="store_true", help="print the plan and exit; touches no device and no network")
     p.add_argument("--list", action="store_true", help="list step ids and exit")
     p.add_argument("--verbose", action="store_true")
@@ -743,7 +919,7 @@ def main():
 
     validate(stepsmod.STEPS)
     only = set(a.only.split(",")) if a.only else None
-    plan = select_steps(stepsmod.STEPS, a.platform, only, a.start, a.stop)
+    plan = select_steps(stepsmod.STEPS, a.platform, only, a.start, a.stop, offline=a.offline)
     if a.list or a.dry_run:
         for i, s in enumerate(plan, 1):
             print(f"{i:3d} [{s.get('page', '')}] {s['id']}: {s['say']}")
@@ -784,16 +960,21 @@ def main():
             base = mbmod.fetch_real_state(g.real_topic_for_read())
             with open(cache, "w", encoding="utf-8") as f:
                 json.dump(base, f, ensure_ascii=False)
-    mb = mbmod.Mailbox(g, a.topic, a.pin, base)
-    q, fam = mbmod.quota()
-    print(f"ntfy.sh 今天还能发：IPv4 {q.get(4)} 条，IPv6 {q.get(6)} 条；本脚本走 IPv{fam}", flush=True)
-    if fam is None or (q.get(fam) or 0) < 60:
-        print("拒绝运行：ntfy.sh 本机今天的匿名消息额度不够跑一遍（一遍约 40 条状态 / 心跳 + App 自己寄出的 20 来条）")
-        return 2
-    app_fam = 6 if (a.platform == "ios" and q.get(6) is not None) else 4
-    if (q.get(app_fam) or 0) < 25:
-        print(f"注意：App 多半走 IPv{app_fam}，那边只剩 {q.get(app_fam)} 条，App 寄出的命令会被 ntfy 拒（429），"
-              "「寄出」类步骤会判不对", flush=True)
+    if a.offline:
+        mb = mbmod.OfflineMailbox(g, a.topic, a.pin, base)
+        print("离线：不往 ntfy 发任何东西；机器状态写进 App 的缓存，寄出类步骤停在确认单、记「跳过（额度）」", flush=True)
+    else:
+        mb = mbmod.Mailbox(g, a.topic, a.pin, base)
+        q, fam = mbmod.quota()
+        print(f"ntfy.sh 今天还能发：IPv4 {q.get(4)} 条，IPv6 {q.get(6)} 条；本脚本走 IPv{fam}", flush=True)
+        if fam is None or (q.get(fam) or 0) < 60:
+            print("拒绝运行：ntfy.sh 本机今天的匿名消息额度不够跑一遍（一遍约 40 条状态 / 心跳 + App 自己寄出的 20 来条）；"
+                  "可加 --offline")
+            return 2
+        app_fam = 6 if (a.platform == "ios" and q.get(6) is not None) else 4
+        if (q.get(app_fam) or 0) < 25:
+            print(f"注意：App 多半走 IPv{app_fam}，那边只剩 {q.get(app_fam)} 条，App 寄出的命令会被 ntfy 拒（429），"
+                  "「寄出」类步骤会判不对", flush=True)
 
     if a.platform == "ios":
         from drv_ios import IOSDriver
@@ -801,6 +982,7 @@ def main():
     else:
         from drv_android import AndroidDriver
         drv = AndroidDriver(a.serial, out)
+    mb.drv = drv
 
     t_start = time.time()
     r = Runner(a, drv, mb, g, out)
@@ -856,7 +1038,10 @@ def main():
         mb.stop()
     took = time.time() - t_start
     bad = [x for x in r.results if not x["ok"]]
-    print(f"\n合计 {len(r.results)} 步：对 {len(r.results) - len(bad)}，不对 {len(bad)}；用时 {took / 60:.1f} 分钟")
+    n_ok = sum(1 for x in r.results if x.get("verdict") == "对")
+    n_skip = sum(1 for x in r.results if (x.get("verdict") or "").startswith("跳过"))
+    n_nj = sum(1 for x in r.results if (x.get("verdict") or "").startswith("不判"))
+    print(f"\n合计 {len(r.results)} 步：对 {n_ok}，不对 {len(bad)}，跳过 {n_skip}，不判 {n_nj}；用时 {took / 60:.1f} 分钟")
     for x in bad:
         print(f"  不对 {x['n']:3d} {x['say']}：{x['err']}" + (f"（截图 {x['shot']}）" if x["shot"] else ""))
     with open(os.path.join(out, "results.json"), "w", encoding="utf-8") as f:

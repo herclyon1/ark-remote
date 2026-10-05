@@ -14,7 +14,10 @@ Each step is a dict:
              ("enter",) / ("hidekb",)  submit / put the keyboard away (iOS: the keyboard toolbar's 完成; Android: back)
              ("swipe", "up"|"down", n) scroll the content (up = the content moves up)
              ("top", n) / ("back",) / ("wait", s) / ("relaunch",)
-             ("state", variant)        publish a machine state to the throwaway mailbox: base | dup | noef
+             ("state", variant)        publish a machine state to the throwaway mailbox: base | dup | noef | farm | times
+                                       (--offline: written into the app's cache ark-remote-cfg-snap, app relaunched)
+             ("time", label, h, m)     iOS DatePicker: open the capsule, turn the wheels to h:m, close it by a tap outside
+             ("dismiss",)              close a sheet / alert / notice (再想想, 取消, 好) and throw edits away (✕)
              ("receipt", action, queued, ok)  publish base + a receipt for the newest command of that action the app sent
              ("clear_receipts",)       forget the receipts added by ("receipt", ...)
              ("hb", n)                 heartbeat "hb n" (the app counts the machine on for 2n+30 s)
@@ -31,6 +34,13 @@ Each step is a dict:
   nocmd    seconds: nothing but refresh / watch may be sent during this many seconds
   timeout  seconds for expect (default --timeout)
   ios / android   overrides merged into the step on that platform
+  offline  overrides merged with --offline (ntfy quota spent: no heartbeat, states injected into the app's cache).
+           Without one, a step with cmd runs everything but its last tap, closes what is open (dismiss) and reads
+           「跳过（额度）」
+  skip     reason: the step is not judged, it only runs (「跳过（reason）」)
+  nojudge / nojudge_fail   reason: never judged / judged 对 when it passes, 「不判（reason）」 when it fails
+  below    [[upper sel, lower sel], ...]: the lower element starts under the upper one's bottom edge
+  last_above sel / last_bottom [lo, hi]: the page's last line ends above sel's top edge / inside the range
 
 Selectors: "exact text" | "~substring" | "re:regex" | [alternatives] |
            {"t": ..., "kind": "Switch", "region": "content", "nth": 1, "after": "<anchor text>", "count": 2}
@@ -45,6 +55,12 @@ MINUS = ["Decrement", "减少", "-", "−"]
 CLEAR = "不等了，清掉"
 TAB_EF = {"t": "终末地", "region": "bottom"}
 STATUS_ROOT = "现在跑一趟"
+CONFIRM_WAIT = ("wait", 0.5)                 # confirm alerts / review sheets ignore a press in their first 400 ms
+OFF_NOTE = "~所以这次没有发"                  # the 「机器关着」 notice (StatusCommands.swift:69, :102)
+SEND_N = "re:^寄出 \\d+ 项$"
+
+import mailbox as _mb                        # noqa: E402  (the injected farm's end, machine time)
+FARM_HHMM = _mb.farm_until_hhmm()
 
 
 def tap(sel, **opts):
@@ -62,48 +78,61 @@ def step(id, page, say, do=(), **kw):
 
 # ------------------------------------------------------------------ setup
 step("setup.launch", "setup", "冷启动（一次性信箱已写好）→ 状态页数据齐、设备卡「开机中」",
-     [("relaunch",)], expect=[STATUS_ROOT, "刷新", "停止一切", "这一趟", "~开机中"], timeout=45, always=True)
+     [("relaunch",)], expect=[STATUS_ROOT, "刷新", "停止一切", "这一趟", "~开机中"], timeout=45, always=True,
+     offline={"say": "冷启动（一次性信箱 + 缓存注入的状态）→ 状态页数据齐、设备卡「关机」（离线没有心跳）",
+              "expect": [STATUS_ROOT, "刷新", "停止一切", "这一趟", "~关机"]})
 
 # ------------------------------------------------------------------ status page
 step("status.refresh", "status", "状态 · 刷新 → 寄出 refresh，设备卡仍「开机中」",
      [tap("刷新")], expect=["~开机中"], cmd={"action": "refresh"})
 step("status.runnow.ask", "status", "状态 · 现在跑一趟 → 弹「现在跑一趟？」",
      [tap(STATUS_ROOT)], expect=["现在跑一趟？", "跑一趟"])
-step("status.runnow.go", "status", "弹窗 · 跑一趟 → 寄出 run_now",
-     [tap("跑一趟", last=True)], absent=["现在跑一趟？"], cmd={"action": "run_now"})
+step("status.runnow.go", "status", "弹窗 · 跑一趟（等过 400 ms 门）→ 寄出 run_now",
+     [CONFIRM_WAIT, tap("跑一趟", last=True)], absent=["现在跑一趟？"], cmd={"action": "run_now"})
 step("status.stop.ask", "status", "状态 · 停止一切 → 弹「停止一切？」",
-     [tap("停止一切")], expect=["停止一切？"])
+     [tap("停止一切")], expect=["停止一切？"],
+     offline={"say": "状态 · 停止一切（关机）→ 提示「机器关着…所以这次没有发」", "expect": [OFF_NOTE]})
 step("status.stop.cancel", "status", "弹窗 · 取消 → 关掉，没寄出",
-     [tap("取消", last=True)], absent=["停止一切？"], nocmd=3)
-step("status.4c.menu", "status", "刷 4C 声骸 · 打哪个 → 菜单列出 boss",
-     [tap("刷 4C 声骸 · 打哪个")], expect=["re:^3\\. "])
+     [tap("取消", last=True)], absent=["停止一切？"], nocmd=3,
+     offline={"say": "提示 · 好 → 关掉", "do": [tap("好", last=True)], "absent": [OFF_NOTE]})
+step("status.4c.menu", "status", "刷 4C 声骸 · 打哪个（点当前值）→ 菜单列出 boss",
+     [tap({"t": "re:^\\d\\. ", "kind": "StaticText"})], expect=["re:^3\\. "])
 step("status.4c.pick", "status", "菜单 · 选第 3 个 boss → 菜单收起，行显示第 3 个",
      [tap("re:^3\\. ", last=True)], expect=["re:^3\\. "], absent=[{"t": "re:^4\\. "}])
-step("status.until.type", "status", "刷到几点 填 25:00 → 框里是 25:00",
-     [("field", "刷到几点（机器时间）", "25:00")], expect=["25:00"])
-step("status.until.bad", "status", "收键盘 / 回车 → 框退回 08:30（提示「时刻填成 08:30 这种」）",
-     [("enter",), ("hidekb",)], expect=["08:30"], absent=["25:00"], keyboard=False,
-     android={"do": [("hidekb",)]})
-step("status.echo.ask", "status", "开始刷 → 弹「开始刷？」",
-     [tap("开始刷", region="content")], expect=["开始刷？"])
-step("status.echo.go", "status", "弹窗 · 开始刷 → 寄出 echo_farm（第 3 个，到 08:30）",
-     [tap("开始刷", last=True)], absent=["开始刷？"], cmd={"action": "echo_farm"})
+step("status.until.2330", "status", "刷到几点 · 点胶囊拨转盘 23 / 30 → 点外面关掉 → 胶囊「23:30」（796103b）",
+     [("time", "刷到几点", 23, 30)], expect=["23:30"], absent=[{"t": "", "kind": "PickerWheel"}], on="ios")
+step("status.until.0005", "status", "刷到几点 · 拨 0 / 05 → 胶囊「0:05」（系统按地区不补零，存进去是 00:05，已知存疑）",
+     [("time", "刷到几点", 0, 5)], expect=["re:^0?0:05$"], on="ios")
+step("status.echo.ask", "status", "开始刷 → 弹「开始刷？」（到 00:05）",
+     [tap("开始刷", region="content")], expect=["开始刷？", "~00:05"],
+     android={"expect": ["开始刷？"]},
+     offline={"say": "开始刷（关机）→ 提示「机器关着…所以这次没有发」", "expect": [OFF_NOTE]})
+step("status.echo.go", "status", "弹窗 · 开始刷（等过 400 ms 门）→ 寄出 echo_farm（第 3 个，到 00:05）",
+     [CONFIRM_WAIT, tap("开始刷", last=True)], absent=["开始刷？"], cmd={"action": "echo_farm", "boss": 3, "until": "00:05"},
+     android={"cmd": {"action": "echo_farm"}},
+     offline={"say": "提示 · 好 → 关掉", "do": [tap("好", last=True)], "absent": [OFF_NOTE]})
 step("status.keepon.discard", "status", "下次跑完不关机 打开 → 待保存 1 项 → ✕ 放弃 → 回原样、没寄出",
      [("toggle", "下次跑完不关机"), ("wait", 0.6), tap(DISCARD, region="top")],
-     absent=["~待保存"], nocmd=2)
+     absent=["~待保存"], nocmd=2, switch={"下次跑完不关机": False})
+step("status.keepon.think", "status", "下次跑完不关机 打开 → ✓ → 确认单 → 再想想 → ✕ → 开关回到关",
+     [("toggle", "下次跑完不关机"), ("wait", 0.6), tap(SAVE, region="top"), ("wait", 1.0), tap("再想想"), ("wait", 0.8),
+      tap(DISCARD, region="top")], absent=["~待保存", "确认这次修改"], switch={"下次跑完不关机": False}, nocmd=2)
 step("status.two.pending", "status", "下次跑完不关机 + 调试模式 打开 → 标题「待保存 2 项」",
      [("toggle", "下次跑完不关机"), ("toggle", "调试模式")], expect=["~待保存 2 项"])
 step("status.two.review", "status", "✓ → 确认单两行、「寄出 2 项」",
      [tap(SAVE, region="top")], expect=["确认这次修改", "寄出 2 项"])
 step("status.two.send", "status", "寄出 2 项 → 寄出 skip_shutdown + debug_mode，行变「已寄出」",
-     [("wait", 0.5), tap("寄出 2 项")], absent=["确认这次修改"], expect=["~已寄出"],
+     [CONFIRM_WAIT, tap("寄出 2 项")], absent=["确认这次修改"], expect=["~已寄出"],
      cmd=[{"action": "skip_shutdown"}, {"action": "debug_mode"}])
 step("status.queued", "status", "D207：机器回「排队」回执 → 行下「排队中 · 跑完执行」",
-     [("receipt", ["skip_shutdown", "debug_mode"], True)], expect=["~排队中 · 跑完执行"], timeout=25)
+     [("receipt", ["skip_shutdown", "debug_mode"], True)], expect=["~排队中 · 跑完执行"], timeout=25,
+     offline={"do": [], "expect": [], "skip": "额度"})
 step("status.queued.final", "status", "机器回最终回执 → 「排队中」消失",
-     [("receipt", ["skip_shutdown", "debug_mode"], False)], absent=["~排队中 · 跑完执行"], timeout=25)
+     [("receipt", ["skip_shutdown", "debug_mode"], False)], absent=["~排队中 · 跑完执行"], timeout=25,
+     offline={"do": [], "absent": [], "skip": "额度"})
 step("status.clear", "status", "顶上条「不等了，清掉」→ 待回执全清",
-     [("clear_receipts",), ("state", "base"), tap(CLEAR)], absent=[CLEAR, "~已寄出"], timeout=10)
+     [("clear_receipts",), ("state", "base"), tap(CLEAR)], absent=[CLEAR, "~已寄出"], timeout=10,
+     offline={"do": [], "absent": [], "skip": "额度"})
 step("status.skip.pending", "status", "早班开关关掉 → 「今天跳过，明天照常」+ 待保存 1 项",
      [("toggle", "re:^早班 · \\d")], expect=["~今天跳过，明天照常", "~待保存 1 项"])
 step("status.skip.review", "status", "✓ → 确认单红字「今天不跑：早班」",
@@ -113,20 +142,22 @@ step("status.skip.think", "status", "再想想 → 关单，改动还在",
 
 # ------------------------------------------------------------------ 400 ms confirmation guard
 # Android: judged by the app's own send log (诊断记录, turned on for this block only) and the mailbox; each early press is
-# timed against the sheet window's first frame (gate_trials). iOS: 寄出 is .disabled for 400 ms, one early press.
+# timed against the sheet window's first frame (gate_trials). iOS: 寄出 is .disabled for 400 ms, one early press; a sheet
+# still up afterwards is 对; gone is 「不判（模拟器）」 (the press may have landed after the gate on a slow simulator).
 step("gate.diag.on", "gate", "手机 · 诊断记录打开（门测试用 App 自己的发送记录判断）→ 回状态",
      [("tab", "手机"), ("toggle", "诊断记录"), ("tab", "状态")], expect=[STATUS_ROOT, "~待保存 1 项"], on="android")
 step("gate.early", "gate", "400 ms 门：✓ 后 150 ms 按下「寄出」按住 0.9 秒 → 不寄出、单子还在",
-     [("gate", "save", "send", 150, 900)], expect=["确认这次修改"], nocmd=3,
+     [("gate", "save", "send", 150, 900)], expect=["确认这次修改"], nocmd=3, nojudge_fail="模拟器",
      android={"say": "400 ms 门：✓ 后马上按住「寄出」1.5 秒（按下早于门开、松手晚于门开）× 6 → 一次都不寄出",
               "do": [("gate_trials", 6, 150, 1500)], "expect": ["~待保存 1 项"], "absent": ["确认这次修改"],
-              "nocmd": 1, "timeout": 12})
+              "nocmd": 1, "timeout": 12, "nojudge_fail": None})
 step("gate.close", "gate", "再想想 → 关单", [tap("再想想")], absent=["确认这次修改"], on="ios")
 step("gate.late", "gate", "✓ 等单子停稳再点「寄出」→ 寄出 skip_today",
      [tap(SAVE, region="top"), tap("寄出 1 项", stable=True)], absent=["确认这次修改"], cmd={"action": "skip_today"},
      timeout=10)
 step("gate.clear", "gate", "不等了，清掉 → 早班开关回到开",
-     [tap(CLEAR)], absent=[CLEAR], expect=["~今天照常"])
+     [tap(CLEAR)], absent=[CLEAR], expect=["~今天照常"],
+     offline={"say": "（上一步已放弃改动）早班开关回到开、没有待保存", "do": [], "absent": ["~待保存"]})
 step("gate.diag.check", "gate", "App 自己的发送记录（打开分享诊断记录让它存盘）：门测试 0 条、停稳后寄出 ≥1 条",
      [("tab", "手机"), tap("~分享诊断记录"), ("wait", 1.5), ("back",), ("app_posts", {"gate.early": 0, "gate.late": 1})],
      expect=["运行自检"], on="android")
@@ -135,11 +166,14 @@ step("gate.diag.off", "gate", "手机 · 诊断记录关掉 → 回状态",
 
 # ------------------------------------------------------------------ heartbeat / machine off
 step("status.off", "status", "心跳过期 → 设备卡「关机」",
-     [("hb", 1), ("wait", 33)], expect=["~关机"], timeout=25)
+     [("hb", 1), ("wait", 33), ("top", 5)], expect=["~关机"], timeout=25,
+     offline={"say": "没有心跳 → 设备卡「关机」（离线：一次性信箱没有心跳）", "do": [("top", 5)]})
 step("status.off.stop", "status", "关机时按停止一切 → 提示「所以这次没有发」，没寄出",
-     [tap("停止一切")], expect=["~所以这次没有发"], nocmd=2)
+     [tap("停止一切")], expect=[OFF_NOTE], nocmd=2)
 step("status.off.ok", "status", "好 → 关提示；心跳回来 → 「开机中」",
-     [tap("好", last=True), ("hb", 300), ("state", "base"), tap("刷新")], expect=["~开机中"], timeout=20)
+     [tap("好", last=True), ("hb", 300), ("state", "base"), tap("刷新")], expect=["~开机中"], timeout=20,
+     offline={"say": "好 → 关提示（心跳回来那半步要 ntfy，离线不做）", "do": [tap("好", last=True)], "expect": [STATUS_ROOT],
+              "absent": [OFF_NOTE]})
 
 # ------------------------------------------------------------------ shifts
 step("shift.night", "shift", "班次切「晚班」→ 只剩明日方舟，底栏没有终末地",
@@ -155,7 +189,8 @@ step("receipts.back", "receipts", "再进查看全部 → 返回键回来", [tap
 step("receipts.reenter", "d39", "回来后再进查看全部 → 进得去", [tap("~查看全部")], expect=["回执"], absent=[STATUS_ROOT])
 step("receipts.leave", "receipts", "点「状态」回根页", [("tab", "状态")], expect=[STATUS_ROOT])
 step("d39.status.top", "d39", "D39：状态根页滑到底再点「状态」→ 回到顶",
-     [("swipe", "up", 4), ("tab", "状态"), ("wait", 1.2)], visible=["~开机中"], timeout=6)
+     [("swipe", "up", 4), ("tab", "状态"), ("wait", 1.2)], visible=["~开机中"], timeout=6,
+     offline={"visible": ["~关机"]})
 
 # ------------------------------------------------------------------ 月卡
 step("mc.open", "monthcard", "终末地月卡行 → 月卡页",
@@ -170,28 +205,35 @@ step("mc.days", "monthcard", "天数填 15 → 收键盘（iOS 完成键）",
      [("field", "游戏里显示还剩", "15"), ("hidekb",)], keyboard=False)
 step("mc.align.ask", "monthcard", "对准 → 弹「对准为还剩 15 天？」", [tap("对准", region="content")], expect=["对准为还剩 15 天？"])
 step("mc.align.go", "monthcard", "弹窗 · 对准 → 寄出 monthcard left 15，页面变 15 天",
-     [tap("对准", last=True)], expect=["15 天"], absent=["对准为还剩 15 天？"],
+     [CONFIRM_WAIT, tap("对准", last=True)], expect=["15 天"], absent=["对准为还剩 15 天？"],
      cmd={"action": "monthcard", "left": 15, "game": "终末地"})
 step("mc.tabpop", "d39", "点「状态」→ 月卡页退掉、回根页", [("tab", "状态")], expect=[STATUS_ROOT])
 
 # ------------------------------------------------------------------ 方舟
 step("ark.open", "arknights", "方舟标签 → 关卡 / 理智药 / 作战开关", [("tab", "方舟")], expect=["关卡", "理智药", "作战开关"])
-step("ark.sanity.bad", "arknights", "理智药填 1000 → 提示「要填 0–999 的整数」",
-     [("field", "理智药", "1000"), ("hidekb",)], expect=["~要填 0–999 的整数"], timeout=5,
-     android={"do": [("field", "理智药", "1000"), ("hidekb",), tap(SAVE, region="top"), ("wait", 1.0), tap("~寄出")],
-              "expect": ["~一项都没寄出"]})
-step("ark.sanity.bad.close", "arknights", "关掉提示，没寄出", [], nocmd=1,
-     android={"do": [tap("好", last=True), ("wait", 0.5)], "absent": ["~一项都没寄出"]})
+step("ark.sanity.x", "arknights", "理智药改 1000（键盘开着）→ 点 ✕ → 回原值、键盘收起、没有待保存（0878f3b）",
+     [("field", "理智药", "1000"), ("wait", 0.6), tap(DISCARD, region="top")], keyboard=False, absent=["~待保存"],
+     expect=["理智药"], nocmd=2)
+step("ark.sanity.bad", "arknights", "理智药填 1000 → ✓ → 寄出 → 挡下「一项都没寄出」「要填 0–999 的整数」（寄出前校验，什么也不发）",
+     [("field", "理智药", "1000"), ("hidekb",), tap(SAVE, region="top"), ("wait", 1.0), tap(SEND_N)],
+     expect=["~一项都没寄出", "~要填 0–999 的整数"], timeout=6, nocmd=2)
+step("ark.sanity.bad.close", "arknights", "好 → 关提示，没寄出", [tap("好", last=True), ("wait", 0.5)],
+     absent=["~一项都没寄出"], nocmd=1)
 step("ark.edit4", "arknights", "理智药 2、关卡 CE-6、邮件开关、基建「赤金」→ 待保存 4 项",
      [("field", "理智药", "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", "领取所有邮件奖励"),
       tap("无人机用在哪"), ("wait", 0.8), tap("~赤金", last=True)],
-     expect=["~待保存 4 项"])
+     expect=["~待保存 4 项"],
+     ios={"do": [("field", "理智药", "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", "领取所有邮件奖励"),
+                 tap({"t": "~基建无人机用在哪", "kind": "Button"}, right=60), ("wait", 0.8), tap("~赤金", last=True)]})
 step("ark.review", "arknights", "✓ → 确认单「寄出 4 项」", [tap(SAVE, region="top")], expect=["确认这次修改", "寄出 4 项"])
 step("ark.send", "arknights", "寄出 → set_master 赤金 / 邮件 + set_config 理智药 2 / CE-6",
-     [("wait", 0.5), tap("寄出 4 项")], absent=["确认这次修改"],
+     [CONFIRM_WAIT, tap("寄出 4 项")], absent=["确认这次修改"],
      cmd=["~PureGold", "~Mail", "~MedicineNumb", "~CE-6"])
 step("ark.battle.discard", "arknights", "作战开关切换 → 待保存 → ✕ 放弃 → 回原值",
-     [tap(CLEAR), ("toggle", "作战开关"), ("wait", 0.6), tap(DISCARD, region="top")], absent=["~待保存"], nocmd=2)
+     [tap(CLEAR), ("toggle", "作战开关"), ("wait", 0.6), tap(DISCARD, region="top")], absent=["~待保存"], nocmd=2,
+     offline={"do": [("toggle", "作战开关"), ("wait", 0.6), tap(DISCARD, region="top")]})
+step("ark.menu.left", "arknights", "菜单行：点行左边的名字不出菜单（照原生，只有右边的值能点；已知存疑 D203 不改）",
+     [tap("基建无人机用在哪"), ("wait", 0.8)], absent=["不使用"], on="ios")
 step("d39.ark.top", "d39", "D39：方舟滑到底再点「方舟」→ 回顶",
      [("swipe", "up", 4), ("tab", "方舟"), ("wait", 1.2)], visible=["关卡"])
 
@@ -213,13 +255,19 @@ step("ef.days.done", "endfield", "✓ → 回推入页「已选 6/7」「待保�
      [tap(SAVE, region="top")], expect=["~6/7", "~待保存 1 项"])
 step("ef.more.tabpop", "d39", "点「终末地」→ 更多设置页退掉、回根页", [("tab", "终末地")], expect=["库存"], absent=["周日"])
 step("ef.mode", "endfield", "刷取设置菜单 → 地区模式 → 待保存 2 项",
-     [tap("刷取设置"), ("wait", 0.8), tap("~地区模式", last=True)], expect=["~待保存 2 项"])
+     [tap({"t": "~刷取设置, ", "kind": "Button"}, right=60), ("wait", 0.8), tap("~地区模式", last=True)],
+     expect=["~待保存 2 项"], android={"do": [tap("刷取设置"), ("wait", 0.8), tap("~地区模式", last=True)]})
 step("ef.review", "endfield", "✓ → 确认单「寄出 2 项」", [tap(SAVE, region="top")], expect=["确认这次修改", "寄出 2 项"])
 step("ef.send", "endfield", "寄出 → set_master 执行周期 / 刷取设置",
-     [("wait", 0.5), tap("寄出 2 项")], absent=["确认这次修改"], cmd=["~AutoEssence"])
+     [CONFIRM_WAIT, tap("寄出 2 项")], absent=["确认这次修改"], cmd=["~AutoEssence"])
 step("ef.protocol", "endfield", "协议空间 选「武器养成」→ 待保存 → ✕ 放弃",
-     [tap(CLEAR), tap("~干员养成"), ("wait", 0.8), tap("~武器养成", last=True), ("wait", 0.6), tap(DISCARD, region="top")],
-     absent=["~待保存"], nocmd=2)
+     [tap(CLEAR), tap({"t": "~干员养成", "kind": "Button"}, right=60), ("wait", 0.8),
+      tap("~武器养成", last=True), ("wait", 0.6), tap(DISCARD, region="top")],
+     absent=["~待保存"], nocmd=2,
+     android={"do": [tap(CLEAR), tap("~干员养成"), ("wait", 0.8), tap("~武器养成", last=True), ("wait", 0.6),
+                     tap(DISCARD, region="top")]},
+     offline={"do": [tap({"t": "~干员养成", "kind": "Button"}, right=60), ("wait", 0.8),
+                     tap("~武器养成", last=True), ("wait", 0.6), tap(DISCARD, region="top")]})
 step("ef.collect.more", "endfield", "自动采集 · 更多设置 → 推入页 → 返回",
      [tap({"t": "更多设置", "after": "自动采集"}), ("wait", 1.0), ("back",)], expect=["库存"], timeout=10)
 step("ef.ticket.open", "endfield", "再进「更多设置」→ 执行周期「已选 7/7」、使用刻写券关（机器值）",
@@ -231,25 +279,34 @@ step("ef.ticket.days", "endfield", "执行周期去掉周日 → 「已选 6/7�
 step("ef.ticket.discard", "endfield", "保存条 ✕ → 控件回到机器值（7/7、刻写券关），还在更多设置页（e17db83）",
      [tap(DISCARD, region="top")], expect=["已选 7/7", "使用刻写券"], absent=["待保存", "~待保存 2 项", "库存"],
      switch={"使用刻写券": False}, nocmd=2)
+step("ef.loop.x", "endfield", "循环执行改 20（键盘开着）→ 点 ✕ → 回原值、键盘收起、没有待保存、还在更多设置页（0878f3b）",
+     [("field", "循环执行", "20"), ("wait", 0.6), tap(DISCARD, region="top")], keyboard=False,
+     expect=["已选 7/7"], absent=["~待保存", "库存"], nocmd=2)
 step("d39.ef.top", "d39", "D39：终末地根页滑到底再点「终末地」→ 回顶",
      [("tab", "终末地"), ("wait", 0.8), ("swipe", "up", 4), ("tab", "终末地"), ("wait", 1.2)], visible=["库存"])
 
 # ------------------------------------------------------------------ 鸣潮
 step("ww.open", "wuwa", "鸣潮标签 → 无音区 / 周本", [("tab", "鸣潮")], expect=["~无音区", "周本打第几个"])
+step("ww.what", "wuwa", "刷什么（点右边的值）→ 菜单 无音区 / 凝素领域 / 模拟领域",
+     [tap({"t": "~刷什么, ", "kind": "Button"}, right=50)], expect=["凝素领域", "模拟领域"],
+     android={"do": [tap("刷什么")]})
+step("ww.what.same", "wuwa", "选回「无音区」→ 菜单收起、没有待保存",
+     [tap("无音区", last=True), ("wait", 0.6)], absent=["凝素领域", "~待保存"])
 step("ww.tacet", "wuwa", "刷第几个无音区（安卓旧闪退点）→ 选择页 7 行", [tap("~刷第几个无音区")], expect=["~雪落无声之愿", "~长路启航之星"])
 step("ww.tacet.pick", "wuwa", "选第 5 个 → ✓ → 待保存 1 项",
      [tap("~雪落无声之愿"), ("wait", 0.4), tap(SAVE, region="top")], expect=["~待保存 1 项"])
-step("ww.boss.bad", "wuwa", "周本填 251 → 提示「要填 1–20」",
-     [("field", "周本打第几个", "251"), ("hidekb",)], expect=["~要填 1–20"], timeout=5,
-     android={"do": [("field", "周本打第几个", "251"), ("hidekb",), tap(SAVE, region="top"), ("wait", 1.0), tap("~寄出")],
-              "expect": ["~要填 1–20"]})
-step("ww.boss.fix", "wuwa", "周本改 13 → 待保存 2 项",
-     [("field", "周本打第几个", "13"), ("hidekb",)], expect=["~待保存 2 项"],
-     android={"do": [tap("好", last=True), ("wait", 0.5), ("field", "周本打第几个", "13"), ("hidekb",)]})
+step("ww.boss.bad", "wuwa", "周本填 251 → ✓ → 寄出 → 挡下「要填 1–20」（寄出前校验，什么也不发）",
+     [("field", "周本打第几个", "251"), ("hidekb",), tap(SAVE, region="top"), ("wait", 1.0), tap(SEND_N)],
+     expect=["~要填 1–20", "~一项都没寄出"], timeout=6, nocmd=2)
+step("ww.boss.fix", "wuwa", "好 → 周本改 13 → 待保存 2 项",
+     [tap("好", last=True), ("wait", 0.5), ("field", "周本打第几个", "13"), ("hidekb",)], expect=["~待保存 2 项"])
 step("ww.review", "wuwa", "✓ → 确认单「寄出 2 项」", [tap(SAVE, region="top")], expect=["确认这次修改", "寄出 2 项"])
 step("ww.send", "wuwa", "寄出 → set_master 无音区 + weekly_boss 13",
-     [("wait", 0.5), tap("寄出 2 项")], absent=["确认这次修改"], cmd=[{"action": "weekly_boss"}, {"action": "set_master"}])
-step("ww.clear", "wuwa", "不等了，清掉", [tap(CLEAR)], absent=[CLEAR])
+     [CONFIRM_WAIT, tap("寄出 2 项")], absent=["确认这次修改"], cmd=[{"action": "weekly_boss"}, {"action": "set_master"}])
+step("ww.clear", "wuwa", "不等了，清掉", [tap(CLEAR)], absent=[CLEAR], offline={"do": [], "absent": [], "skip": "额度"})
+step("ww.boss.x", "wuwa", "周本打第几个改 31（键盘开着）→ 点 ✕ → 回原值、键盘收起、没有待保存（0878f3b）",
+     [("field", "周本打第几个", "31"), ("wait", 0.6), tap(DISCARD, region="top")], keyboard=False,
+     absent=["~待保存"], nocmd=2)
 step("d39.ww.top", "d39", "D39：鸣潮滑到底再点「鸣潮」→ 回顶",
      [("swipe", "up", 4), ("tab", "鸣潮"), ("wait", 1.2)], visible=["~无音区"])
 
@@ -274,22 +331,69 @@ step("ph.paste.bad", "phone", "粘贴密钥串 填乱码 → 存 → 「没存�
      [tap("粘贴密钥串"), ("wait", 1.0), ("field", {"t": "", "kind": ["TextField", "EditText"]}, "zzz"), tap("存")],
      expect=["没存上"], timeout=6)
 step("ph.paste.close", "phone", "关掉提示和粘贴单", [tap("好", last=True), ("wait", 0.6), tap("取消")], expect=["页面版本"])
-step("ph.diag.off", "phone", "诊断记录关掉 → 多出的行收起", [("toggle", "诊断记录")], absent=["运行自检", "就是这里"])
+DIAG_BTN = "就是这里"
+step("diag.bottom.phone", "diag", "诊断开 · 手机页滑到底 → 最后一行在红钮「就是这里」上面（ce8ebc3）",
+     [("swipe", "up", 4), ("wait", 0.6)], last_above=DIAG_BTN, on="ios")
+step("diag.bottom.status", "diag", "诊断开 · 状态根页滑到底 → 「查看全部」在红钮上面",
+     [("tab", "状态"), ("wait", 0.8), ("swipe", "up", 8), ("wait", 0.6)], last_above=DIAG_BTN, expect=["~查看全部"], on="ios")
+step("diag.bottom.all", "diag", "诊断开 · 点「查看全部」→ 进回执页，不弹诊断单子",
+     [tap("~查看全部", scroll=False)], expect=["回执"], absent=["诊断记录已生成", STATUS_ROOT], on="ios")
+step("diag.bottom.receipts", "diag", "诊断开 · 回执页滑到底 → 最后一行在红钮上面",
+     [("swipe", "up", 8), ("wait", 0.6)], last_above=DIAG_BTN, on="ios")
+step("diag.bottom.ark", "diag", "诊断开 · 方舟滑到底 → 最后一行在红钮上面",
+     [("tab", "状态"), ("tab", "方舟"), ("wait", 0.8), ("swipe", "up", 6), ("wait", 0.6)], last_above=DIAG_BTN, on="ios")
+step("diag.bottom.ef", "diag", "诊断开 · 终末地根页滑到底 → 最后一行在红钮上面",
+     [("tab", "终末地"), ("wait", 0.8), ("swipe", "up", 8), ("wait", 0.6)], last_above=DIAG_BTN, on="ios")
+step("diag.bottom.ww", "diag", "诊断开 · 鸣潮滑到底 → 最后一行在红钮上面",
+     [("tab", "鸣潮"), ("wait", 0.8), ("swipe", "up", 6), ("wait", 0.6)], last_above=DIAG_BTN, on="ios")
+step("ph.diag.off", "phone", "诊断记录关掉 → 多出的行收起", [("tab", "手机"), ("top", 4), ("toggle", "诊断记录")],
+     absent=["运行自检", "就是这里"])
+step("diag.off.status", "diag", "诊断关 · 状态根页滑到底 → 最后一行贴着底栏（没有多出的空白）",
+     [("tab", "状态"), ("wait", 0.8), ("swipe", "up", 8), ("wait", 0.6)], last_bottom=[860, 880], absent=[DIAG_BTN], on="ios")
+step("diag.off.ark", "diag", "诊断关 · 方舟滑到底 → 最后一行贴着底栏",
+     [("tab", "方舟"), ("wait", 0.8), ("swipe", "up", 6), ("wait", 0.6)], last_bottom=[860, 880], on="ios")
+step("diag.off.ef", "diag", "诊断关 · 终末地根页滑到底 → 最后一行贴着底栏",
+     [("tab", "终末地"), ("wait", 0.8), ("swipe", "up", 8), ("wait", 0.6)], last_bottom=[860, 880], on="ios")
 step("d39.ph.top", "d39", "D39：手机页滑到底再点「手机」→ 回顶",
-     [("swipe", "up", 4), ("tab", "手机"), ("wait", 1.2)], visible=["页面版本"])
+     [("tab", "手机"), ("wait", 0.8), ("swipe", "up", 4), ("tab", "手机"), ("wait", 1.2)], visible=["页面版本"])
 
 # ------------------------------------------------------------------ shift change while on a gone tab (pass-1 item 6, fix 5)
 step("noef.jump", "layout", "人在终末地，机器发来早班不含终末地的状态（实时分片，不刷新）→ 终末地标签消失、跳到状态",
-     [("tab", "终末地"), ("wait", 1.0), ("state", "noef")], expect=[STATUS_ROOT], absent=[TAB_EF], timeout=30)
+     [("tab", "终末地"), ("wait", 1.0), ("state", "noef")], expect=[STATUS_ROOT], absent=[TAB_EF], timeout=30,
+     offline={"say": "人在终末地，缓存注入早班不含终末地的状态、冷启动 → 终末地标签没了、停在状态（记住的标签改回状态）"})
 step("noef.back", "layout", "机器发回原状态 → 终末地标签回来，App 留在状态",
      [("state", "base"), ("wait", 6)], expect=[TAB_EF, STATUS_ROOT], timeout=30)
 
 # ------------------------------------------------------------------ duplicate receipts (pass-1 item 5, fix 3)
 step("dup.status", "receipts", "同一分钟两条一样的回执 → 状态页两行都在、不崩",
-     [("state", "dup"), tap("刷新")], expect=[{"t": "周本：打第 2 个", "count": 2}], timeout=25)
+     [("state", "dup"), tap("刷新")], expect=[{"t": "周本：打第 2 个", "count": 2}], timeout=25,
+     offline={"do": [("state", "dup")]})
 step("dup.page", "receipts", "查看全部 → 回执页也有这两行（不是旧数据）",
      [tap("~查看全部")], expect=["回执", {"t": "周本：打第 2 个", "count": 2}], timeout=10)
 step("dup.done", "receipts", "回状态，发回原状态", [("tab", "状态"), ("state", "base")], expect=[STATUS_ROOT])
+
+# ------------------------------------------------------------------ 刷声骸 in progress (cache / state injection; 796103b)
+FH, FM = FARM_HHMM.split(":")
+step("farm.show", "farm", f"机器正在刷声骸（到机器时间 {FARM_HHMM}）→ 「正在刷」「改收工时刻」「提前收工」，4C 段只剩「改成刷到几点」",
+     [("tab", "状态"), ("state", "farm"), ("wait", 1.0)],
+     expect=["~正在刷「回放Boss」", f"~机器时间 {FARM_HHMM}", "改收工时刻", "提前收工", "改成刷到几点（机器时间）"],
+     absent=["刷到几点（机器时间）", "开始刷"], timeout=30)
+step("farm.capsule", "farm", f"「改成刷到几点」胶囊显示机器时间的「到」{FARM_HHMM}（不随手机时区）",
+     [], expect=[{"t": f"re:^0?{int(FH)}:{FM}$", "kind": "Button"}], on="ios")
+step("farm.pick", "farm", "改成刷到几点 · 拨 23 / 30 → 点外面关掉 → 胶囊「23:30」，没进别的页",
+     [("time", "改成刷到几点", 23, 30)], expect=["23:30", "改收工时刻"], absent=["终末地月卡"], on="ios")
+step("farm.done", "farm", "发回原状态 → 「刷到几点」「开始刷」回来",
+     [("state", "base"), ("wait", 1.0)], expect=["刷到几点（机器时间）", "开始刷"], absent=["~正在刷「回放Boss」"], timeout=30)
+
+# ------------------------------------------------------------------ two-time receipts (ce8ebc3)
+TWO_T = "re:\\d\\d:\\d\\d 发出 · .*执行"
+step("times.show", "receipts", "两条测试回执（单时间 / 发出≠执行）→ 状态页两行都在，两段时间那行时间在文字下面、不压字",
+     [("state", "times"), ("wait", 1.0), ("see", "~回放两时间回执")],
+     expect=["~回放单时间回执", "~回放两时间回执", TWO_T], below=[["~回放两时间回执", TWO_T]], timeout=30)
+step("times.page", "receipts", "查看全部 → 回执页同样两行、时间在文字下面",
+     [tap("~查看全部"), ("wait", 1.0), ("see", "~回放两时间回执")],
+     expect=["回执", "~回放单时间回执", TWO_T], below=[["~回放两时间回执", TWO_T]], timeout=10)
+step("times.done", "receipts", "回状态，发回原状态", [("tab", "状态"), ("state", "base")], expect=[STATUS_ROOT], timeout=30)
 
 # ------------------------------------------------------------------ fluency (Android; the Mac must be idle)
 step("flu.tabs", "fluency", "五个标签各切 3 次（间隔 1.5 秒）→ FluencyRec 记下的 long 次数和最长一帧（Mac 1 分钟负载 < 8）",

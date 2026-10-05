@@ -17,6 +17,8 @@
 //   activate              bring the app to the front
 //   pbclear               empty the simulator's general pasteboard (no items, so hasStrings is false)
 //   pbset <text>          put a string on the general pasteboard
+//   pick <n> <value>      turn the app's n-th picker wheel to <value> (XCUIElement.adjust(toPickerWheelValue:)), e.g. the
+//                         DatePicker wheels "23" / "30" (the 检查 pass-7 runner's command); answers the wheel's new value
 import XCTest
 import UIKit
 
@@ -76,6 +78,13 @@ final class ReplayUITests: XCTestCase {
         case "activate": app.activate(); return "ok"
         case "pbclear": UIPasteboard.general.items = []; return "ok \(UIPasteboard.general.hasStrings)"
         case "pbset": UIPasteboard.general.string = rest; return "ok"
+        case "pick":
+            let n = Int(parts.count > 1 ? parts[1] : "0") ?? 0
+            let val = parts.dropFirst(2).joined(separator: " ")
+            let w = app.pickerWheels.element(boundBy: n)
+            guard w.waitForExistence(timeout: 3) else { return "error no wheel \(n) (\(app.pickerWheels.count))" }
+            w.adjust(toPickerWheelValue: val)
+            return "ok \(String(describing: w.value ?? ""))"
         case "wait":
             Thread.sleep(forTimeInterval: (Double(parts.count > 1 ? parts[1] : "0") ?? 0) / 1000); return "ok"
         case "tap":

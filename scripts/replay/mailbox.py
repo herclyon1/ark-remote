@@ -78,6 +78,23 @@ def machine_minute(ts):
     return time.strftime("%m-%d %H:%M", time.gmtime(ts + SHANGHAI))
 
 
+FARM_UNTIL_MIN = 90     # the injected farm ends this many minutes after now (machine time), rounded down to 5 minutes
+FARM_T0 = time.time()   # one "now" per run, so the step table (steps.FARM_HHMM) and the injected state agree
+
+
+def farm_entry(now=None):
+    """relay.刷声骸 of a farm that started 2 h ago and ends FARM_UNTIL_MIN later (machine clock, "YYYY-MM-DD HH:MM")."""
+    now = now or FARM_T0
+    until = now + FARM_UNTIL_MIN * 60
+    until -= until % 300
+    fmt = lambda t: time.strftime("%Y-%m-%d %H:%M", time.gmtime(t + SHANGHAI))
+    return {"名字": "回放Boss", "从": fmt(now - 7200), "到": fmt(until)}
+
+
+def farm_until_hhmm(now=None):
+    return farm_entry(now)["到"][-5:]
+
+
 class Mailbox:
     def __init__(self, guard, topic, pin, base_state):
         self.guard = guard
@@ -158,6 +175,14 @@ class Mailbox:
         elif name == "noef":      # the morning shift without 终末地 (MaaEnd)
             if qs:
                 qs[0]["脚本"] = [s for s in qs[0].get("脚本", []) if s != "MaaEnd"]
+        elif name == "farm":      # 刷 4C 声骸 in progress (relay.刷声骸, as the 检查 passes 7-8 injected it)
+            b["relay"]["刷声骸"] = farm_entry()
+        elif name == "times":     # two test receipts: one time, and sent ≠ at (the two-time line, ce8ebc3)
+            now = time.time()
+            b["relay"].setdefault("最近指令", []).extend([
+                {"at": machine_minute(now - 900), "action": "weekly_boss", "ok": True, "text": "回放单时间回执", "sent": machine_minute(now - 900)},
+                {"at": machine_minute(now - 600), "action": "weekly_boss", "ok": True,
+                 "text": "回放两时间回执：这一行字故意写长一点，看它和两个时间排不排得开", "sent": machine_minute(now - 1380)}])
         else:
             raise ValueError(f"unknown state variant {name}")
         if extra_receipts:
@@ -227,3 +252,39 @@ class Mailbox:
         if queued:
             r["queued"] = True
         return r
+
+
+class OfflineMailbox(Mailbox):
+    """--offline: ntfy.sh is out of anonymous quota, so nothing is posted at all. A machine state reaches the app the
+    way the 检查 passes 5-8 did it by hand: stop the app, write the state (its `at` = now) into the app's own cache
+    ark-remote-cfg-snap (Net.swift Relay.snapKey; the app adopts only a newer state, Net.swift:353), start the app.
+    No heartbeat can arrive, so the machine reads as off. The app's sends are never made (the runner skips the last
+    tap of a send step), so there is nothing to listen to."""
+    offline = True
+
+    def __init__(self, guard, topic, pin, base_state, drv=None):
+        super().__init__(guard, topic, pin, base_state)
+        self.drv = drv
+
+    def listen(self, since_ts):
+        self.listening = False
+
+    def stop(self):
+        pass
+
+    def cmds(self, since_ts):
+        return []
+
+    def hb(self, every=300):
+        pass
+
+    def publish_state(self, name="base", extra_receipts=None):
+        b = self.variant(name, extra_receipts)
+        b["at"] = int(time.time())
+        self.drv.terminate()
+        self.drv.write_default("ark-remote-cfg-snap", json.dumps(b, ensure_ascii=False, separators=(",", ":")))
+        self.drv.launch()
+        return 0
+
+    def _post(self, topic, data, title):
+        raise NtfyLimit("--offline: nothing is posted")
