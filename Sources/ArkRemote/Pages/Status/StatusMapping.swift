@@ -231,6 +231,7 @@ extension StatusData {
         d.receipts = rcs.reversed().map { r in
             StatusReceipt(ok: r["ok"]?.truthy ?? false, text: r["text"]?.jsString ?? "", at: r["at"]?.jsString ?? "",
                           sent: r["sent"]?.jsString ?? "", action: r["action"]?.jsString ?? "",
+                          queued: r["queued"]?.truthy == true,
                           atLocal: phoneStamp(fromMachine: r["at"]?.jsString ?? ""),
                           sentLocal: (r["sent"]?.jsString).map { phoneStamp(fromMachine: $0) } ?? "")
         }
@@ -253,7 +254,8 @@ extension StatusData {
                   let q = statusFirstQuoted(r.text) else { continue }
             let day = String(r.at.prefix(5)), key = day + "|" + q
             if day == todayMD { skipToday = true }
-            if !r.ok { continue }
+            // a queued skip (D207) has not run: it neither replaces the one before nor answers for today yet
+            if !r.ok || r.queued { continue }
             if let later = lastOk[key] {
                 d.receipts[i].note = "已被 \(String(later.shownAt.dropFirst(6))) 的「\(later.action == "skip_today" ? "跳过" : "取消跳过")\(q)」取代"
                 continue

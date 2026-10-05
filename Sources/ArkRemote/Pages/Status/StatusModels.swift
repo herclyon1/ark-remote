@@ -52,6 +52,9 @@ struct StatusReceipt: Hashable, Identifiable {
     var at: String            // "MM-DD HH:MM", when the machine acted on it
     var sent: String = ""     // "MM-DD HH:MM", the envelope's own time (modes.add_receipt sent=); older receipts have none
     var action: String = ""   // the command's action (skip_today / unskip_today / estop …)
+    /// D207: the relay holds the order until the running script ends (modes.py add_receipt `queued`); the final receipt
+    /// follows with the same action and `sent`. Not yet an answer to what the order did.
+    var queued = false
     /// `at` / `sent` on the phone's clock, for display only (Logic/MachineTime.swift, 审查 B4); "" = not converted, show raw.
     /// The raw Beijing strings stay for the skip notes, the estop match and the Beijing day.
     var atLocal: String = ""

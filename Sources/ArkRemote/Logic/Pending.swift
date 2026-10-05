@@ -50,8 +50,8 @@ struct AckedEdit: Codable, Sendable, Equatable {
 
 /// The small line under a control (where Messages puts 「Delivered」).
 enum PendingTag: Sendable, Equatable {
-    /// 「已寄出 HH:MM · 机器开机后生效」, or past 10 h 「没回执 · 已寄出 HH:MM」 (class "sent"; that one also gets
-    /// 「再发一次」: `Pending.staleResendKey(for:)`).
+    /// 「已寄出 HH:MM · 机器开机后生效」, 「排队中 · 跑完执行」 (the relay holds it until the run ends, D207), or past 10 h
+    /// 「没回执 · 已寄出 HH:MM」 (class "sent"; that one also gets 「再发一次」: `Pending.staleResendKey(for:)`).
     case sent(text: String)
     /// 「没生效 · 机器 HH:MM 报的还是「…」」 plus a 「再发一次」 button for `key` (class "sent bad").
     case mismatch(text: String, key: String)
@@ -160,6 +160,8 @@ struct PendingBar: Sendable, Equatable {
                 return .mismatch(text: "没生效 · 机器 \(Self.hhmm(mm)) 报的还是「\(valueLabel(p, liveVals[key]))」", key: key)
             }
             let at = p.resentAt ?? p.sentAt
+            // D207: the relay took it and runs it after the script now running; grey, no 「再发一次」 (staleResendKey)
+            if isQueued(p) { return .sent(text: Self.queuedText) }
             // pending.js:58-59: past 10 h the mailbox (12 h) may have dropped it; resent only by a tap, never automatically
             if Self.isStale(p) { return .sent(text: "没回执 · 已寄出 \(Self.hhmm(at))") }
             return .sent(text: "已寄出 \(Self.hhmm(at)) · \(waitNote)")
@@ -189,7 +191,7 @@ struct PendingBar: Sendable, Equatable {
     /// The key for the 「再发一次」 button under a 「没回执 · 已寄出 HH:MM」 line (pending.js:59 `data-again`), or nil.
     /// That line is a `.sent` tag (grey, class "sent", not "sent bad"), so the page asks for the button here.
     func staleResendKey(for key: String) -> String? {
-        guard let p = items[key], Self.isStale(p) else { return nil }
+        guard let p = items[key], Self.isStale(p), !isQueued(p) else { return nil }
         return key
     }
 
@@ -206,9 +208,11 @@ struct PendingBar: Sendable, Equatable {
         let n = items.count
         guard n > 0 else { return nil }
         let bad = items.values.filter { $0.mismatchAt != nil }.count
+        // D207: every waiting item queued behind the run says so; a mix keeps the B9 wording (waitNote)
+        let queued = bad == 0 && items.values.allSatisfy { isQueued($0) }
         let text = bad > 0
             ? "\(bad) 项改动机器没接受（见红字）" + (n - bad > 0 ? "，另 \(n - bad) 项还在等回执" : "")
-            : "\(n) 项改动已寄出 · \(waitNote)"
+            : queued ? "\(n) 项改动\(Self.queuedText)" : "\(n) 项改动已寄出 · \(waitNote)"
         return PendingBar(text: text, hasMismatch: bad > 0)
     }
 
@@ -256,7 +260,31 @@ struct PendingBar: Sendable, Equatable {
     /// clock (clockSkewMs) − 60 s. A receipt without
     /// `sent` (an older relay) counts by `at`, which is never before its send. A match only ever clears an item, so a
     /// matching value is taken as applied without a receipt, as before.
+    ///
+    /// A queued receipt (D207: modes.py add_receipt `queued`, boot_stages.py:643, written when the order arrives during a
+    /// run) is no such proof: the order has not run yet, and its value would read 「没生效」 against the state until the
+    /// final receipt — same action and `sent`, no `queued` — comes.
     func machineActed(on p: PendingEdit) -> Bool {
+        receipts(for: p).contains { $0["queued"]?.truthy != true }
+    }
+
+    /// 「排队中 · 跑完执行」 under a row and in the bar.
+    static let queuedText = "排队中 · 跑完执行"
+
+    /// D207: the relay queued this change behind the running script — a queued receipt of its action sent at or after its
+    /// (re)send, and no final receipt (same action and `sent`, without `queued`) yet. The final one then goes through
+    /// reconcile like any receipt.
+    func isQueued(_ p: PendingEdit) -> Bool {
+        let rs = receipts(for: p)
+        return rs.contains { q in
+            guard q["queued"]?.truthy == true else { return false }
+            let sent = q["sent"]?.jsString ?? ""
+            return !rs.contains { $0["queued"]?.truthy != true && ($0["sent"]?.jsString ?? "") == sent }
+        }
+    }
+
+    /// The machine's receipts (relay.最近指令) of `p`'s action sent at or after its (re)send; see machineActed.
+    private func receipts(for p: PendingEdit) -> [JSONValue] {
         let action: String
         switch p.src {
         case "relay": action = p.body?["action"]?.string ?? ""
@@ -271,7 +299,7 @@ struct PendingBar: Sendable, Equatable {
         // sentAt is this phone's clock, `sent` ntfy's (Net.send) and `at` the machine's: compare on ntfy's (edge audit 3)
         let from = f.string(from: Date(timeIntervalSince1970: Double(p.resentAt ?? p.sentAt) + relay.clockSkewMs / 1000 - 60))
         let rcs = relay.snap?["relay"]?["最近指令"]?.array ?? []
-        return rcs.contains { r in
+        return rcs.filter { r in
             guard r["action"]?.jsString == action else { return false }
             let s = r["sent"]?.jsString ?? ""
             return (s.isEmpty ? (r["at"]?.jsString ?? "") : s) >= from
