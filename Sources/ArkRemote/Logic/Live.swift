@@ -153,6 +153,10 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             relay.setStatus("还没设置信箱，先去设置里填", "off")
             return
         }
+        // one ping at a time (刷新 tile, pull to refresh, the ping 2 s after a save): two at once each sent `refresh` twice
+        // (four states out of ntfy's 250 a day), the later one cleared pingLatest under the first, and the first to end
+        // set busy false while the other still ran (edge audit 9). The running one answers this tap too.
+        guard !busy else { return }
         relay.setStatus("正在问机器…", "")
         busy = true
         // stamina: asked at the same time as the machine (an action repeated within a minute reuses the last answer)
@@ -181,14 +185,16 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         defer { es.close() }
 
         do { try await relay.send(.object(["action": .string("refresh")])) } catch {
-            relay.setStatus("发不出去：" + errorMessage(error), "off")
+            relay.setStatus("发不出去：" + Self.why(error), "off")
             return
         }
 
         let t0 = nowMs()
         var resent = false, polled = false
-        while nowMs() - t0 < 11000 {
-            try? await Task.sleep(nanoseconds: 500_000_000)
+        // a cancelled task (pull to refresh left mid-way) gets no sleep: `try?` returned at once and the loop spun on the
+        // main actor for the whole 11 s (edge audit 10)
+        while nowMs() - t0 < 11000 && !Task.isCancelled {
+            do { try await Task.sleep(nanoseconds: 500_000_000) } catch { break }   // still say what is known (below)
             if let s = pingLatest, let sAt = Self.atOf(s), best == nil || sAt > (Self.atOf(best) ?? 0) { best = s }
             if let b = best, let bAt = Self.atOf(b), bAt >= floor, relay.serverNowMs() - bAt * 1000 < Self.freshMs,
                relay.snapAt == nil || bAt > Double(relay.snapAt ?? 0) {
