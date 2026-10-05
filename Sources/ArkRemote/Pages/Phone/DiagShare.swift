@@ -36,7 +36,10 @@ import UIKit
         #elseif canImport(UIKit)
         guard let top = Self.topController() else { Self.finish(state: 2, message: "没有可以弹出分享面板的界面"); return }
         let vc = UIActivityViewController(activityItems: [text], applicationActivities: nil)
-        vc.completionWithItemsHandler = { _, completed, _, error in
+        // @Sendable: the handler's block type carries no NS_SWIFT_UI_ACTOR (UIActivityViewController.h:24) and the docs
+        // name no thread; written in this @MainActor class the closure would be inferred main-actor isolated, and Swift 6's
+        // runtime check traps if UIKit calls it off the main queue (the detectPatterns crash, 0.4.4 second test pass)
+        vc.completionWithItemsHandler = { @Sendable _, completed, _, error in
             let why = error.map { $0.localizedDescription }
             Task { @MainActor in DiagShare.finish(state: why != nil ? 2 : (completed ? 0 : 1), message: why ?? "") }
         }
