@@ -9,6 +9,7 @@
 //   ax                    the app's element tree as one JSON line {"state": n, "els": [[type, label, id, value, x, y, w, h, enabled, selected], ...]}
 //   tap <x> <y> [ms]      one finger down/up at (x, y) pt, held ms (default 50)
 //   path <x,y,dt|...>     one finger path: dt = ms after the previous point (first point = touch-down), the last point lifts
+//   sysalert <a|b>        press the first existing button named a or b in a system / app alert
 //   type <text>           type into the focused element
 //   del <n>               n delete keys into the focused element
 //   back                  tap the navigation bar's back button (the leftmost button of the top-most navigation bar)
@@ -43,9 +44,15 @@ final class ReplayUITests: XCTestCase {
         return out
     }
 
+    /// typeText into an app with no focused element is an XCTest failure that ended the whole runner (pass 7 note)
+    func hasFocus() -> Bool {
+        app.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch.exists
+    }
+
     func testReplay() throws {
         guard let url = ProcessInfo.processInfo.environment["REPLAY_URL"], !url.isEmpty else { throw XCTSkip("no REPLAY_URL") }
         base = url
+        continueAfterFailure = true   // a failed query (typing with no focus) must not end the runner
         var misses = 0
         while true {
             guard let batch = http("/next", timeout: 50) else {
@@ -85,6 +92,16 @@ final class ReplayUITests: XCTestCase {
             guard w.waitForExistence(timeout: 3) else { return "error no wheel \(n) (\(app.pickerWheels.count))" }
             w.adjust(toPickerWheelValue: val)
             return "ok \(String(describing: w.value ?? ""))"
+        case "sysalert":
+            // the paste permission alert (「"ArkRemote" would like to paste from …」) is SpringBoard's: press the named
+            // button there. Never query the app while it is up: its tree reads hang and the failure ends the runner
+            let names = rest.split(separator: "|").map(String.init)
+            let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            for n in names {
+                let b = sb.buttons[n].firstMatch
+                if b.exists { b.tap(); return "ok \(n)" }
+            }
+            return "none"
         case "wait":
             Thread.sleep(forTimeInterval: (Double(parts.count > 1 ? parts[1] : "0") ?? 0) / 1000); return "ok"
         case "tap":
@@ -104,15 +121,24 @@ final class ReplayUITests: XCTestCase {
             guard pts.count >= 2 else { return "error bad path" }
             do { try synthesize(points: pts); return "ok" } catch { return "error \(error.localizedDescription)" }
         case "type":
+            guard hasFocus() else { return "error no focus" }
             app.typeText(rest); return "ok"
         case "del":
             let n = Int(parts.count > 1 ? parts[1] : "0") ?? 0
+            guard hasFocus() else { return "error no focus" }
             app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: n)); return "ok"
         case "back":
             let bars = app.navigationBars.allElementsBoundByIndex.filter { $0.exists && $0.isHittable }
             for bar in bars.reversed() {
                 let b = bar.buttons.allElementsBoundByIndex.filter { $0.exists && $0.isHittable }.min { $0.frame.minX < $1.frame.minX }
-                if let b = b, b.frame.minX < 120 { b.tap(); return "ok \(b.label)" }
+                // read everything before the tap (the button is gone after it: a query then fails the test and ends
+                // the runner), and tap by synthesized touch (XCUIElement.tap waits for an idle app)
+                if let b = b, b.frame.minX < 120 {
+                    let label = b.label, f = b.frame
+                    do { try synthesize(points: [(Double(f.midX), Double(f.midY), 0), (Double(f.midX), Double(f.midY), 50)]) }
+                    catch { return "error \(error.localizedDescription)" }
+                    return "ok \(label)"
+                }
             }
             return "none"
         default:

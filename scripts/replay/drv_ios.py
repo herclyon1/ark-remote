@@ -76,7 +76,16 @@ class IOSDriver:
             raise RuntimeError("simctl install failed: " + r.stderr[-400:])
 
     def terminate(self):
+        """Stop the app and wait until its process is gone, so a defaults write / delete that follows is not undone
+        by the app's own last write (a deleted ark-remote-cfg came back once: run 10-05 22:5x, clip.first.empty)."""
         self.simctl("terminate", self.udid, BUNDLE)
+        t_end = time.time() + 5
+        while time.time() < t_end:
+            r = self.simctl("spawn", self.udid, "launchctl", "list")
+            if "UIKitApplication:" + BUNDLE not in (r.stdout or ""):
+                break
+            time.sleep(0.3)
+        time.sleep(0.3)
 
     def launch(self):
         r = self.simctl("launch", self.udid, BUNDLE)
@@ -97,18 +106,55 @@ class IOSDriver:
     def screenshot(self, path):
         self.simctl("io", self.udid, "screenshot", path)
 
+    # The app's preferences live in two places on the simulator: its data container's Library/Preferences/<bundle>.plist
+    # (everything the app itself writes) and the simulator home's domain <bundle> (what `simctl spawn defaults <bundle>`
+    # reads and writes). The app reads the container first and falls back to the home domain, so a key the app once
+    # wrote in its container shadows any home-domain write or delete (10-05 23:1x: a deleted ark-remote-cfg kept the app
+    # configured; the stored mailbox the guard reads must be the container's). Reads take the container first; writes
+    # go to the container and clear the home copy; deletes clear both.
+    def _container_prefs(self):
+        r = self.simctl("get_app_container", self.udid, BUNDLE, "data")
+        if r.returncode:
+            return None
+        return os.path.join(r.stdout.strip(), "Library", "Preferences", BUNDLE)
+
+    def _defaults(self, *a):
+        return self.simctl("spawn", self.udid, "defaults", *a)
+
     def read_default(self, key):
-        r = self.simctl("spawn", self.udid, "defaults", "read", BUNDLE, key)
+        path = self._container_prefs()
+        if path:
+            r = self._defaults("read", path, key)
+            if r.returncode == 0:
+                return r.stdout.strip()
+        r = self._defaults("read", BUNDLE, key)
         return r.stdout.strip() if r.returncode == 0 else None
 
+    def read_defaults_all(self, key):
+        """Every stored copy of key: [(where, value)] - the guard checks all of them."""
+        out = []
+        path = self._container_prefs()
+        for where, dom in (("container", path), ("home", BUNDLE)):
+            if dom:
+                r = self._defaults("read", dom, key)
+                if r.returncode == 0:
+                    out.append((where, r.stdout.strip()))
+        return out
+
     def write_default(self, key, value):
-        r = self.simctl("spawn", self.udid, "defaults", "write", BUNDLE, key, "-string", value)
+        path = self._container_prefs()
+        r = self._defaults("write", path or BUNDLE, key, "-string", value)
         if r.returncode:
             raise RuntimeError("defaults write failed: " + r.stderr[-300:])
+        if path:
+            self._defaults("delete", BUNDLE, key)
 
     def delete_defaults(self, keys):
+        path = self._container_prefs()
         for k in keys:
-            self.simctl("spawn", self.udid, "defaults", "delete", BUNDLE, k)
+            if path:
+                self._defaults("delete", path, k)
+            self._defaults("delete", BUNDLE, k)
 
     def clear_clipboard(self):
         # an EMPTY pasteboard (simctl pbcopy always leaves a string): the app reads a #k= link from the clipboard on
@@ -140,8 +186,18 @@ class IOSDriver:
         self.build_runner()
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", self.port), _handler(self.hub))
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.spawn_runner()
+
+    def spawn_runner(self):
+        """Start (again) the XCUITest runner: an XCTest failure inside a command (an element gone between query and
+        use) ends the test and so the runner; the run goes on with a new one (each in its own log)."""
+        self.runs = getattr(self, "runs", 0) + 1
+        self.hub.polled.clear()
+        while not self.hub.cmds.empty():
+            self.hub.cmds.get_nowait()
         env = dict(os.environ, TEST_RUNNER_REPLAY_URL=f"http://127.0.0.1:{self.port}", TEST_RUNNER_REPLAY_BUNDLE=BUNDLE)
-        self.runner_log = open(os.path.join(self.out, "xcuitest-runner.log"), "w")
+        name = "xcuitest-runner.log" if self.runs == 1 else f"xcuitest-runner-{self.runs}.log"
+        self.runner_log = open(os.path.join(self.out, name), "w")
         self.proc = subprocess.Popen(["xcodebuild", "test-without-building", "-project", os.path.join(HERE, "xcuitest/ReplayDriver.xcodeproj"),
                                       "-scheme", "ReplayDriverUITests", "-destination", f"id={self.udid}", "-derivedDataPath", self.dd,
                                       "-only-testing:ReplayDriverUITests/ReplayUITests/testReplay"],
@@ -164,16 +220,44 @@ class IOSDriver:
         if self.server:
             self.server.shutdown()
 
-    def call(self, batch, timeout=60):
+    def runner_ended(self):
         if self.proc and self.proc.poll() is not None:
-            raise RuntimeError("the XCUITest runner exited (see xcuitest-runner.log)")
+            return True
+        try:
+            with open(self.runner_log.name, errors="ignore") as f:
+                return "Tear Down" in f.read()
+        except OSError:
+            return False
+
+    def restart_runner(self, why):
+        if self.runs >= 6:
+            raise RuntimeError(f"the XCUITest runner ended again ({why}); 5 restarts used up")
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()         # our own xcodebuild child only
+            try:
+                self.proc.wait(20)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+        self.spawn_runner()
+
+    def call(self, batch, timeout=60):
+        if self.runner_ended():
+            self.restart_runner("before " + batch[:30])
         while not self.hub.results.empty():
             self.hub.results.get_nowait()
         self.hub.cmds.put(batch)
-        try:
-            res = self.hub.results.get(timeout=timeout)
-        except queue.Empty:
-            raise RuntimeError(f"runner did not answer in {timeout} s: {batch[:60]}")
+        t_end = time.time() + timeout
+        while True:
+            try:
+                res = self.hub.results.get(timeout=2)
+                break
+            except queue.Empty:
+                if self.runner_ended():
+                    log = os.path.basename(self.runner_log.name)
+                    self.restart_runner(batch[:30])
+                    raise RuntimeError(f"XCUITest runner 在「{batch[:30]}」时结束（XCTest 失败，见 {log}），已重启")
+                if time.time() > t_end:
+                    raise RuntimeError(f"runner did not answer in {timeout} s: {batch[:60]}")
         return [ln.split("\t", 1)[1] if "\t" in ln else "" for ln in res.split("\n")]
 
     # ---- the common driver interface
@@ -214,10 +298,14 @@ class IOSDriver:
         self.call(f"path {x0},{y0},0|{x0},{y0 + (y1 - y0) // 10},30|{mid[0]},{mid[1]},{ms // 2}|{x1},{y1},{ms // 2}|{x1},{y1},120")
 
     def type(self, text):
-        self.call("type " + text)
+        res = self.call("type " + text)[0]
+        if res.startswith("error"):
+            raise RuntimeError(f"type: {res}")
 
     def clear_field(self, n=12):
-        self.call(f"del {n}")
+        res = self.call(f"del {n}")[0]
+        if res.startswith("error"):
+            raise RuntimeError(f"del: {res}")
 
     def back(self):
         return self.call("back")[0]
@@ -243,4 +331,6 @@ class IOSDriver:
         return False
 
     def keyboard_up(self, nodes):
-        return any(n["kind"] == "Keyboard" for n in nodes)
+        # a keyboard sliding away stays in the tree for a while below the screen edge: count it only while it shows
+        H = self.size[1]
+        return any(n["kind"] == "Keyboard" and n["h"] > 0 and n["y"] - n["h"] / 2 < H - 40 for n in nodes)

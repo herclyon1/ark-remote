@@ -175,6 +175,7 @@ class Runner:
             if n:
                 return settled(n)
         for direction in ("up", "down"):
+            same = 0
             for _ in range(8 if direction == "up" else 12):
                 self.scroll(direction)
                 n, sig2, near = look(True)
@@ -183,8 +184,9 @@ class Runner:
                     n, sig2, near = look(True)
                 if n:
                     return settled(n)
-                if sig2 == sig:
-                    break        # this end of the page reached
+                same = same + 1 if sig2 == sig else 0
+                if same >= 2:
+                    break        # this end of the page reached (twice: one swipe can be lost on a busy simulator)
                 sig = sig2
         raise StepFail(f"找不到「{sel_text(sel)}」")
 
@@ -216,14 +218,7 @@ class Runner:
                 n = hits[-1]
             else:
                 n = self.locate(rest[0], scroll=opts.get("scroll", True), region=opts.get("region", "any"))
-                for _ in range(8 if opts.get("stable") else 0):
-                    # a sheet still sliding up: tap only once two dumps agree on where the element is
-                    time.sleep(0.4)
-                    self.invalidate()
-                    m = self.locate(rest[0], scroll=False, region=opts.get("region", "any"))
-                    if (m["x"], m["y"]) == (n["x"], n["y"]):
-                        break
-                    n = m
+                n = self.steady(rest[0], n, opts)
             x, y = n["x"] + opts.get("dx", 0), n["y"] + opts.get("dy", 0)
             if opts.get("right"):
                 x = n["x"] + n["w"] // 2 - opts["right"]
@@ -241,11 +236,21 @@ class Runner:
             n = self.locate(rest[0], scroll=opts.get("scroll", True))
             target = n
             if not self.is_field(n):
-                fields = [f for f in self.dump(False)["nodes"] if self.is_field(f) and abs(f["y"] - n["y"]) <= max(n["h"], f["h"]) and self.on_screen(f)]
+                fields = [f for f in self.dump(False)["nodes"] if self.is_field(f) and abs(f["y"] - n["y"]) <= max(n["h"], f["h"], 36) and self.on_screen(f)]   # iOS 27: the field under its title
                 if fields:
                     target = min(fields, key=lambda f: abs(f["y"] - n["y"]))
-            self.drv.tap(target["x"] + (target["w"] // 2 - 20 if self.drv.platform == "ios" and target["w"] > 80 else 0), target["y"])
-            self.drv.wait_keyboard()
+            tx = target["x"] + (target["w"] // 2 - 20 if self.drv.platform == "ios" and target["w"] > 80 else 0)
+            self.drv.tap(tx, target["y"])
+            if not self.drv.wait_keyboard() and self.drv.platform == "ios":
+                # the list was still gliding under the tap: read the field's place again and tap once more
+                self.invalidate()
+                fresh = [f for f in self.dump(True)["nodes"] if self.is_field(f) and self.on_screen(f)
+                         and abs(f["x"] - target["x"]) <= 4]
+                if fresh:
+                    target = min(fresh, key=lambda f: abs(f["y"] - target["y"]))
+                self.drv.tap(target["x"] + (target["w"] // 2 - 20 if target["w"] > 80 else 0), target["y"])
+                if not self.drv.wait_keyboard():
+                    raise StepFail("点了框没出键盘")
             self.drv.clear_field(opts.get("clear", 12))
             if rest[1]:
                 self.drv.type(rest[1])
@@ -311,6 +316,19 @@ class Runner:
             res = self.drv.call(f"pick {rest[0]} {rest[1]}")[0]
             if not res.startswith("ok"):
                 raise StepFail(f"转盘 {rest[0]} 拨不到 {rest[1]}：{res}")
+        elif kind == "allow_paste":
+            # ("allow_paste", s): within s seconds press 「Allow Paste」 on the system paste permission alert, if it comes
+            # (it can come twice: once for the link, once more for the runner's own pasteboard write)
+            t_end, n = time.time() + (rest[0] if rest else 8), 0
+            while time.time() < t_end:
+                res = self.drv.call("sysalert Allow Paste|允许粘贴", timeout=40)[0]
+                if res.startswith("ok"):
+                    n += 1
+                    self.note = f"点了系统粘贴许可框 Allow Paste ×{n}"
+                time.sleep(0.5)
+        elif kind == "point":
+            # ("point", fx, fy): a tap at that fraction of the screen (outside a system panel, which has no button)
+            self.drv.tap(int(self.drv.size[0] * rest[0]), int(self.drv.size[1] * rest[1]))
         elif kind == "see":
             # ("see", sel): scroll until sel is inside the content area, without tapping
             self.locate(rest[0])
@@ -333,7 +351,13 @@ class Runner:
         elif kind == "forget_config":
             # the 第一次使用 screen: no stored mailbox (and no remembered link, so a copied link is taken again)
             self.drv.terminate()
-            self.drv.delete_defaults(["ark-remote-cfg", "ark-remote-link-taken"])
+            for _ in range(3):
+                self.drv.delete_defaults(["ark-remote-cfg", "ark-remote-link-taken"])
+                if self.drv.read_default("ark-remote-cfg") is None:
+                    break
+                time.sleep(0.5)
+            else:
+                raise StepFail("删不掉 App 存的信箱（ark-remote-cfg）")
         elif kind == "restore_config":
             self.drv.terminate()
             self.drv.write_default("ark-remote-cfg", json.dumps({"topic": self.guard.topic, "pin": self.mb.pin}, separators=(",", ":")))
@@ -350,8 +374,21 @@ class Runner:
         """iOS compact DatePicker (StatusPage.swift hhmmBinding): tap the capsule, wait for the two wheels, set
         hour / minute (XCUIElement.adjust), then close the popover with a tap in the right margin at the capsule's
         height (outside the cards: a tap on a row below would also hit that row, pass 7 doubt 3)."""
-        if self.drv.platform != "ios":
-            raise StepFail("time 只在 iOS 上跑")
+        if self.drv.platform == "android":
+            # a TextView button with the time (「8:30 AM」 / 「08:30」) right of the row title opens a Material3 dialog
+            n = self.locate(f"{label}（机器时间）")
+            n = self.steady(f"{label}（机器时间）", n, {})
+            pat = re.compile(r"^\d{1,2}:\d\d( [AP]M)?$")
+            btns = [b for b in self.dump(True)["nodes"] if any(pat.match(t) for t in b["texts"]) and b["x"] > n["x"]
+                    and abs(b["y"] - n["y"]) <= 120 and self.on_screen(b)]
+            if not btns:
+                raise StepFail(f"「{label}」那行没有时间按钮")
+            b = min(btns, key=lambda b: abs(b["y"] - n["y"]))
+            self.drv.tap(b["x"], b["y"])
+            time.sleep(1.0)
+            self.drv.set_time_dialog(int(hh), int(mm))
+            time.sleep(0.6)
+            return
         sel = {"t": label, "kind": "DatePicker"}
         for _ in range(2):
             self.locate(sel)
@@ -604,8 +641,23 @@ class Runner:
                 cands = [s for s in nodes if s["checked"] is not None and abs(s["y"] - n["y"]) <= max(n["h"], 110)]
         return min(cands, key=lambda s: abs(s["y"] - n["y"])) if cands else None
 
+    def steady(self, sel, n, opts):
+        """iOS: a page still sliding in (push, sheet) or a list still gliding moves the element under the tap; tap
+        only once two reads agree on where it is (stable: up to 8 reads 0.4 s apart, else 3 reads 0.25 s apart)."""
+        tries = 8 if opts.get("stable") else (3 if self.drv.platform == "ios" else 0)
+        for _ in range(tries):
+            time.sleep(0.4 if opts.get("stable") else 0.25)
+            self.invalidate()
+            # still gliding, it may have left the content area: find it again (nudging it back in when allowed)
+            m = self.locate(sel, scroll=opts.get("scroll", True), region=opts.get("region", "any"))
+            if (m["x"], m["y"]) == (n["x"], n["y"]):
+                return m
+            n = m
+        return n
+
     def toggle(self, sel, opts):
         n = self.locate(sel, scroll=opts.get("scroll", True))
+        n = self.steady(sel, n, opts)
         sw = self.switch_on_row(n, self.dump(False)["nodes"])
         if sw is None:
             raise StepFail(f"「{sel_text(sel)}」那行没有开关")
@@ -633,16 +685,10 @@ class Runner:
 
     # ---- checks
     def check_stored_config(self):
-        raw = self.drv.read_default("ark-remote-cfg")
-        stored = None
-        if raw:
-            try:
-                stored = json.loads(raw).get("topic")
-            except ValueError:
-                stored = raw
-        self.guard.check_app_topic(stored)
-        if stored is not None and stored != self.guard.topic:
-            raise Abort("App 存的信箱不是 --topic（已停 App）")
+        for stored in stored_topics(self.drv):
+            self.guard.check_app_topic(stored)
+            if stored is not None and stored != self.guard.topic:
+                raise Abort("App 存的信箱不是 --topic（已停 App）")
 
     def expect(self, step, t0):
         exp = step.get("expect", [])
@@ -680,7 +726,8 @@ class Runner:
             if step.get("last_above") or step.get("last_bottom"):
                 miss += self.check_last(step, dump)
             if kb is not None and self.drv.keyboard_up(dump["nodes"]) != kb:
-                miss.append("键盘还在" if not kb else "键盘没出来")
+                k = [n for n in dump["nodes"] if n["kind"] == "Keyboard"]
+                miss.append(("键盘还在" + (f"（y {k[0]['y']} 高 {k[0]['h']}）" if k else "")) if not kb else "键盘没出来")
             if not miss or time.time() > deadline:
                 break
             time.sleep(0.3)
@@ -823,7 +870,7 @@ class Runner:
 
 ACTIONS = {"tap", "tab", "toggle", "field", "type", "enter", "hidekb", "swipe", "top", "back", "wait", "relaunch", "state",
            "receipt", "clear_receipts", "hb", "remember", "gate", "gate_trials", "app_posts", "shot", "clipboard", "forget_config", "restore_config", "fluency",
-           "dismiss", "pick", "tapout", "time", "see"}
+           "dismiss", "pick", "tapout", "time", "see", "point", "allow_paste"}
 STEP_KEYS = {"id", "page", "say", "do", "on", "expect", "absent", "visible", "keyboard", "cmd", "nocmd", "timeout", "cmd_timeout",
              "ios", "android", "always", "settle", "pause", "relaunch_on_crash", "switch", "offline",
              "skip", "nojudge", "nojudge_fail", "below", "last_above", "last_bottom"}
@@ -849,6 +896,21 @@ def validate(all_steps):
             errs.append(f"{s['id']}: bad on")
     if errs:
         raise SystemExit("step table errors:\n  " + "\n  ".join(errs))
+
+
+def stored_topics(drv):
+    """The mailbox topic of every stored copy of ark-remote-cfg ([None] when there is none)."""
+    raws = [v for _, v in drv.read_defaults_all("ark-remote-cfg")] if hasattr(drv, "read_defaults_all") \
+        else [drv.read_default("ark-remote-cfg")]
+    out = []
+    for raw in raws:
+        if not raw:
+            continue
+        try:
+            out.append(json.loads(raw).get("topic"))
+        except ValueError:
+            out.append(raw)
+    return out or [None]
 
 
 def select_steps(all_steps, platform, only=None, start=None, stop=None, offline=False):
@@ -988,6 +1050,7 @@ def main():
     r = Runner(a, drv, mb, g, out)
     r.t_run0 = t_start
     rc = 0
+    prefs_saved = None
     try:
         drv.start()
         drv.terminate()
@@ -997,15 +1060,13 @@ def main():
         if not drv.installed():
             print("拒绝运行：设备上没装 App（用 --install）")
             return 2
-        # guard BEFORE the app is ever launched
-        raw = drv.read_default("ark-remote-cfg")
-        stored = None
-        if raw:
-            try:
-                stored = json.loads(raw).get("topic")
-            except ValueError:
-                stored = raw
-        g.check_app_topic(stored)
+        # guard BEFORE the app is ever launched (every stored copy: iOS keeps a container and a home-domain one)
+        for stored in stored_topics(drv):
+            g.check_app_topic(stored)
+        if hasattr(drv, "prefs_backup"):
+            # Android: the whole defaults.xml goes back byte for byte at the end (the emulator's app keeps its own data)
+            prefs_saved = drv.prefs_backup()
+            print("偏好已备份", prefs_saved)
         drv.delete_defaults(RESET_KEYS)
         drv.write_default("ark-remote-cfg", json.dumps({"topic": a.topic, "pin": a.pin}, separators=(",", ":")))
         drv.write_default("ark-diag-bucket", DIAG_BLACKHOLE)
@@ -1034,6 +1095,13 @@ def main():
             drv.terminate()
         except Exception:
             pass
+        if prefs_saved:
+            try:
+                drv.prefs_restore(prefs_saved, launch=False)
+                print("偏好已恢复（逐字节一致）")
+            except Exception as e:
+                print("偏好恢复失败：", e, "备份在", prefs_saved)
+                rc = rc or 4
         drv.stop()
         mb.stop()
     took = time.time() - t_start
