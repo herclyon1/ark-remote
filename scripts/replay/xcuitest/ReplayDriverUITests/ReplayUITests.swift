@@ -15,7 +15,10 @@
 //   wait <ms>
 //   state                 XCUIApplication.State raw value of the app (4 = running in foreground)
 //   activate              bring the app to the front
+//   pbclear               empty the simulator's general pasteboard (no items, so hasStrings is false)
+//   pbset <text>          put a string on the general pasteboard
 import XCTest
+import UIKit
 
 final class ReplayUITests: XCTestCase {
     let bundleID = ProcessInfo.processInfo.environment["REPLAY_BUNDLE"] ?? "com.herclyon.arkremote"
@@ -71,6 +74,8 @@ final class ReplayUITests: XCTestCase {
         case "ax": return dump()
         case "state": return "\(app.state.rawValue)"
         case "activate": app.activate(); return "ok"
+        case "pbclear": UIPasteboard.general.items = []; return "ok \(UIPasteboard.general.hasStrings)"
+        case "pbset": UIPasteboard.general.string = rest; return "ok"
         case "wait":
             Thread.sleep(forTimeInterval: (Double(parts.count > 1 ? parts[1] : "0") ?? 0) / 1000); return "ok"
         case "tap":

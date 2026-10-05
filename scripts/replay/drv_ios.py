@@ -111,8 +111,12 @@ class IOSDriver:
             self.simctl("spawn", self.udid, "defaults", "delete", BUNDLE, k)
 
     def clear_clipboard(self):
-        p = subprocess.Popen(["xcrun", "simctl", "pbcopy", self.udid], stdin=subprocess.PIPE)
-        p.communicate(b"ark-replay")
+        # an EMPTY pasteboard (simctl pbcopy always leaves a string): the app reads a #k= link from the clipboard on
+        # foreground, and its iOS detectPatterns path traps when the pasteboard holds any string (see steps.py)
+        return self.call("pbclear")[0]
+
+    def set_clipboard(self, text):
+        self.call("pbset " + text)
 
     def crash_reports(self):
         return set(glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/ArkRemote*")))
@@ -228,6 +232,15 @@ class IOSDriver:
     def crashed_since(self, marker):
         new = self.crash_reports() - marker
         return sorted(new)
+
+    def wait_keyboard(self, timeout=4):
+        t = time.time()
+        while time.time() - t < timeout:
+            if any(n["kind"] == "Keyboard" for n in self.dump()["nodes"]):
+                time.sleep(0.2)
+                return True
+            time.sleep(0.2)
+        return False
 
     def keyboard_up(self, nodes):
         return any(n["kind"] == "Keyboard" for n in nodes)

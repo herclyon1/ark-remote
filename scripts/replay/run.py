@@ -11,6 +11,7 @@ stored mailbox is the real one, publishes only to --topic, and re-checks the sto
 import argparse
 import json
 import os
+import signal
 import re
 import sys
 import time
@@ -124,38 +125,43 @@ class Runner:
         return 0 <= n["y"] <= H and 0 <= n["x"] <= W
 
     def locate(self, sel, scroll=True, region="any"):
-        """A visible node for sel; when scroll is on, scroll down to the bottom, then back up to the top, looking."""
+        """A node for sel inside the content area (below the navigation bar, above the tab bar / keyboard).
+        With scroll on: a match just outside the area is nudged in; otherwise scroll down to the bottom, then up."""
         d = norm_sel(sel)
         nth = d.get("nth", 0)
-        H = self.drv.size[1]
 
         def look(fresh):
             dump = self.dump(fresh)
             top, bottom = self.drv.content_box(dump["nodes"])
             hits = [n for n in self.find(sel, dump, region) if self.on_screen(n)]
-            if region == "any":
-                # prefer nodes not hidden behind the tab bar / keyboard
-                hits = [n for n in hits if top - 60 <= n["y"] <= bottom + 10] or hits
+            if region in ("top", "bottom"):
+                inside = hits
+            else:
+                inside = [n for n in hits if top + 4 <= n["y"] <= bottom - 4]
             sig = tuple((tuple(n["texts"]), n["y"]) for n in dump["nodes"] if n["texts"])[:80]
-            return (hits[nth] if len(hits) > nth else None), sig, bottom
+            near = None
+            if not inside and hits:
+                near = "down" if hits[0]["y"] < top else "up"
+            return (inside[nth] if len(inside) > nth else None), sig, near
 
-        n, sig, bottom = look(self.cache is None)
-        if n or not scroll:
-            if n and scroll and region == "any" and n["y"] > bottom + 10:
-                self.scroll("up", short=True)
-                n2, _, _ = look(True)
-                n = n2 or n
+        n, sig, near = look(self.cache is None)
+        if n:
+            return n
+        if not scroll:
+            raise StepFail(f"找不到「{sel_text(sel)}」")
+        if near:
+            self.scroll(near, short=True)
+            n, sig, near = look(True)
             if n:
                 return n
-            raise StepFail(f"找不到「{sel_text(sel)}」")
         for direction in ("up", "down"):
             for _ in range(8 if direction == "up" else 12):
                 self.scroll(direction)
-                n, sig2, bottom = look(True)
+                n, sig2, near = look(True)
+                if not n and near:
+                    self.scroll(near, short=True)
+                    n, sig2, near = look(True)
                 if n:
-                    if region == "any" and n["y"] > bottom + 10:
-                        self.scroll("up", short=True)
-                        n = look(True)[0] or n
                     return n
                 if sig2 == sig:
                     break        # this end of the page reached
@@ -173,7 +179,7 @@ class Runner:
         else:
             y1 = int(top + (bottom - top) * 0.2)
             self.drv.swipe(x, y1, x, int(y1 + span), 300)
-        time.sleep(0.35)
+        time.sleep(0.6)
         self.invalidate()
 
     # ---- actions
@@ -211,7 +217,7 @@ class Runner:
                 if fields:
                     target = min(fields, key=lambda f: abs(f["y"] - n["y"]))
             self.drv.tap(target["x"] + (target["w"] // 2 - 20 if self.drv.platform == "ios" and target["w"] > 80 else 0), target["y"])
-            time.sleep(0.5)
+            self.drv.wait_keyboard()
             self.drv.clear_field(opts.get("clear", 12))
             if rest[1]:
                 self.drv.type(rest[1])
@@ -243,20 +249,24 @@ class Runner:
             self.mb.publish_state(rest[0] if rest else "base", self.ctx.get("receipts"))
         elif kind == "receipt":
             # rest = (action, queued?, ok?): answer the newest command of that action the app sent this run
-            action = rest[0]
-            sent = [m for _, m in self.mb.cmds(self.t_run0) if (m.get("body") or {}).get("action") == action
-                    or (action in ("set_master", "set_config") and action == self.cmd_action(m))]
-            if not sent:
-                raise StepFail(f"信箱里没有 App 寄出的 {action}，没法回执")
-            r = self.mb.receipt_for(sent[-1], queued=rest[1] if len(rest) > 1 else False, ok=rest[2] if len(rest) > 2 else True)
-            self.ctx.setdefault("receipts", []).append(r)
+            actions = rest[0] if isinstance(rest[0], list) else [rest[0]]
+            cmds = self.mb.cmds(self.t_run0)
+            for action in actions:
+                sent = [m for _, m in cmds if self.cmd_action(m) == action]
+                if not sent:
+                    raise StepFail(f"信箱里没有 App 寄出的 {action}，没法回执")
+                r = self.mb.receipt_for(sent[-1], queued=rest[1] if len(rest) > 1 else False, ok=rest[2] if len(rest) > 2 else True)
+                self.ctx.setdefault("receipts", []).append(r)
             self.mb.publish_state("base", self.ctx["receipts"])
         elif kind == "clear_receipts":
             self.ctx["receipts"] = []
         elif kind == "hb":
-            self.mb.hb(rest[0] if rest else 300)
+            n = rest[0] if rest else 300
+            self.mb.hb(n)
+            self.last_hb = time.time()
+            self.hb_hold = n < 60      # a short heartbeat on purpose (machine-off steps): no keep-alive until the next hb
         elif kind == "remember":
-            n = self.locate(rest[0], scroll=False)
+            n = self.locate(rest[0], scroll=False, region=opts.get("region", "any"))
             self.ctx[rest[1]] = (n["x"], n["y"])
         elif kind == "gate":
             # ("gate", key-of-✓, key-of-寄出, gap_ms, hold_ms)
@@ -264,6 +274,11 @@ class Runner:
                 raise StepFail("门测试缺坐标（先跑记坐标的步骤）")
             (x1, y1), (x2, y2) = self.ctx[rest[0]], self.ctx[rest[1]]
             self.drv.gate_press(x1, y1, x2, y2, rest[2], rest[3])
+        elif kind == "clipboard":
+            if rest and rest[0]:
+                self.drv.set_clipboard(rest[0])
+            else:
+                self.drv.clear_clipboard()
         elif kind == "shot":
             self.drv.screenshot(os.path.join(self.out, rest[0] + ".png"))
         else:
@@ -276,7 +291,9 @@ class Runner:
         return b.get("action", "")
 
     def is_field(self, n):
-        return n["kind"] in ("TextField", "SecureTextField", "EditText", "TextView") or (self.drv.platform == "android" and n.get("focused") is not None and n["kind"] == "EditText")
+        if self.drv.platform == "android":
+            return n["kind"] == "EditText"
+        return n["kind"] in ("TextField", "SecureTextField", "TextView")
 
     def toggle(self, sel, opts):
         n = self.locate(sel, scroll=opts.get("scroll", True))
@@ -393,7 +410,14 @@ class Runner:
         return all(body.get(k) == v for k, v in w.items())
 
     # ---- loop
+    def keep_alive(self):
+        """hb 300 keeps the machine 'on' for 630 s; re-post every 4 minutes so a long run never sees it expire."""
+        if not getattr(self, "hb_hold", False) and time.time() - getattr(self, "last_hb", 0) > 240:
+            self.mb.hb(300)
+            self.last_hb = time.time()
+
     def run_step(self, i, step):
+        self.keep_alive()
         t0 = time.time()
         marker = self.drv.log_marker()
         err = None
@@ -443,7 +467,7 @@ class Runner:
 
 
 ACTIONS = {"tap", "tab", "toggle", "field", "type", "enter", "hidekb", "swipe", "top", "back", "wait", "relaunch", "state",
-           "receipt", "clear_receipts", "hb", "remember", "gate", "shot"}
+           "receipt", "clear_receipts", "hb", "remember", "gate", "shot", "clipboard"}
 STEP_KEYS = {"id", "page", "say", "do", "on", "expect", "absent", "visible", "keyboard", "cmd", "nocmd", "timeout", "cmd_timeout",
              "ios", "android", "always", "settle", "pause", "relaunch_on_crash"}
 
@@ -562,6 +586,15 @@ def main():
             with open(cache, "w", encoding="utf-8") as f:
                 json.dump(base, f, ensure_ascii=False)
     mb = mbmod.Mailbox(g, a.topic, a.pin, base)
+    q, fam = mbmod.quota()
+    print(f"ntfy.sh 今天还能发：IPv4 {q.get(4)} 条，IPv6 {q.get(6)} 条；本脚本走 IPv{fam}", flush=True)
+    if fam is None or (q.get(fam) or 0) < 60:
+        print("拒绝运行：ntfy.sh 本机今天的匿名消息额度不够跑一遍（一遍约 40 条状态 / 心跳 + App 自己寄出的 20 来条）")
+        return 2
+    app_fam = 6 if (a.platform == "ios" and q.get(6) is not None) else 4
+    if (q.get(app_fam) or 0) < 25:
+        print(f"注意：App 多半走 IPv{app_fam}，那边只剩 {q.get(app_fam)} 条，App 寄出的命令会被 ntfy 拒（429），"
+              "「寄出」类步骤会判不对", flush=True)
 
     if a.platform == "ios":
         from drv_ios import IOSDriver
@@ -633,5 +666,10 @@ def main():
     return rc or (1 if bad else 0)
 
 
+def _term(*_):
+    raise KeyboardInterrupt   # SIGTERM runs the same cleanup as Ctrl-C (stop the app and the XCUITest runner)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _term)
     sys.exit(main())

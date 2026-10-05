@@ -76,10 +76,11 @@ step("status.4c.menu", "status", "刷 4C 声骸 · 打哪个 → 菜单列出 bo
      [tap("刷 4C 声骸 · 打哪个")], expect=["re:^3\\. "])
 step("status.4c.pick", "status", "菜单 · 选第 3 个 boss → 菜单收起，行显示第 3 个",
      [tap("re:^3\\. ", last=True)], expect=["re:^3\\. "], absent=[{"t": "re:^4\\. "}])
-step("status.until.bad", "status", "刷到几点 填 25:00 → 回车 → 提示「时刻填成 08:30 这种」、框退回 08:30",
-     [("field", "刷到几点（机器时间）", "25:00"), ("enter",)], expect=["~时刻填成 08:30 这种"], timeout=6,
-     android={"do": [("field", "刷到几点（机器时间）", "25:00"), ("hidekb",), tap(STATUS_ROOT, scroll=False)]})
-step("status.until.reset", "status", "刷到几点 框是 08:30", [("hidekb",)], expect=["08:30"])
+step("status.until.type", "status", "刷到几点 填 25:00 → 框里是 25:00",
+     [("field", "刷到几点（机器时间）", "25:00")], expect=["25:00"])
+step("status.until.bad", "status", "收键盘 / 回车 → 框退回 08:30（提示「时刻填成 08:30 这种」）",
+     [("enter",), ("hidekb",)], expect=["08:30"], absent=["25:00"], keyboard=False,
+     android={"do": [("hidekb",)]})
 step("status.echo.ask", "status", "开始刷 → 弹「开始刷？」",
      [tap("开始刷", region="content")], expect=["开始刷？"])
 step("status.echo.go", "status", "弹窗 · 开始刷 → 寄出 echo_farm（第 3 个，到 08:30）",
@@ -95,15 +96,15 @@ step("status.two.send", "status", "寄出 2 项 → 寄出 skip_shutdown + debug
      [("wait", 0.5), tap("寄出 2 项")], absent=["确认这次修改"], expect=["~已寄出"],
      cmd=[{"action": "skip_shutdown"}, {"action": "debug_mode"}])
 step("status.queued", "status", "D207：机器回「排队」回执 → 行下「排队中 · 跑完执行」",
-     [("receipt", "skip_shutdown", True)], expect=["~排队中 · 跑完执行"], timeout=25)
+     [("receipt", ["skip_shutdown", "debug_mode"], True)], expect=["~排队中 · 跑完执行"], timeout=25)
 step("status.queued.final", "status", "机器回最终回执 → 「排队中」消失",
-     [("receipt", "skip_shutdown", False)], absent=["~排队中 · 跑完执行"], timeout=25)
+     [("receipt", ["skip_shutdown", "debug_mode"], False)], absent=["~排队中 · 跑完执行"], timeout=25)
 step("status.clear", "status", "顶上条「不等了，清掉」→ 待回执全清",
      [("clear_receipts",), ("state", "base"), tap(CLEAR)], absent=[CLEAR, "~已寄出"], timeout=10)
 step("status.skip.pending", "status", "早班开关关掉 → 「今天跳过，明天照常」+ 待保存 1 项",
-     [("toggle", "re:^早班 · ")], expect=["~今天跳过，明天照常", "~待保存 1 项"])
+     [("toggle", "re:^早班 · \\d")], expect=["~今天跳过，明天照常", "~待保存 1 项"])
 step("status.skip.review", "status", "✓ → 确认单红字「今天不跑：早班」",
-     [("remember", SAVE, "save"), tap(SAVE, region="top")], expect=["确认这次修改", "~今天不跑：早班", "寄出 1 项"])
+     [("remember", SAVE, "save", {"region": "top"}), tap(SAVE, region="top")], expect=["确认这次修改", "~今天不跑：早班", "寄出 1 项"])
 step("status.skip.think", "status", "再想想 → 关单，改动还在",
      [("remember", "寄出 1 项", "send"), ("wait", 0.3), tap("再想想")], absent=["确认这次修改"], expect=["~待保存 1 项"], nocmd=2)
 

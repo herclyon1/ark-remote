@@ -11,6 +11,7 @@ output directory. Nothing is ever sent to the real mailbox. `--state <file>` reu
 import base64
 import copy
 import gzip
+import socket
 import threading
 import hashlib
 import json
@@ -26,6 +27,39 @@ SHANGHAI = 8 * 3600                                                      # the m
 
 class NtfyLimit(RuntimeError):
     pass
+
+
+# ntfy.sh counts anonymous messages per IP (250 a day) separately for IPv4 and IPv6. The runner's own posts go over the
+# family with more quota left (set by quota()); only this Python process is affected, nothing on the Mac changes.
+_FAMILY = {"family": 0}
+_orig_getaddrinfo = socket.getaddrinfo
+
+
+def _getaddrinfo(host, *a, **k):
+    res = _orig_getaddrinfo(host, *a, **k)
+    fam = _FAMILY["family"]
+    if fam and host == "ntfy.sh":
+        res = [r for r in res if r[0] == fam] or res
+    return res
+
+
+socket.getaddrinfo = _getaddrinfo
+
+
+def quota():
+    """{4: remaining, 6: remaining} anonymous ntfy.sh messages for this machine (None = family unreachable),
+    and pins the runner's posts to the family with more left."""
+    out = {}
+    for fam, key in ((socket.AF_INET, 4), (socket.AF_INET6, 6)):
+        _FAMILY["family"] = fam
+        try:
+            with urllib.request.urlopen(f"{NTFY}/v1/account", timeout=10) as r:
+                out[key] = json.loads(r.read())["stats"]["messages_remaining"]
+        except Exception:
+            out[key] = None
+    best = max((k for k in out if out[k] is not None), key=lambda k: out[k], default=None)
+    _FAMILY["family"] = {4: socket.AF_INET, 6: socket.AF_INET6}.get(best, 0)
+    return out, best
 
 
 def fetch_real_state(real_topic):

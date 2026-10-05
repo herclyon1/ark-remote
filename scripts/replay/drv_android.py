@@ -78,7 +78,10 @@ class AndroidDriver:
         self.pid = None
 
     def launch(self):
-        self.sh(f"am start -n {PKG}/.MainActivity")
+        if not getattr(self, "activity", None):
+            lines = [l.strip() for l in self.sh(f"cmd package resolve-activity --brief {PKG}").splitlines() if "/" in l]
+            self.activity = lines[-1] if lines else f"{PKG}/ark.remote.MainActivity"
+        self.sh(f"am start -n {self.activity}")
         for _ in range(40):
             p = self.sh(f"pidof {PKG}").strip()
             if p:
@@ -97,6 +100,9 @@ class AndroidDriver:
     def clear_clipboard(self):
         # the app takes a #k= link copied in the last 10 minutes; make sure the clipboard holds nothing like that
         self.sh("cmd clipboard set-text ark-replay 2>/dev/null || true")
+
+    def set_clipboard(self, text):
+        self.sh(f"cmd clipboard set-text '{text}' 2>/dev/null || true")
 
     # ---- SharedPreferences (app must be stopped while writing)
     def _prefs(self):
@@ -136,7 +142,7 @@ class AndroidDriver:
         if not xml.strip():
             return
         n0 = len(xml)
-        for k in keys:
+        for k in list(keys) + ["__unrepresentable__:" + k for k in keys]:
             ek = re.escape(su.escape(k))
             xml = re.sub(r'\s*<(\w+) name="%s"(?:[^>]*?/>|[^>]*>.*?</\1>)' % ek, "", xml, flags=re.S)
         if len(xml) != n0:
@@ -198,6 +204,15 @@ class AndroidDriver:
     def back(self):
         self.sh("input keyevent KEYCODE_BACK")
         return "ok"
+
+    def wait_keyboard(self, timeout=4):
+        t = time.time()
+        while time.time() - t < timeout:
+            if self.keyboard_up([]):
+                time.sleep(0.4)      # the input connection follows the keyboard
+                return True
+            time.sleep(0.2)
+        return False
 
     def hide_keyboard(self):
         if self.keyboard_up([]):
