@@ -167,6 +167,41 @@ extension View {
 }
 
 extension View {
+    /// iOS: the HH:MM fields (刷到几点 / 改成刷到几点) open the digits-and-punctuation keyboard. The web's inputmode
+    /// "numeric" (view.js:161, 171) opens a digit pad, but .numberPad has no ":" and statusTimeHHMM (StatusMapping.swift:19,
+    /// view.js:71 timeHHMM) only takes 08:30, so the time could not be typed at all; the default keyboard was letters
+    /// with only a return key (test pass 5). Android: skip-ui maps .numbersAndPunctuation to Compose's Text
+    /// (UIKeyboardType.swift:30), the keyboard it already had, so nothing changes there.
+    func timeKeyboard() -> some View {
+        #if !os(Android) && canImport(UIKit)
+        keyboardType(.numbersAndPunctuation).autocorrectionDisabled()
+        #else
+        self
+        #endif
+    }
+
+    /// The page's 放弃 (✕) also ends the editing: the field kept its focus and keyboard on Android, and the next tap on
+    /// the keyboard typed into the reverted value and made a new 待保存 (test pass 5, 理智药 → 6). Android: the Compose
+    /// focus is cleared when the press goes down (the Initial pass, before the button's click), so a field that checks
+    /// its text on blur does so before the edits are dropped. iOS: the button's action calls endEditing() first.
+    func endsEditingOnTap() -> some View {
+        #if os(Android)
+        composeModifier { ClearFocusOnPress() }
+        #else
+        self
+        #endif
+    }
+}
+
+/// iOS: hides the keyboard, as keyboardDone's 完成; the field's blur check runs on its focus change. Android: no-op,
+/// endsEditingOnTap() does it there.
+@MainActor func endEditing() {
+    #if !os(Android) && canImport(UIKit)
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    #endif
+}
+
+extension View {
     /// Text fields under this view lose focus, as a web input blurs, when the user taps outside them or hides the keyboard
     /// with the system back gesture. No-op on iOS.
     ///
@@ -197,6 +232,9 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /// See `clearsFocusOnOutsideTap()`. `composed` because composeModifier's block is not composable
@@ -220,6 +258,24 @@ struct ClearFocusOutsideFields: ContentModifier {
                 }
                 return Modifier.pointerInput(true) {
                     detectTapGestures(onTap: { _ in focusManager.clearFocus() })
+                }
+            }
+        }
+    }
+}
+
+/// See `endsEditingOnTap()`. Watches the press in the Initial pass without consuming it, so the button still gets
+/// its click.
+struct ClearFocusOnPress: ContentModifier {
+    func modify(view: any View) -> any View {
+        view.composeModifier { modifier in
+            modifier.composed {
+                let focusManager = LocalFocusManager.current
+                return Modifier.pointerInput(true) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed: false, pass: PointerEventPass.Initial)
+                        focusManager.clearFocus()
+                    }
                 }
             }
         }

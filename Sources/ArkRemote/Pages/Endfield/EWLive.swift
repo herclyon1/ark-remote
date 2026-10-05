@@ -459,8 +459,9 @@ struct EWSaveBar: ViewModifier {
                 if !edits.isEmpty {
                     // index.html:921 #discard (aria-label 放弃, xmark) / #save (aria-label 完成, checkmark)
                     ToolbarItem(placement: .cancellationAction) {
-                        Button { EWEdits.shared.items = [:] } label: { Image(systemName: "xmark") }   // view.js:2950
+                        Button { endEditing(); EWEdits.shared.items = [:] } label: { Image(systemName: "xmark") }   // view.js:2950
                             .accessibilityLabel("放弃")
+                            .endsEditingOnTap()
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button {

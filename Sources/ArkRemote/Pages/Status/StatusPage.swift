@@ -353,6 +353,7 @@ struct StatusPage: View {
                         }
                         .multilineTextAlignment(.trailing)
                         .frame(width: Self.timeFieldWidth)
+                        .timeKeyboard()
                 }
             } else {
                 Picker(selection: $bossIndex) {
@@ -375,6 +376,7 @@ struct StatusPage: View {
                         }
                         .multilineTextAlignment(.trailing)
                         .frame(width: Self.timeFieldWidth)
+                        .timeKeyboard()
                 }
                 Button("开始刷") { actions.startEchoFarm(bossIndex, echoUntil) }
             }
