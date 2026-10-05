@@ -74,6 +74,11 @@ struct ArknightsTab: View {
             .onChange(of: Relay.shared.snapAt) {
                 refresh()
             }
+            // the sent changes changed outside this tab — 「不等了，清掉」 on the bar (pending.js:85 `pending = {}; savePending();
+            // render();`): redraw now, so the rows' 「已寄出」 line, green ground and sent value go at once, not with the next state
+            .onChange(of: Pending.shared.items) {
+                redraw()
+            }
             // view.js:945-949: a new shift re-renders; the unsaved changes stay in the pool.
             .onChange(of: storedQueue) {
                 refresh()
