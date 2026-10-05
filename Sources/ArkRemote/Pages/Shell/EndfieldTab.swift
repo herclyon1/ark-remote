@@ -7,7 +7,8 @@ struct EndfieldTab: View {
 
     var body: some View {
         let relay = Relay.shared
-        let master = EWMaster.from(snap: relay.snap, game: Self.game)
+        // decoded once per snapshot, not per body (EWMaster.live, EWLastGood): every switch to this tab runs the body afresh
+        let master = EWMaster.live(Self.game)
         let lastGood = EWLastGood.load(Self.game)
         EndfieldPage(data: Self.pageData(), live: Self.pageData, onChange: { path, v in
             let machine = ewEffectiveMaster(master, lastGood: lastGood).0
@@ -31,7 +32,7 @@ struct EndfieldTab: View {
     /// The page's data from the live snap and the unsaved changes. Also read by the 「更多设置」 pages as they draw: on
     /// Android a pushed page keeps the data it was pushed with, so its 「待保存」 / 「已寄出」 lines would not appear.
     static func pageData() -> EndfieldPageData {
-        let master = EWMaster.from(snap: Relay.shared.snap, game: game)
+        let master = EWMaster.live(game)
         let edits = EWEdits.shared.items   // the unsaved changes of every tab (Logic/Edits.swift); this tab's own keys
         return EndfieldPageData(master: ewShown(master, game: game, edits: edits),
                                 lastGoodMaster: EWLastGood.load(game).map { ewShown($0, game: game, edits: edits) },
@@ -46,6 +47,6 @@ struct EndfieldTab: View {
     private func sync() {
         let relay = Relay.shared
         EWLastGood.save(snap: relay.snap, game: Self.game)
-        ewSyncLive(game: Self.game, master: EWMaster.from(snap: relay.snap, game: Self.game))
+        ewSyncLive(game: Self.game, master: EWMaster.live(Self.game))
     }
 }

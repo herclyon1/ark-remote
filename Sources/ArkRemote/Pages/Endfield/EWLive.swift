@@ -11,6 +11,25 @@ extension EWMaster {
               let m = try? JSONDecoder().decode(EWMaster.self, from: v.encoded()) else { return EWMaster() }
         return m
     }
+
+    /// The decoded copy of each game's snap.master per snapshot, for `live` below. A plain static, not a property of an
+    /// @Observable type: a tracked write during body re-runs the body (StatusMapping.swift:55-57).
+    @MainActor private static var liveCache: [String: (at: Double, master: EWMaster)] = [:]
+
+    /// `from(snap: Relay.shared.snap, game:)`, decoded once per snapshot. A switch to 终末地 stalled the user's Android
+    /// phone 166-187 ms every time and 手机 → 鸣潮 122-123 ms (fluency audit 10-05, 0.4.3): skip-ui composes only the
+    /// selected tab (TabView.swift:537-541 hands NavDisplay the selected tab's entries alone), so every switch ran the tab's
+    /// body afresh, and it encoded and re-decoded snap.master twice on the main thread. snap.at names one snapshot: adopt
+    /// takes only a strictly newer `at` (Net.swift:307-310) and is the only writer besides init; a snap without `at`
+    /// (only a cached one from before the first adopt) is decoded every time, as before.
+    @MainActor static func live(_ game: String) -> EWMaster {
+        let snap = Relay.shared.snap
+        guard let at = snap?["at"]?.number else { return from(snap: snap, game: game) }
+        if let c = liveCache[game], c.at == at { return c.master }
+        let m = from(snap: snap, game: game)
+        liveCache[game] = (at, m)
+        return m
+    }
 }
 
 extension EWValue {
@@ -145,18 +164,45 @@ func ewSyncLive(game: String, master: EWMaster, extra: [String: JSONValue] = [:]
 enum EWLastGood {
     static let key = "ark-remote-cfg-master"
 
-    static func load(_ game: String) -> EWMaster? {
-        guard let raw = UserDefaults.standard.string(forKey: key), let all = try? JSONValue.parse(raw),
-              let v = all[game], !v.isNull else { return nil }
-        return try? JSONDecoder().decode(EWMaster.self, from: v.encoded())
+    // In-memory copies, so a tab's body does not parse the stored string: load ran twice per body of the 终末地 and 鸣潮
+    // tabs, each parsing every game's stored master and re-decoding one (see EWMaster.live for the stalls it was part of).
+    // `save` is the only writer of `key` (ArknightsBridge.swift:222 only reads it), so the copies change only there.
+    /// The stored object, parsed once per process.
+    @MainActor private static var stored: [String: JSONValue]? = nil
+    /// One game's decoded copy; a wrapper so "read, none stored" (nil master) differs from "not read yet" (no entry).
+    private struct Decoded { var master: EWMaster? }
+    @MainActor private static var decoded: [String: Decoded] = [:]
+    /// snap.at of the copy each game last saved: a newer tab body or sync with the same snapshot has nothing new to keep.
+    @MainActor private static var savedAt: [String: Double] = [:]
+
+    @MainActor private static func all() -> [String: JSONValue] {
+        if let stored { return stored }
+        let a = (UserDefaults.standard.string(forKey: key).flatMap { try? JSONValue.parse($0) })?.object ?? [:]
+        stored = a
+        return a
+    }
+
+    @MainActor static func load(_ game: String) -> EWMaster? {
+        if let d = decoded[game] { return d.master }
+        var m: EWMaster? = nil
+        if let v = all()[game], !v.isNull { m = try? JSONDecoder().decode(EWMaster.self, from: v.encoded()) }
+        decoded[game] = Decoded(master: m)
+        return m
     }
 
     /// Keeps a readable copy; called with the raw snap so the stored JSON is the relay's own.
-    static func save(snap: JSONValue?, game: String) {
+    @MainActor static func save(snap: JSONValue?, game: String) {
         guard let v = snap?["master"]?[game], v["values"]?.object?.isEmpty == false else { return }
-        var all = (UserDefaults.standard.string(forKey: key).flatMap { try? JSONValue.parse($0) })?.object ?? [:]
-        all[game] = v
-        UserDefaults.standard.set(JSONValue.object(all).encodedString(), forKey: key)
+        // the same snapshot again (each tab's .task and onChange(of: snapAt) call this): already stored as is.
+        // snap.at names one snapshot (Net.swift:307-310); a snap without one is stored every time, as before
+        let at = snap?["at"]?.number
+        if let at, savedAt[game] == at { return }
+        var a = all()
+        a[game] = v
+        UserDefaults.standard.set(JSONValue.object(a).encodedString(), forKey: key)
+        stored = a
+        decoded[game] = nil   // the next load decodes the copy just stored
+        if let at { savedAt[game] = at }
     }
 }
 
