@@ -35,6 +35,9 @@ struct PendingEdit: Codable, Sendable, Equatable {
     var resentAt: Int? = nil
     /// The `at` of the state that still reported another value.
     var mismatchAt: Int? = nil
+    /// That value was neither the one sent nor the one it replaced (`from`): changed after it, by another phone or the
+    /// machine. Optional so a record stored before it still decodes.
+    var elsewhere: Bool? = nil
     /// relay switches and 周本: the command body as sent, resent as is.
     var body: JSONValue? = nil
 }
@@ -148,6 +151,10 @@ struct PendingBar: Sendable, Equatable {
     func tag(for key: String, editing: Bool = false) -> PendingTag? {
         if let p = items[key] {
             if let mm = p.mismatchAt {
+                // no 「再发一次」 here: a tap put this older change back over the newer one (edge audit 13)
+                if p.elsewhere == true {
+                    return .sent(text: "机器 \(Self.hhmm(mm)) 报的是「\(valueLabel(p, liveVals[key]))」，别处改过")
+                }
                 return .mismatch(text: "没生效 · 机器 \(Self.hhmm(mm)) 报的还是「\(valueLabel(p, liveVals[key]))」", key: key)
             }
             let at = p.resentAt ?? p.sentAt
@@ -218,6 +225,7 @@ struct PendingBar: Sendable, Equatable {
                 relay.showToast(t.count <= 13 ? t : "改动已生效")
             } else if p.mismatchAt != at {
                 items[key]?.mismatchAt = at
+                items[key]?.elsewhere = p.from.map { !Self.sameVal(live, $0) }
                 changed = true
             }
         }
@@ -241,6 +249,7 @@ struct PendingBar: Sendable, Equatable {
             try await relay.send(body)
             items[key]?.resentAt = nowSec()
             items[key]?.mismatchAt = nil
+            items[key]?.elsewhere = nil
             savePending()
             relay.showToast("又发了一次")   // pending.js:117
         } catch {
