@@ -64,7 +64,7 @@ struct EndfieldPage: View {
             card(EndfieldSchema.otherTasks)
         }
         // On the List, not a Section or row (skip-ui's List finds its sections by type, MonthCardRows.swift; SwiftUI wants
-        // navigationDestination outside lazy containers); in body so $values, onChange, onResend and live stay in scope.
+        // navigationDestination outside lazy containers); in body so onChange, onResend and live stay in scope.
         .keyboardDone()
         .navigationDestination(for: EndfieldRoute.self) { route in
             switch route {
@@ -72,7 +72,7 @@ struct EndfieldPage: View {
                 EndfieldStockpilePage()
             case .more(let title):
                 if let g = Self.cards.first(where: { $0.title == title }) {
-                    EndfieldMorePage(group: g, data: live ?? { [data] in data }, values: $values, onChange: onChange, onResend: onResend)
+                    EndfieldMorePage(group: g, data: live ?? { [data] in data }, onChange: onChange, onResend: onResend)
                 }
             }
         }
@@ -151,15 +151,30 @@ func ewNoteRows(_ notes: [String], _ prefix: String) -> [EWRow] {
 }
 
 /// A card's rows past its first level (EndfieldSchema.firstLevel), titled by the task. The rows are worked out here from
-/// the live `values` binding, so a mode changed on either page shows the rows it opens; edits go through the same
-/// binding and `onChange` as the 终末地 page's own rows.
+/// the page's own `values`, kept to the shown master (machine + 已寄出 + 待保存, ewShown) as the 终末地 page keeps its own,
+/// so a mode changed on either page shows the rows it opens; edits go through the same `onChange` into EWEdits.
+///
+/// Its own state, not the 终末地 page's `$values`: on Android the 终末地 page's resync (its onChange of data.master.values)
+/// did not reach this page while it was pushed - a binding captured by the navigationDestination closure skip-ui keeps
+/// from its first registration (Navigation.swift:869-872) - so after ✕ here the rows kept the discarded values
+/// (执行周期 「已选 6/7」 for 7/7, 使用刻写券 off for on) until a trip back to the root (0.4.4 second test pass).
 struct EndfieldMorePage: View {
     var group: EWGroupSpec
     /// Read in `body`, not stored: on Android the pushed page is not redrawn with the 终末地 page's newer data.
     var data: () -> EndfieldPageData
-    @Binding var values: [String: EWValue]
+    @State var values: [String: EWValue]
     var onChange: (String, EWValue) -> Void
     var onResend: (String) -> Void
+
+    init(group: EWGroupSpec, data: @escaping () -> EndfieldPageData, onChange: @escaping (String, EWValue) -> Void,
+         onResend: @escaping (String) -> Void) {
+        self.group = group
+        self.data = data
+        self.onChange = onChange
+        self.onResend = onResend
+        let d = data()
+        _values = State(initialValue: ewEffectiveMaster(d.master, lastGood: d.lastGoodMaster).0?.values ?? [:])
+    }
 
     /// 「终末地 · 基质刷取」 → 「基质刷取」.
     private var name: String { group.title.components(separatedBy: " · ").last ?? group.title }
@@ -185,5 +200,10 @@ struct EndfieldMorePage: View {
         .keyboardDone()
         // the ✕ / ✓ of 「待保存」 here too, so a change made on this page is saved from it
         .modifier(EWSaveBar(title: name))
+        // ✕ (edits dropped), a send, a newer machine state: back to what the master now shows (EndfieldPage's own onChange)
+        .onChange(of: data.master.values) { _, _ in
+            let d = self.data()
+            values = ewEffectiveMaster(d.master, lastGood: d.lastGoodMaster).0?.values ?? [:]
+        }
     }
 }
