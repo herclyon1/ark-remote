@@ -110,7 +110,9 @@ struct ArknightsTab: View {
         // view.js:323-328: and the last readable AUTO-MAS config.
         ArknightsBridge.saveConfig(snap: Relay.shared.snap)
         // The web's render fills liveVals for every field on the page, then reconciles the sent changes.
-        Pending.shared.liveVals.merge(bridge.liveVals) { _, new in new }
+        let b = bridge
+        Pending.shared.liveVals.merge(b.liveVals) { _, new in new }
+        for id in b.staleIDs { Pending.shared.liveVals[id] = nil }   // a copy, not a read: no receipt check against it
         Pending.shared.reconcile()
         redraw()
     }

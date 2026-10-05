@@ -304,12 +304,23 @@ struct ArknightsBridge {
 
     /// The machine's value of every 方舟 field, for Pending.reconcile (the web's render fills liveVals,
     /// from the last good copy too when that is what it draws: view.js:435 then :460).
+    /// Not the fields drawn from a last good copy (configStale / masterStale): that copy is older than any send, so a
+    /// change the machine took read as 「没生效」 against it (edge audit 32); they wait for a real read (staleIDs).
     var liveVals: [String: JSONValue] {
         var out: [String: JSONValue] = [:]
         for f in ArknightsField.allCases {
-            if let ref = f.ref, let raw = ref.rawValue(in: snap) { out[ref.id] = raw }
+            if let ref = f.ref, !isStale(f), let raw = ref.rawValue(in: snap) { out[ref.id] = raw }
         }
         return out
+    }
+
+    /// The ids liveVals leaves out this time; the tab drops them from Pending.liveVals, where an earlier read's value stays.
+    var staleIDs: [String] {
+        ArknightsField.allCases.compactMap { f in isStale(f) ? f.ref?.id : nil }
+    }
+
+    private func isStale(_ f: ArknightsField) -> Bool {
+        f.src == "mas" ? configStale : masterStale
     }
 
     /// The edits between what the page shows and `base` (view.js note(): an edit back to the old value is dropped).
