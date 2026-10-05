@@ -252,6 +252,11 @@ enum EWSave {
     /// when something did not go out, the message of the 「有改动没发出去」 alert (view.js:3005-3009).
     static func send(_ edits: [String: EWEdit]) async -> (left: [String: EWEdit], failure: String?) {
         let relay = Relay.shared
+        #if !os(Android) && canImport(UIKit)
+        // the orders go one after another: leaving the app mid-send must not suspend the rest (edge audit 15)
+        let grace = BackgroundGrace("save")
+        defer { grace.end() }
+        #endif
         var left = edits
         var sent = 0
         var failed: Error? = nil
