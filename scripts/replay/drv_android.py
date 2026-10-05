@@ -536,6 +536,21 @@ class AndroidDriver:
                 best = cand
         return best
 
+    # ---- 400 ms gate moments logged by a DEBUG build (gatelog-1006: EWLive.swift `#if DEBUG` logger.info("ArkGate ..."))
+    def gate_log(self, marker):
+        """The app's ArkGate lines since marker, oldest first: [(event, {key: int})], event in sheet-up, gate-open,
+        press-down, go, go-blocked, go-send. Values are RecKit.mono() ms (one clock inside the app). A release build
+        logs none (returns [])."""
+        out = []
+        for ln in self.sh(f"logcat -d -b main -T '{marker}'").splitlines():
+            m = re.search(r"ArkGate (\S+)(.*)$", ln)
+            if not m:
+                continue
+            kv = {k: (v == "true") if v in ("true", "false") else int(v)
+                  for k, v in re.findall(r"(\w+)=(-?\d+|true|false)", m.group(2))}
+            out.append((m.group(1), kv))
+        return out
+
     # ---- crash check
     def log_marker(self):
         return self.sh("date '+%m-%d %H:%M:%S.000'").strip()
