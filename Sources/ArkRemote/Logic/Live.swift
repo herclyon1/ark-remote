@@ -430,11 +430,15 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         let t = (d["time"]?.number ?? 0) * 1000
         if d["topic"]?.string == cfg.topic + "-hb" {
             sawHb(t)
+            // by time, not by arrival (edge audit 25): an older beat must not undo a later bye, nor a bye an older beat
+            // (probeHb and readCosHb merge the same way)
             if d["message"]?.string == "bye" {
-                lastHb = 0
-                pendingUntil = 0
+                if t >= lastHb {
+                    lastHb = 0
+                    pendingUntil = 0
+                }
             } else {
-                lastHb = t
+                lastHb = max(lastHb, t)
                 if let n = Self.hbPace(d["message"]) { hbEvery = n }
             }
             updateLive()
@@ -587,7 +591,8 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         if events.contains(where: { $0["event"]?.string == "open" }) { DiagLog.shared.record("stream", ["state": "open"]) }
         if isClosed { return }
         let f = onEvent
-        for e in events { Task { @MainActor in f(e) } }
+        // one task for the batch, so its events are handled in the order they came (edge audit 25)
+        Task { @MainActor in for e in events { f(e) } }
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
