@@ -88,7 +88,8 @@ enum ArknightsField: CaseIterable {
             return .int(n)
         }
         switch self {
-        case .stage: return data.stage.map { .string($0) }
+        // set_stage's own cleaning (commands.py:161 strip + upper): set_config hands the value to AUTO-MAS as is (审查 A5)
+        case .stage: return data.stage.map { .string($0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()) }
         case .medicineNumb: return number(data.medicineNumb)
         case .ifFight: return data.ifFight.map { .bool($0) }
         case .ifActivityFirst: return data.ifActivityFirst.map { .bool($0) }

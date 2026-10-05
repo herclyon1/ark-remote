@@ -212,6 +212,51 @@ enum EWSave {
         return (key, EWEdit(label: label, src: "master", owner: game, path: path, from: machine?.json, to: v.json))
     }
 
+    /// What is wrong with a change, in words, or nil when it can go (send). Number rows: the schema's `number` fields
+    /// (Logic/Schema.swift, EndfieldSchema, WuwaSchema). An emptied box is null (EWRowView.setNumber, ArknightsBridge
+    /// outgoing) and text the machine keeps as text stays text (masterEdit), so a number may arrive as "5".
+    static func problem(_ e: EWEdit) -> String? {
+        func int(_ v: JSONValue) -> Int? {
+            switch v {
+            case .int(let i): return i
+            case .double(let d): return d == d.rounded() && abs(d) < 1e9 ? Int(d) : nil
+            case .string(let s): return Int(s.trimmingCharacters(in: .whitespacesAndNewlines))
+            default: return nil
+            }
+        }
+        if e.src == "wb" {
+            guard let n = int(e.to), (1...20).contains(n) else { return "要填 1–20" }   // weeklyboss.py:219
+            return nil
+        }
+        if e.src == "mas" && e.path == "Info.Stage" {
+            return stageOK(e.to.string ?? "") ? nil : "要写成 1-7、CE-6 这种"   // set_stage's check, commands.py:58 / 160-163
+        }
+        if e.src == "mas" && e.path == "Info.MedicineNumb" {
+            guard let n = int(e.to), (0...999).contains(n) else { return "要填 0–999 的整数" }   // set_medicine, commands.py:186
+            return nil
+        }
+        if numberPaths.contains("\(e.src)|\(e.owner)|\(e.path)") && int(e.to) == nil { return "要填整数" }
+        return nil
+    }
+
+    /// commands.py _STAGE_RE `^[A-Za-z0-9]{1,4}-[A-Za-z0-9]{1,3}$` (the stage is trimmed and upper-cased before, outgoing).
+    static func stageOK(_ s: String) -> Bool {
+        let p = s.split(separator: "-", omittingEmptySubsequences: false)
+        guard p.count == 2, (1...4).contains(p[0].count), (1...3).contains(p[1].count) else { return false }
+        return s.unicodeScalars.allSatisfy { $0 == "-" || ($0.isASCII && CharacterSet.alphanumerics.contains($0)) }
+    }
+
+    /// `src|owner|path` of every number row.
+    static let numberPaths: Set<String> = {
+        var out = Set<String>()
+        for sec in schema {
+            for f in sec.fields where f.type == "number" { out.insert("\(sec.src)|\(sec.game ?? sec.script ?? "")|\(f.path)") }
+        }
+        for f in EndfieldSchema.groups.flatMap({ $0.fields }) where f.type == .number { out.insert("master|MaaEnd|\(f.path)") }
+        for f in WuwaSchema.group.fields where f.type == .number { out.insert("master|OK-WW|\(f.path)") }
+        return out
+    }()
+
     /// A 状态 shift switch: skip_today / unskip_today (view.js:1606 isSkipEdit).
     static func isSkip(_ e: EWEdit) -> Bool {
         guard e.src == "relay", let a = e.body?["action"]?.string else { return false }
@@ -251,6 +296,16 @@ enum EWSave {
     /// view.js #go: send each change; the sent ones leave 「待保存」, the failed ones stay. Returns the keys still unsent and,
     /// when something did not go out, the message of the 「有改动没发出去」 alert (view.js:3005-3009).
     static func send(_ edits: [String: EWEdit]) async -> (left: [String: EWEdit], failure: String?) {
+        // 审查 A5 / B11 / B15: a value the relay refuses (周本 outside 1–20, weeklyboss.py:219; a MaaEnd number its verify
+        // rule rejects, mastercfg.py:465-482) or hands to AUTO-MAS unchecked (set_config checks nothing, commands.py:417-449)
+        // is not sent; nothing goes until it is fixed, so one review is one send
+        let bad = ordered(edits).compactMap { k -> String? in
+            guard let e = edits[k], let why = problem(e) else { return nil }
+            return "「\(e.label)」\(why)"
+        }
+        if !bad.isEmpty {
+            return (edits, "有几项填得不对，这次一项都没寄出：\(bad.joined(separator: "；"))。改好再保存。")
+        }
         let relay = Relay.shared
         var left = edits
         var sent = 0
@@ -273,7 +328,8 @@ enum EWSave {
             } catch { failed = error; break }
         }
         for k in ordered(edits) {
-            guard let e = edits[k], e.src == "relay", let body = e.body else { continue }
+            guard let e = edits[k], e.src == "relay", let raw = e.body else { continue }
+            let body = Pending.skipDayNow(raw)   // the day of a skip is today's when it goes out (审查 B10)
             do {
                 try await relay.send(body)
                 sent += 1

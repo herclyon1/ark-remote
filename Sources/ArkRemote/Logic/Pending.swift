@@ -228,7 +228,7 @@ struct PendingBar: Sendable, Equatable {
         guard let p = items[key] else { return }
         let body: JSONValue
         if p.src == "relay" || p.src == "wb" {
-            body = p.body ?? .null
+            body = Self.skipDayNow(p.body ?? .null)   // a skip's day is today's when it goes again (审查 B10)
         } else if p.src == "master" {
             body = .object(["action": .string("set_master"), "confirmed": .bool(true), "game": .string(p.owner),
                             "path": .string(p.path), "value": p.to])
@@ -239,6 +239,7 @@ struct PendingBar: Sendable, Equatable {
         do {
             try await relay.send(body)
             items[key]?.resentAt = nowSec()
+            if p.src == "relay" { items[key]?.body = body }
             items[key]?.mismatchAt = nil
             savePending()
             relay.showToast("又发了一次")   // pending.js:117
@@ -246,6 +247,15 @@ struct PendingBar: Sendable, Equatable {
             // pending.js:118: a reason is a sentence: alert, not the one-line HUD
             relay.showAlert("发不出去", Live.why(error))
         }
+    }
+
+    /// A skip_today carries the Beijing day it means, and the relay refuses one for another day (commands.py:944-950): the
+    /// day was taken when the switch was flipped, so one flipped at 23:59 and saved at 00:01, or 「再发一次」 the next day, came
+    /// back 「指令在收件箱里过期了」 (审查 B10). It is taken when the order goes out instead.
+    nonisolated static func skipDayNow(_ body: JSONValue) -> JSONValue {
+        guard case .object(var o) = body, o["action"]?.string == "skip_today" else { return body }
+        o["day"] = .string(statusBeijingToday())
+        return .object(o)
     }
 
     // No automatic resend (web 188a5339, 09-30, pending.js:121-124): the old resendStale re-sent every change without
