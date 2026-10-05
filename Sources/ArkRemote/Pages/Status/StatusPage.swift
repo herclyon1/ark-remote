@@ -338,8 +338,12 @@ struct StatusPage: View {
                 // echofarm.py retime (363-384) resolves the time like a start: one already past is tomorrow's (审查 A2: the
                 // old 「已经过了的时刻＝立刻收工」 sent a farm on for another day); stopping now is 「提前收工」. view.js:398 #efnew
                 // starts at the current 到; picked with the system time picker, not typed (user 20:12, via 验收)
-                DatePicker(selection: hhmmBinding($echoNewUntil, else: ef.until), displayedComponents: .hourAndMinute) {
+                // the picker beside the title, labels hidden: as its label, the two-line hint pushed iOS's time capsule
+                // under it, at the left (test pass 7)
+                HStack(spacing: 12) {
                     rowTitle("改成刷到几点（机器时间）", "提前或延后都行。已经过了的时刻算明天；要马上停按「提前收工」")
+                    DatePicker("改成刷到几点", selection: hhmmBinding($echoNewUntil, else: ef.until), displayedComponents: .hourAndMinute)
+                        .labelsHidden()
                 }
             } else {
                 Picker(selection: $bossIndex) {
@@ -352,8 +356,10 @@ struct StatusPage: View {
                 }
                 .pickerStyle(.menu)
                 // view.js:174-176 echoFarmBlock: title + explanation left, the time right of them; picked, not typed
-                DatePicker(selection: hhmmBinding($echoUntil, else: "08:30"), displayedComponents: .hourAndMinute) {
+                HStack(spacing: 12) {
                     rowTitle("刷到几点（机器时间）", "已过就算明天。到点自动收工、配置还原")
+                    DatePicker("刷到几点", selection: hhmmBinding($echoUntil, else: "08:30"), displayedComponents: .hourAndMinute)
+                        .labelsHidden()
                 }
                 Button("开始刷") { actions.startEchoFarm(bossIndex, echoUntil) }
             }
