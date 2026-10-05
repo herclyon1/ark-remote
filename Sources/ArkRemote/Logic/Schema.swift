@@ -253,13 +253,20 @@ struct RelaySwitch: Sendable {
     var hintOn: (@Sendable (String) -> String)? = nil
 }
 
+/// 调试模式's rule as the relay applies it (modes.py set_debug); the end moment itself is shown once the machine reports it
+/// (relay.调试模式, in the phone's time: StatusMapping).
+let debugModeRule = "打开后跑完都不关机，一直到下一次预定开机前 10 分钟才自动关掉（两个半小时内就要到的那次开机不算），可能开十几个小时"
+
 let relaySwitches: [RelaySwitch] = [
     RelaySwitch(id: "relay|skip_shutdown", key: "下次别关机", tab: "状态", label: "下次跑完不关机",
                 hint: "只跳过下一次关机，再下一趟照常关",
                 on: .object(["action": .string("skip_shutdown")]),
                 off: .object(["action": .string("skip_shutdown"), "off": .bool(true)])),
     RelaySwitch(id: "relay|debug_mode", key: "调试模式", tab: "状态", label: "调试模式",
-                hint: "开着的 90 分钟里跑完不关机，到点自动关掉",
+                // relay modes.py set_debug (183-222): `minutes` is not read; the mode holds until 10 min before the next
+                // scheduled power-on (BOOT_TIMES 08:40 / 21:20 Beijing, :54-56) more than 150 min away (CURRENT_CYCLE_MIN,
+                // :58-65) — up to ~13 h, not 90 min (审查 A1). The body is left as it was; the text says what happens.
+                hint: debugModeRule,
                 on: .object(["action": .string("debug_mode"), "minutes": .int(90), "confirmed": .bool(true)]),
                 off: .object(["action": .string("debug_mode"), "off": .bool(true), "confirmed": .bool(true)]),
                 hintOn: { v in "开着，到 \(v)——这期间跑完不关机" }),

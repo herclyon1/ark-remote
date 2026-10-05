@@ -406,7 +406,7 @@ struct StatusPage: View {
             Toggle(isOn: Binding(get: { data.debugModeUntil != nil }, set: { actions.setDebugMode($0) })) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("调试模式")
-                    Text(data.debugModeUntil.flatMap { $0.isEmpty ? nil : "开着，到 \($0)——这期间跑完不关机" } ?? "开着的 90 分钟里跑完不关机，到点自动关掉")
+                    Text(data.debugModeUntil.flatMap { $0.isEmpty ? nil : "开着，到 \($0)——这期间跑完不关机" } ?? debugModeRule)
                         .font(.footnote).foregroundStyle(.secondary)
                     tagLine(StatusSwitchID.debugMode)
                 }

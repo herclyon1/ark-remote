@@ -236,7 +236,9 @@ extension StatusData {
         let dbgLive = dbg?.truthy ?? false
         if record { pending.liveVals[StatusSwitchID.debugMode] = .bool(dbgLive) }
         let dbgShown = pending.shownValue(for: StatusSwitchID.debugMode)?.truthy ?? dbgLive
-        d.debugModeUntil = dbgShown ? (dbgLive ? (dbg?.jsString ?? "") : "") : nil   // "" = on, until not reported yet
+        // "" = on, until not reported yet. The relay's "YYYY-MM-DD HH:MM" is Beijing (modes.py:217): shown on the phone's
+        // clock with the day (「明天 09:30」), as the page's other times (审查 A1 / B4)
+        d.debugModeUntil = dbgShown ? (dbgLive ? localClock(fromMachineFull: dbg?.jsString ?? "") : "") : nil
         for id in [StatusSwitchID.skipShutdown, StatusSwitchID.debugMode] {
             if let t = tag(pending, id) { d.switchTags[id] = t }
         }
