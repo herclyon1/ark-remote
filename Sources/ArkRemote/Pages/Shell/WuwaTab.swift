@@ -40,7 +40,7 @@ struct WuwaTab: View {
         // 「拨回原样就撤销」 compares with what the control showed before this change: the sent-but-unconfirmed value while it is
         // on its way, else the machine's (view.js:1286 base(), used at :1254 for the switch and :1336 / :1347 for 周本 and config rows)
         let tacetBase = sentTacet ?? bits.tacetShots
-        let bossBase = Pending.shared.items[Self.bossKey]?.to.number.map { Int($0) } ?? bits.bossIndex
+        let bossBase = safeInt(Pending.shared.items[Self.bossKey]?.to.number) ?? bits.bossIndex
         let data = WuwaPageData(master: ewShown(master, game: Self.game, edits: edits),
                                 lastGoodMaster: lastGood.map { ewShown($0, game: Self.game, edits: edits) },
                                 tacetShots: edits[Self.tacetKey]?.to.bool ?? sentTacet ?? bits.tacetShots,
@@ -104,7 +104,7 @@ struct WuwaTab: View {
         var extra: [String: JSONValue] = [Self.tacetKey: .bool(RelayBits(relay.snap).tacetShots)]
         // view.js:576: the machine's 第几个周本, for the receipt check of a sent 周本 change (only when the relay reports it)
         let r = relay.snap?["relay"]
-        if let n = (r?["周常"]?["周本"] ?? r?["周本"])?["第几个周本"]?.number { extra[Self.bossKey] = .int(Int(n)) }
+        if let n = safeInt((r?["周常"]?["周本"] ?? r?["周本"])?["第几个周本"]?.number) { extra[Self.bossKey] = .int(n) }
         ewSyncLive(game: Self.game, master: EWMaster.from(snap: relay.snap, game: Self.game), extra: extra)
     }
 }

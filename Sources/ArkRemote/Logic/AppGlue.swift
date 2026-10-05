@@ -82,8 +82,8 @@ import SwiftUI
                             estopAt: d.integer(forKey: "ark-remote-estop"), record: true)
         // view.js:575-576: the 鸣潮 周本 「打第几个」 value on the machine, on every render whatever the tab, for reconcile
         let relay = Relay.shared.snap?["relay"]
-        if let n = (relay?["周常"]?["周本"] ?? relay?["周本"])?["第几个周本"]?.number {
-            Pending.shared.liveVals["wb|OK-WW|第几个周本"] = .int(Int(n))
+        if let n = safeInt((relay?["周常"]?["周本"] ?? relay?["周本"])?["第几个周本"]?.number) {
+            Pending.shared.liveVals["wb|OK-WW|第几个周本"] = .int(n)
         }
     }
 

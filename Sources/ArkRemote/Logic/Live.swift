@@ -222,7 +222,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
                relay.snapAt == nil || bAt > Double(relay.snapAt ?? 0) {
                 relay.adopt(b)
                 let a = relay.serverNowMs() - bAt * 1000
-                relay.setStatus(a < Self.justMs ? "开机中 · 刚刚更新" : "开机中 · 在忙 · 状态 \(ago(Int(bAt)))", "on")
+                relay.setStatus(a < Self.justMs ? "开机中 · 刚刚更新" : "开机中 · 在忙 · 状态 \(ago(safeInt(bAt) ?? 0))", "on")
                 return
             }
             if !resent && nowMs() - t0 > 4000 {
@@ -257,7 +257,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         }
         let age = relay.serverNowMs() - bAt * 1000
         if age < Self.justMs { relay.setStatus("开机中 · 刚刚更新", "on"); return }
-        if age < Self.freshMs { relay.setStatus("开机中 · 在忙 · 状态 \(ago(Int(bAt)))", "on"); return }
+        if age < Self.freshMs { relay.setStatus("开机中 · 在忙 · 状态 \(ago(safeInt(bAt) ?? 0))", "on"); return }
         sawHb(bAt * 1000)
         relay.setStatus("关机 · 没应答刷新 · 最后心跳 \(lastBeat())", "off")
     }
@@ -380,7 +380,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             let cosEvery = b["cos_every"]?.number ?? 30
             if relay.serverNowMs() - at < cosEvery * 2000 + 30000 && at > lastHb {
                 lastHb = at
-                if let n = b["every"]?.number, n > 0 { hbEvery = Int(n) }
+                if let n = safeInt(b["every"]?.number), n > 0 { hbEvery = n }
             }
         }
         if show { updateLive() }

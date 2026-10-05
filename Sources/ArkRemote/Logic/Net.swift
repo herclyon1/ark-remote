@@ -140,6 +140,13 @@ func jsNumberString(_ d: Double) -> String {
     return String(d)
 }
 
+/// `Int(d)` traps on a value that is infinite or outside Int's range; a number from the machine, COS or a game's API
+/// that big is no usable number, so it reads as missing (edge audit 18: an `at` of 1e20 ended the app).
+func safeInt(_ d: Double?) -> Int? {
+    guard let d, d.isFinite, d >= Double(Int.min), d < Double(Int.max) else { return nil }
+    return Int(d)
+}
+
 /// Two-digit zero pad, `String(x).padStart(2, "0")`.
 func pad2(_ x: Int) -> String { x < 10 ? "0\(x)" : String(x) }
 
@@ -319,7 +326,7 @@ struct PinScan: Sendable, Equatable {
     }
 
     /// The `at` of the snapshot (seconds), or nil.
-    var snapAt: Int? { snap?["at"]?.number.map { Int($0) } }
+    var snapAt: Int? { safeInt(snap?["at"]?.number) }
 
     /// view.js save_cache().
     func saveCache() {
@@ -396,8 +403,9 @@ struct PinScan: Sendable, Equatable {
     func joinChunks(_ m: JSONValue) throws -> JSONValue? {
         guard let slice = m["gzp"] else { return nil }
         let sid = m["sid"]?.jsString ?? ""
-        let i = Int(m["i"]?.number ?? 0)
-        let n = Int(m["n"]?.number ?? 0)
+        let i = safeInt(m["i"]?.number) ?? 0
+        let n = safeInt(m["n"]?.number) ?? 0
+        guard n > 0 else { return nil }   // `0..<n` traps on a negative count
         var got = chunkBox[sid] ?? [:]
         got[i] = slice.string ?? slice.jsString
         chunkBox[sid] = got

@@ -344,7 +344,7 @@ func stampFrom(_ epoch: Double?) -> String {
         if let last = jsNumber(ap["lastApAddTime"]), last.isFinite, last > 0, nowSec > last {
             live = min(top, cur + ((nowSec - last) / 360).rounded(.down))
         }
-        var o = GameStamina(current: Int(live), max: Int(top))
+        var o = GameStamina(current: safeInt(live), max: safeInt(top))
         if live < top, let full = ap["completeRecoveryTime"], full.truthy { o.fullAt = stampFrom(full.number) }
         return o
     }
@@ -377,7 +377,7 @@ func stampFrom(_ epoch: Double?) -> String {
             }
         }
         guard let c = cur else { return GameStamina(error: "终末地的理智没认出来：" + keys.prefix(6).joined(separator: "、")) }
-        var o = GameStamina(current: Int(c), max: top.map { Int($0) })
+        var o = GameStamina(current: safeInt(c), max: safeInt(top))
         if let f = full, f != 0, c < (top ?? .infinity) { o.fullAt = stampFrom(f) }
         return o
     }
@@ -433,9 +433,9 @@ func stampFrom(_ epoch: Double?) -> String {
             let full = jsNumber(e["refreshTimeStamp"]) ?? 0, total = jsNumber(e["total"]) ?? .nan
             let cur = jsNumber(curV) ?? .nan
             let live: Double = full > now ? Swift.max(cur, total - ((full - now) / 360).rounded(.up)) : (full > 0 ? total : cur)
-            func int(_ v: JSONValue?) -> Int? { jsNumber(v).flatMap { $0.isFinite ? Int($0) : nil } }
+            func int(_ v: JSONValue?) -> Int? { safeInt(jsNumber(v)) }
             let shown = Swift.min(total, live)
-            var o = WuwaStamina(waveplates: shown.isFinite ? Int(shown) : nil, max: total.isFinite ? Int(total) : nil,
+            var o = WuwaStamina(waveplates: safeInt(shown), max: safeInt(total),
                                 reserve: int(st["cur"]), reserveMax: int(st["total"]),
                                 weekly: int(wk["cur"]), weeklyMax: int(wk["total"]),
                                 activity: int(lv["cur"]), activityMax: int(lv["total"]))

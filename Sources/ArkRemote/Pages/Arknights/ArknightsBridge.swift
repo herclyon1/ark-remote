@@ -104,7 +104,7 @@ enum ArknightsField: CaseIterable {
     /// Puts a JSON value (machine or pending) into the page's typed field.
     func apply(_ v: JSONValue, to data: inout ArknightsPageData) {
         // view.js:503: null shows as an empty box.
-        let n = v.isNull ? "" : (v.number.map { String(Int($0)) } ?? v.jsString)
+        let n = v.isNull ? "" : (safeInt(v.number).map { String($0) } ?? v.jsString)
         switch self {
         case .stage: data.stage = v.isNull ? "" : v.jsString
         case .medicineNumb: data.medicineNumb = n
