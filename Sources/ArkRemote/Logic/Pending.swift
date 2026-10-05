@@ -153,12 +153,22 @@ struct PendingBar: Sendable, Equatable {
             let at = p.resentAt ?? p.sentAt
             // pending.js:58-59: past 10 h the mailbox (12 h) may have dropped it; resent only by a tap, never automatically
             if Self.isStale(p) { return .sent(text: "没回执 · 已寄出 \(Self.hhmm(at))") }
-            let fresh = relay.snapAt.map { Double(nowSec() - $0) < Live.freshMs / 1000 } ?? false
-            return .sent(text: "已寄出 \(Self.hhmm(at)) · \(fresh ? "几秒内回执" : "机器开机后生效")")
+            return .sent(text: "已寄出 \(Self.hhmm(at)) · \(waitNote)")
         }
         if editing { return nil }
         guard let a = acked[key], nowSec() - a.at <= 24 * 3600 else { return nil }
         return .applied(text: "已应用 \(Self.hhmm(a.at))")
+    }
+
+    /// What happens to a sent change now (审查 B9: the bar always said 「机器开机后生效」, the row 「几秒内回执」 on any state
+    /// younger than 3 min, running or not). Machine on (heartbeat, or a state younger than Live.freshMs) and the fresh state
+    /// lists a script or game running → the relay holds the order until the run ends (relay change by 中继二, the 现在在跑
+    /// card's 「推迟到跑完再生效」); on and idle → a receipt within seconds; else → at the next boot.
+    var waitNote: String {
+        let fresh = relay.snapAt.map { Double(nowSec() - $0) < Live.freshMs / 1000 } ?? false
+        guard Live.shared.alive || fresh else { return "机器开机后生效" }
+        let running = fresh && !(relay.snap?["run"]?["在跑的"]?.array ?? []).isEmpty
+        return running ? "机器在跑，跑完再生效" : "几秒内回执"
     }
 
     /// pending.js:58: no receipt for more than 10 h since the last send (the resend when there is one).
@@ -188,7 +198,7 @@ struct PendingBar: Sendable, Equatable {
         let bad = items.values.filter { $0.mismatchAt != nil }.count
         let text = bad > 0
             ? "\(bad) 项改动机器没接受（见红字）" + (n - bad > 0 ? "，另 \(n - bad) 项还在等回执" : "")
-            : "\(n) 项改动已寄出 · 机器开机后生效"
+            : "\(n) 项改动已寄出 · \(waitNote)"
         return PendingBar(text: text, hasMismatch: bad > 0)
     }
 
