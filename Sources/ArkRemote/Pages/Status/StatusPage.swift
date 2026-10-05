@@ -332,7 +332,9 @@ struct StatusPage: View {
                 // view.js:396-398: the field sits beside its title, the explanation under the title (web .row: label + .hint left,
                 // input.short right, index.html:488 72–120 px wide)
                 HStack(spacing: 12) {
-                    rowTitle("改成刷到几点", "提前或延后都行，填 21:00 这种。已经过了的时刻＝立刻收工")
+                    // echofarm.py retime (363-384) resolves the time like a start: one already past is tomorrow's (审查 A2: the
+                    // old 「已经过了的时刻＝立刻收工」 sent a farm on for another day); stopping now is 「提前收工」
+                    rowTitle("改成刷到几点", "提前或延后都行，填 21:00 这种。已经过了的时刻算明天；要马上停按「提前收工」")
                     // view.js:398 #efnew value = the current 到; :1235 data-time: a bad entry rolls back with a toast when it is left
                     TextField(ef.until, text: $echoNewUntil)
                         .onAppear { if echoNewUntil.isEmpty { echoNewUntil = ef.until } }

@@ -92,8 +92,13 @@ enum StatusCommands {
                 relay.showToast("时刻填成 08:30 这种")   // view.js:1239
                 return
             }
+            // echofarm.py retime → resolve_until (114-124): a time not after the machine's clock now is tomorrow's (审查 A2)
+            let past = v <= machineNowHHMM()
             ask.wrappedValue = StatusAsk(
-                title: "改收工时刻？", message: "把收工时刻改成 \(v)（机器时间）？", ok: "改",
+                title: "改收工时刻？",
+                message: past ? "机器时间现在已过 \(v)，会算成明天 \(v) 才收工。要马上停，按「提前收工」。"
+                    : "把收工时刻改成 \(v)（机器时间）？",
+                ok: "改",
                 body: .object(["action": .string("echo_farm_until"), "until": .string(v)]), okText: "收工时刻已改")
         }
         a.stopEchoFarm = {
