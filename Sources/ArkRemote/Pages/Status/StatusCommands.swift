@@ -61,6 +61,12 @@ enum StatusCommands {
         }
         a.refresh = { Task { await Live.shared.ping() } }
         a.stopAll = {
+            // the relay drops an estop read from the boot backlog (boot_stages.py:534-546 LIVE_ONLY_ACTIONS): sent while the
+            // machine is off it never runs, and the page waited 6 h for its receipt (审查 B8)
+            if data.machineOff {
+                ask.wrappedValue = StatusAsk.notice("机器关着", "现在没有在跑的东西。关机时按的「停止一切」开机后也不会执行，所以这次没有发。")
+                return
+            }
             ask.wrappedValue = StatusAsk(
                 title: "停止一切？", message: "停掉现在在跑的：队列、脚本和游戏。不动排班、不动任何设置，下一趟照常。回执会告诉你停干净没有。",
                 ok: "停止", destructive: true,
@@ -81,6 +87,13 @@ enum StatusCommands {
                 return
             }
             let nm = statusBosses.first(where: { $0.index == boss })?.name ?? "第 \(boss) 个"
+            // sent while the machine is off it ran at the next boot, with the time resolved at that moment: 08:30 asked at
+            // 23:00 became the next day's 08:30, a farm of ~24 h over the morning shift (审查 A3; boot_stages.py:692-694,
+            // echofarm.py:329 → 114-124). The relay is to refuse a stale one; the App does not send it at all.
+            if data.machineOff {
+                ask.wrappedValue = StatusAsk.notice("机器关着", "刷声骸要机器开着才能开始。关机时发出的要等下次开机才执行，那时收工时刻按开机那一刻重新算，可能一刷就是一整天。开机后再按。")
+                return
+            }
             ask.wrappedValue = StatusAsk(
                 title: "开始刷？", message: "刷「\(nm)」到机器时间 \(t) 为止？期间脚本会一直在打，别的任务不跑。", ok: "开始刷",
                 body: .object(["action": .string("echo_farm"), "confirmed": .bool(true), "boss": .int(boss),

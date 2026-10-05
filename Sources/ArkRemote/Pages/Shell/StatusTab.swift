@@ -48,10 +48,14 @@ struct StatusTab: View {
                         Button(a.ok, role: .cancel) {}
                     } else {
                         Button(a.ok, role: a.destructive ? .destructive : nil) {
-                            if a.isEstop { estopAt = nowSec() }
+                            // the press time, kept only once the order went out: set before the send, a failed one showed
+                            // 「已下令停止」 beside 「发不出去」 (审查 B8)
+                            let pressed = nowSec()
                             Task {
                                 // view.js oneShot: a send that fails is the 「发不出去」 alert with the reason, not a toast
-                                if let why = await StatusCommands.send(a) {
+                                let why = await StatusCommands.send(a)
+                                if a.isEstop && why == nil { estopAt = pressed }
+                                if let why {
                                     // an instant failure (no mailbox set) must not land while this alert is still closing
                                     try? await Task.sleep(nanoseconds: 400_000_000)
                                     ask = StatusAsk.notice("发不出去", why)

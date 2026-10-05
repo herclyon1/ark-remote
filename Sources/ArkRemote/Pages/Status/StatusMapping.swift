@@ -83,6 +83,8 @@ extension StatusData {
         }
         d.online = live.alive
         d.dotOn = relay.statusState == "on"   // view.js setStatus(text, state) → #dot2 class (live.js:65-66), not the heartbeat alone
+        // "off" also marks the PIN-mismatch line (StatusTab); only the 「关机 · …」 lines are the machine being off
+        d.machineOff = relay.statusState == "off" && st.hasPrefix("关机")
         d.refreshing = live.busy
 
         // notices
