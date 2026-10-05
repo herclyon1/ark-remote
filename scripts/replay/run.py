@@ -258,6 +258,8 @@ class Runner:
             self.drv.clear_field(opts.get("clear", 12))
             if rest[1]:
                 self.drv.type(rest[1])
+                if self.drv.platform == "ios":
+                    self.check_field_text(target, rest[1], opts.get("clear", 12))
         elif kind == "type":
             self.drv.type(rest[0])
         elif kind == "enter":
@@ -270,6 +272,15 @@ class Runner:
         elif kind == "swipe":
             for _ in range(rest[1] if len(rest) > 1 else 1):
                 self.scroll(rest[0])
+        elif kind == "bottom":
+            # ("bottom", most): scroll down until the screen stops changing (the page end), at most `most` swipes
+            prev = None
+            for _ in range(rest[0] if rest else 8):
+                self.scroll("up")
+                sig = [(n["label"], n["y"]) for n in self.dump(True)["nodes"] if n["label"] and self.on_screen(n)]
+                if sig == prev:
+                    break
+                prev = sig
         elif kind == "top":
             for _ in range(rest[0] if rest else 5):
                 self.scroll("down")
@@ -315,6 +326,26 @@ class Runner:
             self.gate_trials(*rest)
         elif kind == "dismiss":
             self.dismiss()
+        elif kind in ("until", "gone"):
+            # ("until" | "gone", sel, seconds[, {"region": ...}]): wait for sel to show on screen / to leave it
+            if not self.wait_for(rest[0], rest[1], gone=kind == "gone", region=opts_of(rest).get("region", "any")):
+                raise StepFail(f"等了 {rest[1]} 秒「{sel_text(rest[0])}」{'还在' if kind == 'gone' else '没出现'}；屏上：{self.seen()}")
+        elif kind == "nokb":
+            # ("nokb", seconds): put the keyboard away (if up) and wait until it has left the screen
+            self.wait_no_keyboard(rest[0] if rest else 5)
+        elif kind == "retry":
+            # ("retry", tries, [actions], check): run the actions, then the check (an until / gone / nokb action);
+            # when the check fails run the actions again, at most `tries` times in all (a press lost under load)
+            for i in range(rest[0]):
+                for sub in rest[1]:
+                    self.act(sub, step)
+                try:
+                    self.act(rest[2], step)
+                    break
+                except StepFail:
+                    if i == rest[0] - 1:
+                        raise
+                    self.invalidate()
         elif kind == "pick":
             # ("pick", wheel index, value): iOS DatePicker wheels (the capsule opened first)
             res = self.drv.call(f"pick {rest[0]} {rest[1]}")[0]
@@ -659,6 +690,64 @@ class Runner:
             n = m
         return n
 
+    def wait_for(self, sel, secs, gone=False, region="any"):
+        """Poll the element tree until sel is on screen (or, gone=True, off it); False on timeout."""
+        t_end = time.time() + secs
+        while True:
+            hits = [h for h in self.find(sel, self.dump(True), region) if self.on_screen(h)]
+            if bool(hits) != gone:
+                self.invalidate()
+                return True
+            if time.time() >= t_end:
+                return False
+            time.sleep(0.3)
+
+    def seen(self, limit=140):
+        """What is on screen now (labels in tree order), for a failure line."""
+        nodes = self.dump(True)["nodes"]
+        self.invalidate()
+        labels = [n["label"] or n.get("value") or "" for n in nodes if self.on_screen(n) and n["kind"] != "Keyboard"]
+        out = "、".join(dict.fromkeys(x for x in labels if x))
+        if self.drv.platform == "ios" and self.drv.keyboard_up(nodes):
+            out = "（键盘开着）" + out
+        return out[:limit]
+
+    def wait_no_keyboard(self, secs):
+        if self.drv.platform == "android":
+            self.drv.hide_keyboard()
+            return
+        t_end, pressed = time.time() + secs, False
+        while True:
+            nodes = self.dump(True)["nodes"]
+            if not self.drv.keyboard_up(nodes):
+                self.invalidate()
+                return
+            if not pressed:
+                self.hide_keyboard()
+                pressed = True
+            if time.time() >= t_end:
+                raise StepFail(f"等了 {secs} 秒键盘没收起；屏上：{self.seen()}")
+            time.sleep(0.3)
+
+    def check_field_text(self, target, text, clear):
+        """iOS: read the field back after typing; when characters were lost or old ones stayed (seen under load:
+        「2511」 for 251), clear it and type once more; still wrong -> 不对 with what the field holds."""
+        def value_now():
+            nodes = [f for f in self.dump(True)["nodes"] if self.is_field(f) and self.on_screen(f)
+                     and abs(f["x"] - target["x"]) <= 6]
+            self.invalidate()
+            if not nodes:
+                return None
+            return (min(nodes, key=lambda f: abs(f["y"] - target["y"]))["value"] or "").strip()
+        v = value_now()
+        if v is None or v == text:
+            return
+        self.drv.clear_field(max(clear, len(v) + 4))
+        self.drv.type(text)
+        v = value_now()
+        if v is not None and v != text:
+            raise StepFail(f"框里是「{v}」，要填的是「{text}」（清掉重输过一次）")
+
     def toggle(self, sel, opts):
         n = self.locate(sel, scroll=opts.get("scroll", True))
         n = self.steady(sel, n, opts)
@@ -872,7 +961,7 @@ class Runner:
         return ok
 
 
-ACTIONS = {"tap", "tab", "toggle", "field", "type", "enter", "hidekb", "swipe", "top", "back", "wait", "relaunch", "state",
+ACTIONS = {"bottom", "until", "gone", "nokb", "retry", "tap", "tab", "toggle", "field", "type", "enter", "hidekb", "swipe", "top", "back", "wait", "relaunch", "state",
            "receipt", "clear_receipts", "hb", "remember", "gate", "gate_trials", "app_posts", "shot", "clipboard", "forget_config", "restore_config", "fluency",
            "dismiss", "pick", "tapout", "time", "see", "point", "allow_paste"}
 STEP_KEYS = {"id", "page", "say", "do", "on", "expect", "absent", "visible", "keyboard", "cmd", "nocmd", "timeout", "cmd_timeout",
@@ -953,6 +1042,10 @@ def select_steps(all_steps, platform, only=None, start=None, stop=None, offline=
         if stop and s["id"] == stop:
             break
     return out
+
+
+def opts_of(rest):
+    return rest[-1] if rest and isinstance(rest[-1], dict) else {}
 
 
 def describe(a):

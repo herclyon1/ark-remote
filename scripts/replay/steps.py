@@ -116,10 +116,11 @@ step("status.echo.go", "status", "弹窗 · 开始刷（等过 400 ms 门）→ 
      [CONFIRM_WAIT, tap("开始刷", last=True)], absent=["开始刷？"], cmd={"action": "echo_farm", "boss": 3, "until": "00:05"},
      offline={"say": "提示 · 好 → 关掉", "do": [CONFIRM_WAIT, tap("好", last=True)], "absent": [OFF_NOTE]})
 step("status.keepon.discard", "status", "下次跑完不关机 打开 → 待保存 1 项 → ✕ 放弃 → 回原样、没寄出",
-     [("toggle", "下次跑完不关机"), ("wait", 0.6), tap(DISCARD, region="top")],
+     [("retry", 2, [("toggle", "下次跑完不关机")], ("until", DISCARD, 5, {"region": "top"})), tap(DISCARD, region="top")],
      absent=["~待保存"], nocmd=2, switch={"下次跑完不关机": False})
 step("status.keepon.think", "status", "下次跑完不关机 打开 → ✓ → 确认单 → 再想想 → ✕ → 开关回到关",
-     [("toggle", "下次跑完不关机"), ("wait", 0.6), tap(SAVE, region="top"), ("wait", 1.0), tap("再想想"), ("wait", 0.8),
+     [("retry", 2, [("toggle", "下次跑完不关机")], ("until", SAVE, 5, {"region": "top"})), tap(SAVE, region="top"),
+      ("until", "再想想", 6), CONFIRM_WAIT, tap("再想想"), ("gone", "确认这次修改", 6),
       tap(DISCARD, region="top")], absent=["~待保存", "确认这次修改"], switch={"下次跑完不关机": False}, nocmd=2)
 step("status.two.pending", "status", "下次跑完不关机 + 调试模式 打开 → 标题「待保存 2 项」",
      [("toggle", "下次跑完不关机"), ("toggle", "调试模式")], expect=["~待保存 2 项"])
@@ -205,7 +206,8 @@ step("mc.minus", "monthcard", "－ → 回到 1 次", [tap(MINUS)], expect=["充
 step("mc.register.ask", "monthcard", "登记 → 弹「登记充值 1 次？」", [tap("登记", region="content")], expect=["登记充值 1 次？"])
 step("mc.register.cancel", "monthcard", "取消 → 没寄出", [CONFIRM_WAIT, tap("取消", last=True)], absent=["登记充值 1 次？"], nocmd=2)
 step("mc.align.empty", "monthcard", "天数空着按「对准」→ 提示「填 0–400 的整数」",
-     [tap("对准", region="content")], expect=["~填 0–400 的整数"], timeout=5)
+     [("retry", 2, [("nokb", 5), tap("对准", region="content")], ("until", "~填 0–400 的整数", 4))],
+     expect=["~填 0–400 的整数"], timeout=5)
 step("mc.days", "monthcard", "天数填 15 → 收键盘（iOS 完成键）",
      [("field", "游戏里显示还剩", "15"), ("hidekb",)], keyboard=False)
 step("mc.align.ask", "monthcard", "对准 → 弹「对准为还剩 15 天？」", [tap("对准", region="content")], expect=["对准为还剩 15 天？"])
@@ -306,7 +308,7 @@ step("ww.tacet", "wuwa", "刷第几个无音区（安卓旧闪退点）→ 选�
 step("ww.tacet.pick", "wuwa", "选第 5 个 → ✓ → 待保存 1 项",
      [tap("~雪落无声之愿"), ("wait", 0.4), tap(SAVE, region="top")], expect=["~待保存 1 项"])
 step("ww.boss.bad", "wuwa", "周本填 251 → ✓ → 寄出 → 挡下「要填 1–20」（寄出前校验，什么也不发）",
-     [("field", "周本打第几个", "251"), ("hidekb",), tap(SAVE, region="top"), ("wait", 1.0), tap(SEND_N)],
+     [("field", "周本打第几个", "251"), ("nokb", 5), tap(SAVE, region="top"), ("until", SEND_N, 6), CONFIRM_WAIT, tap(SEND_N)],
      expect=["~要填 1–20", "~一项都没寄出"], timeout=6, nocmd=2)
 step("ww.boss.fix", "wuwa", "好 → 周本改 13 → 待保存 2 项",
      [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.5), ("field", "周本打第几个", "13"), ("hidekb",)], expect=["~待保存 2 项"])
@@ -338,9 +340,12 @@ step("ph.share", "phone", "分享诊断记录 → 「诊断记录已生成」单
 step("ph.share.sys", "phone", "单里「分享」→ 系统分享面板 → 取消 → 不闪退、单还在（62ba009）",
      [tap("分享", last=True), ("wait", 2.5), ("back",), ("wait", 5)], expect=["诊断记录已生成"], timeout=10,
      ios={"say": "单里「分享」→ 系统分享面板 → 点面板外面 → 「分享已取消」、不闪退、单还在（62ba009）",
-          "do": [CONFIRM_WAIT, tap("分享", last=True), ("wait", 2.5), ("point", 0.5, 0.44), ("wait", 1.2)],
+          # while the share panel is up the app's tree hides the 诊断记录 sheet: its title gone = panel up, back = closed
+          "do": [CONFIRM_WAIT, tap("分享", last=True), ("gone", "诊断记录已生成", 8), ("wait", 0.8),
+                 ("retry", 3, [("point", 0.5, 0.44)], ("until", "诊断记录已生成", 4))],
           "expect": ["诊断记录已生成", "~分享已取消"]})
-step("ph.share.close", "phone", "关闭 → 回手机页", [tap("关闭", last=True)], absent=["诊断记录已生成"], expect=["运行自检"])
+step("ph.share.close", "phone", "关闭 → 回手机页", [("until", "关闭", 6), tap("关闭", last=True)], absent=["诊断记录已生成"],
+     expect=["运行自检"])
 step("ph.copylink", "phone", "复制免输入链接 → 「链接已复制」", [tap("复制免输入链接")], expect=["~链接已复制"], timeout=5)
 step("ph.paste.bad", "phone", "粘贴密钥串 填乱码 → 存 → 「没存上」",
      [tap("粘贴密钥串"), ("wait", 1.0), ("field", {"t": "", "kind": ["TextField", "TextView", "EditText"]}, "zzz"), tap("存")],
@@ -354,27 +359,27 @@ step("ph.paste.close", "phone", "好 → 提示和粘贴单一起关掉，回手
      [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.8)], expect=["页面版本"], absent=["没存上"])
 DIAG_BTN = "就是这里"
 step("diag.bottom.phone", "diag", "诊断开 · 手机页滑到底 → 最后一行在红钮「就是这里」上面（ce8ebc3）",
-     [("swipe", "up", 4), ("wait", 0.6)], last_above=DIAG_BTN, on="ios")
+     [("bottom", 4)], last_above=DIAG_BTN, on="ios")
 step("diag.bottom.status", "diag", "诊断开 · 状态根页滑到底 → 「查看全部」在红钮上面",
-     [("tab", "状态"), ("wait", 0.8), ("swipe", "up", 8), ("wait", 0.6)], last_above=DIAG_BTN, expect=["~查看全部"], on="ios")
+     [("tab", "状态"), ("wait", 0.8), ("bottom", 8)], last_above=DIAG_BTN, expect=["~查看全部"], on="ios")
 step("diag.bottom.all", "diag", "诊断开 · 点「查看全部」→ 进回执页，不弹诊断单子",
      [tap("~查看全部", scroll=False)], expect=["回执"], absent=["诊断记录已生成", STATUS_ROOT], on="ios")
 step("diag.bottom.receipts", "diag", "诊断开 · 回执页滑到底 → 最后一行在红钮上面",
-     [("swipe", "up", 8), ("wait", 0.6)], last_above=DIAG_BTN, on="ios")
+     [("bottom", 8)], last_above=DIAG_BTN, on="ios")
 step("diag.bottom.ark", "diag", "诊断开 · 方舟滑到底 → 最后一行在红钮上面",
-     [("tab", "状态"), ("tab", "方舟"), ("wait", 0.8), ("swipe", "up", 6), ("wait", 0.6)], last_above=DIAG_BTN, on="ios")
+     [("tab", "状态"), ("tab", "方舟"), ("wait", 0.8), ("bottom", 6)], last_above=DIAG_BTN, on="ios")
 step("diag.bottom.ef", "diag", "诊断开 · 终末地根页滑到底 → 最后一行在红钮上面",
-     [("tab", "终末地"), ("wait", 0.8), ("swipe", "up", 8), ("wait", 0.6)], last_above=DIAG_BTN, on="ios")
+     [("tab", "终末地"), ("wait", 0.8), ("bottom", 8)], last_above=DIAG_BTN, on="ios")
 step("diag.bottom.ww", "diag", "诊断开 · 鸣潮滑到底 → 最后一行在红钮上面",
-     [("tab", "鸣潮"), ("wait", 0.8), ("swipe", "up", 6), ("wait", 0.6)], last_above=DIAG_BTN, on="ios")
+     [("tab", "鸣潮"), ("wait", 0.8), ("bottom", 6)], last_above=DIAG_BTN, on="ios")
 step("ph.diag.off", "phone", "诊断记录关掉 → 多出的行收起", [("tab", "手机"), ("top", 4), ("toggle", "诊断记录")],
      absent=["运行自检", "就是这里"])
 step("diag.off.status", "diag", "诊断关 · 状态根页滑到底 → 最后一行贴着底栏（没有多出的空白）",
-     [("tab", "状态"), ("wait", 0.8), ("swipe", "up", 8), ("wait", 0.6)], last_bottom=[860, 880], absent=[DIAG_BTN], on="ios")
+     [("tab", "状态"), ("wait", 0.8), ("bottom", 8)], last_bottom=[860, 880], absent=[DIAG_BTN], on="ios")
 step("diag.off.ark", "diag", "诊断关 · 方舟滑到底 → 最后一行贴着底栏",
-     [("tab", "方舟"), ("wait", 0.8), ("swipe", "up", 6), ("wait", 0.6)], last_bottom=[860, 880], on="ios")
+     [("tab", "方舟"), ("wait", 0.8), ("bottom", 6)], last_bottom=[860, 880], on="ios")
 step("diag.off.ef", "diag", "诊断关 · 终末地根页滑到底 → 最后一行贴着底栏",
-     [("tab", "终末地"), ("wait", 0.8), ("swipe", "up", 8), ("wait", 0.6)], last_bottom=[860, 880], on="ios")
+     [("tab", "终末地"), ("wait", 0.8), ("bottom", 8)], last_bottom=[860, 880], on="ios")
 step("d39.ph.top", "d39", "D39：手机页滑到底再点「手机」→ 回顶",
      [("tab", "手机"), ("wait", 0.8), ("swipe", "up", 4), ("tab", "手机"), ("wait", 1.2)], visible=["页面版本"])
 

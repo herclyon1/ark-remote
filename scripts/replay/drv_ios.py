@@ -67,7 +67,7 @@ class IOSDriver:
         self.size = (402, 874)
 
     # ---- simctl
-    def simctl(self, *a, check=False, timeout=60):
+    def simctl(self, *a, check=False, timeout=180):
         return subprocess.run(["xcrun", "simctl", *a], capture_output=True, text=True, timeout=timeout, check=check)
 
     def install(self, path):
@@ -150,11 +150,31 @@ class IOSDriver:
             self._defaults("delete", BUNDLE, key)
 
     def delete_defaults(self, keys):
+        # one export + one import per domain instead of one `simctl spawn` per key: under memory pressure a spawn took
+        # 8-60 s (10-06 00:2x, swap full), and 2 x 12 deletes timed the run out before the first step
         path = self._container_prefs()
-        for k in keys:
-            if path:
-                self._defaults("delete", path, k)
-            self._defaults("delete", BUNDLE, k)
+        for dom in ([path] if path else []) + [BUNDLE]:
+            r = self._defaults("export", dom, "-")
+            if r.returncode:
+                continue   # no such domain yet
+            try:
+                d = plistlib.loads(r.stdout.encode("utf-8"))
+            except Exception:
+                d = None
+            if not isinstance(d, dict):
+                for k in keys:
+                    self._defaults("delete", dom, k)
+                continue
+            if not any(k in d for k in keys):
+                continue
+            for k in keys:
+                d.pop(k, None)
+            # `defaults import` merges into the domain, so the domain is emptied first and the rest written back
+            self._defaults("delete", dom)
+            r = subprocess.run(["xcrun", "simctl", "spawn", self.udid, "defaults", "import", dom, "-"],
+                               input=plistlib.dumps(d), capture_output=True, timeout=180)
+            if r.returncode:
+                raise RuntimeError(f"defaults import {dom}: {r.stderr[-300:]!r}")
 
     def clear_clipboard(self):
         # an EMPTY pasteboard (simctl pbcopy always leaves a string): the app reads a #k= link from the clipboard on
