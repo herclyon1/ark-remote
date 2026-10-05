@@ -139,6 +139,11 @@ struct DiagOverlay: View {
     private static let tabBar: CGFloat = 49
     #endif
     private static let dark = Color(red: 28 / 255, green: 28 / 255, blue: 30 / 255)
+    private static let markLift: CGFloat = 47   // the red button's bottom above the tab bar
+    private static let markSize: CGFloat = 64
+    /// How far above the tab bar the overlay reaches: the red button's top (the #diagline under it is lower, tabBar + 8
+    /// and one caption line; the word panel opens only on a tap). DiagRoom gives the pages this much bottom room.
+    static let reach: CGFloat = markLift + markSize
 
     var body: some View {
         let ui = DiagUI.shared
@@ -173,12 +178,12 @@ struct DiagOverlay: View {
                         Text("就是这里")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Color.white)
-                            .frame(width: 64, height: 64)
+                            .frame(width: Self.markSize, height: Self.markSize)
                             .background(Circle().fill(Color(red: 1, green: 59 / 255, blue: 48 / 255)))
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.trailing, 12).padding(.bottom, Self.tabBar + 47)
+                .padding(.trailing, 12).padding(.bottom, Self.tabBar + Self.markLift)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
         }
@@ -203,5 +208,31 @@ struct DiagOverlay: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Bottom room under each tab's pages while 诊断记录 is on, so the last row scrolls up past DiagOverlay (the notice line
+/// and the red button sat over 状态 「查看全部」 and 鸣潮 「周本打第几个」 with nothing to scroll them clear, test pass 3).
+/// On each tab's NavigationStack (ContentView.tabs), so pushed pages get it too. A ViewModifier, not a wrapper view, so
+/// the stack's .tabItem / .tag stay on the TabView's direct child; DiagUI.shared.on is read here, in body(content:),
+/// because a read in ContentView's body does not redraw the tab roots (TopNotices, Logic/AppUpdate.swift).
+struct DiagRoom: ViewModifier {
+    func body(content: Content) -> some View {
+        let on = DiagUI.shared.on
+        #if os(Android)
+        // skip-ui has no safeAreaInset / safeAreaPadding (SafeArea.swift:73-97, unavailable). contentMargins is an
+        // environment value (ScrollView.swift:322-336 → _contentMargins) that List adds to its LazyColumn contentPadding
+        // (List.swift:290-294); every tab page is a List / Form. It also reaches Lists in sheets shown from a page
+        // (a blank gap at their end while 诊断记录 is on; the sheet covers the overlay anyway). 0 adds nothing.
+        content.contentMargins(.bottom, on ? DiagOverlay.reach : 0)
+        #else
+        // a bottom safe-area inset: the List scrolls its last row above it and still draws under it; sheets do not
+        // inherit it (same pattern as the top bar in TopNotices)
+        content.safeAreaInset(edge: .bottom, spacing: 0) {
+            if on {
+                Color.clear.frame(height: DiagOverlay.reach).allowsHitTesting(false)
+            }
+        }
+        #endif
     }
 }

@@ -530,7 +530,17 @@ struct EWSaveBar: ViewModifier {
                         }
                     }
                 }
+                #if os(Android)
+                // one detent: skip-ui keeps only detents.first ("TODO: Add support for multiple detents",
+                // Layout/Presentation.swift:1186-1194), and SkipSwiftUI fills that list by iterating the Swift Set
+                // (skip-fuse-ui Layout/Presentation.swift:418-427), so .medium or .large wins by hash order. The detent is
+                // a top spacer (screenHeight / 2 for .medium, the top bar + 44 otherwise, Presentation.swift:148-160)
+                // read from a preference whose value before collection is .large (:815-820); a recomposition under a
+                // press then dropped the sheet to half height and 寄出 out from under the finger (test pass 3, gate-t5)
+                .presentationDetents([.large])
+                #else
                 .presentationDetents([.medium, .large])
+                #endif
             }
             // view.js:3007: ask("有改动没发出去", …, "好", false, { single: true })
             .alert("有改动没发出去", isPresented: Binding(get: { failNote != nil }, set: { if !$0 { failNote = nil } })) {

@@ -128,6 +128,7 @@ struct ContentView: View {
             NavigationStack(path: $statusPath) {
                 StatusTab().noticed()
             }
+            .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
             .tabItem { Label { Text("状态") } icon: { Image("tab-status", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.status)
 
@@ -135,6 +136,7 @@ struct ContentView: View {
             NavigationStack(path: $arknightsPath) {
                 ArknightsTab().noticed()
             }
+            .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
             .tabItem { Label { Text("方舟") } icon: { Image("tab-arknights", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.arknights)
             }
@@ -143,6 +145,7 @@ struct ContentView: View {
             NavigationStack(path: $endfieldPath) {
                 EndfieldTab().noticed()
             }
+            .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
             .tabItem { Label { Text("终末地") } icon: { Image("tab-endfield", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.endfield)
             }
@@ -151,6 +154,7 @@ struct ContentView: View {
             NavigationStack(path: $wuwaPath) {
                 WuwaTab().noticed()
             }
+            .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
             .tabItem { Label { Text("鸣潮") } icon: { Image("tab-wuwa", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.wuwa)
             }
@@ -164,6 +168,7 @@ struct ContentView: View {
                     .modifier(EWSaveBar(title: "游戏机遥控"))
                     .noticed()
             }
+            .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
             .tabItem { Label { Text("手机") } icon: { Image("tab-phone", bundle: assetBundle).tabIconFrame() } }
             .tag(ContentTab.phone)
         }
