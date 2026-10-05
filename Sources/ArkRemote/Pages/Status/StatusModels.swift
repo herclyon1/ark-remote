@@ -48,7 +48,11 @@ struct StatusReceipt: Hashable, Identifiable {
     /// view.js rcNote: a skip receipt that no longer holds, drawn grey with this under it
     /// (「已被 HH:MM 的「跳过早班」取代」 / 「机器现在：早班今天照常」).
     var note: String? = nil
-    var id: String { at + text }
+    /// how many earlier rows (newest first) carry the same at + text: receipts stamp only the minute (modes.py:584 %m-%d %H:%M),
+    /// so one command run twice in a minute gives two equal rows, and skip-ui keys a List's rows by ForEach id, so two equal
+    /// ids crash its LazyColumn ("Key … was already used"; StatusPage planRows has the same trap). Set in StatusData.from.
+    var dup = 0
+    var id: String { dup == 0 ? at + text : at + text + "#\(dup)" }
 
     /// view.js rcWhen(r, at): 「HH:MM 发出 · <at> 执行」 when the phone's send time differs from the run's; the send's date
     /// shows only when it is another day. `at` is the time as the row shows it (full on the 状态 page, HH:MM in 回执).

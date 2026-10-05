@@ -182,6 +182,13 @@ extension StatusData {
             StatusReceipt(ok: r["ok"]?.truthy ?? false, text: r["text"]?.jsString ?? "", at: r["at"]?.jsString ?? "",
                           sent: r["sent"]?.jsString ?? "", action: r["action"]?.jsString ?? "")
         }
+        var idSeen: [String: Int] = [:]   // StatusReceipt.dup: equal minute + text must not give equal ForEach ids
+        for i in d.receipts.indices {
+            let k = d.receipts[i].at + d.receipts[i].text
+            let n = idSeen[k] ?? 0
+            d.receipts[i].dup = n
+            idSeen[k] = n + 1
+        }
         // view.js:418-438: a skip receipt is the machine's answer at that moment, not what holds now. Per day and queue only
         // the last successful skip / unskip stays; earlier ones go grey with what replaced them, and a today's one that the
         // snapshot's 「今天跳过队列」 contradicts goes grey with what holds now. The queue is the first 「…」 in the text.
