@@ -337,7 +337,10 @@ struct ArknightsTextRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(verbatim: label)
+            // a stage code (1-7, CE-6): an auto-capital or an autocorrection made it a code the relay's pattern refuses or
+            // another stage (edge audit 30); the same input traits as the setup screen's mailbox field
             TextField(label, text: $text)
+                .setupPlainInput()
         }
     }
 }
@@ -358,7 +361,16 @@ struct ArknightsNumberRow: View {
     @ViewBuilder private var numberField: some View {
         let field = TextField(label, text: Binding(
             get: { text },
-            set: { text = $0.filter { $0.isNumber } }
+            // ASCII digits only, full-width ones (a Chinese keyboard's １２) turned into them: isNumber let １２ in,
+            // Int() could not read it and the field went out as null (edge audit 31)
+            set: { typed in
+                var out = ""
+                for s in typed.unicodeScalars {
+                    let v = (0xFF10...0xFF19).contains(s.value) ? s.value - 0xFEE0 : s.value   // ０-９ → 0-9
+                    if (0x30...0x39).contains(v), let d = Unicode.Scalar(v) { out.unicodeScalars.append(d) }
+                }
+                text = out
+            }
         ))
         #if os(macOS)
         field
