@@ -53,7 +53,9 @@ struct ContentView: View {
     /// taps always display the root view of the tab, regardless of which tab was previously selected. This is true even if
     /// the tab was already selected." skip-ui does neither: TabView.swift:391-398 onItemClick only writes the tag back to
     /// the selection even for the tab already shown, so this `set` sees the same value and does it here. iOS scrolled the
-    /// 状态 root to the top natively on the simulator; doing it here as well is a second scroll to the same place.
+    /// 状态 root to the top natively on the iOS 27 simulator (scrolled down, tapped 状态: back at the top), so the scroll is
+    /// Android only: a second scrollTo(first row) on iOS could land after the native one and push a first section's
+    /// header out of sight. Clearing the path stays on both.
     private var selection: Binding<ContentTab> {
         Binding(get: { shown(tab) ? tab : .status }, set: { new in
             let current = shown(tab) ? tab : .status
@@ -65,6 +67,15 @@ struct ContentView: View {
     /// The pushed page goes (the path back to empty pops skip-ui's back stack: Navigation.swift:1111-1161 navigateToPath,
     /// run from didCompose :947-956 on every recompose), else the root page is told to scroll to its top.
     private func reselect(_ t: ContentTab) {
+        #if !os(Android)
+        switch t {
+        case .status: statusPath = NavigationPath()
+        case .arknights: arknightsPath = NavigationPath()
+        case .endfield: endfieldPath = NavigationPath()
+        case .wuwa: wuwaPath = NavigationPath()
+        case .phone: phonePath = NavigationPath()
+        }
+        #else
         switch t {
         case .status: if statusPath.isEmpty { statusTop += 1 } else { statusPath = NavigationPath() }
         case .arknights: if arknightsPath.isEmpty { arknightsTop += 1 } else { arknightsPath = NavigationPath() }
@@ -72,6 +83,7 @@ struct ContentView: View {
         case .wuwa: if wuwaPath.isEmpty { wuwaTop += 1 } else { wuwaPath = NavigationPath() }
         case .phone: if phonePath.isEmpty { phoneTop += 1 } else { phonePath = NavigationPath() }
         }
+        #endif
     }
 
     /// Which game tabs the shown shift has; its change is when a tab can go.
