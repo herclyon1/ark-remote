@@ -266,6 +266,10 @@ struct PinScan: Sendable, Equatable {
     var alert: AlertNote?
     /// net.js pinScan.
     var pinScan = PinScan()
+    /// The state on COS carries another PIN (cosState). Kept apart from pinScan, which latestState() zeroes and counts
+    /// from ntfy alone: a normal state is on COS and the topic holds only `state <ts> <bytes>` notices (not envelopes),
+    /// so a wrong PIN read as 「还没有过心跳」 (edge audit 24).
+    @ObservationIgnored var cosPinBad = false
 
     /// Called after `adopt` takes a newer snapshot. view.js render() does
     /// `if (Stamina.fromSnapshot(snap)) Stamina.refresh(true)`; the stamina port hooks that in here.
@@ -433,9 +437,21 @@ struct PinScan: Sendable, Equatable {
               m["kind"]?.string == "state" else { return nil }
         if m["pin"]?.jsString != cfg.pin {
             pinScan = PinScan(seen: 1, matched: 0)
+            cosPinBad = true
             return nil
         }
+        cosPinBad = false
         return try? Self.unwrap(m)
+    }
+
+    /// The status line when the PIN cannot be right (no state matched it on ntfy, or the one on COS carries another),
+    /// else nil. It points at what the App has: there is no settings screen; a 免输入链接 pasted in 「手机 › 粘贴密钥串」
+    /// replaces the mailbox and PIN (PhoneTab pasteTokens → PhoneLink.open → saveConfig).
+    func pinMismatchNote() -> String? {
+        let ntfyBad = pinScan.seen > 0 && pinScan.matched == 0
+        guard ntfyBad || cosPinBad else { return nil }
+        return (ntfyBad ? "信箱里有 \(pinScan.seen) 条消息但 PIN 对不上" : "机器存的状态 PIN 对不上")
+            + "——到「手机」页点「粘贴密钥串」，粘贴免输入链接重设"
     }
 
     /// Reads the state object once and takes it when it is newer. Called on open, on refresh and on the

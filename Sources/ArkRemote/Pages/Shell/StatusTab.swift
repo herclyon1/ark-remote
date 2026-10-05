@@ -32,8 +32,8 @@ struct StatusTab: View {
                         relay.adopt(s)
                         Pending.shared.reconcile()
                     }
-                    if relay.snap == nil && relay.pinScan.seen > 0 && relay.pinScan.matched == 0 {
-                        relay.setStatus("信箱里有 \(relay.pinScan.seen) 条消息但 PIN 对不上——检查设置里的 PIN", "off")
+                    if relay.snap == nil, let note = relay.pinMismatchNote() {
+                        relay.setStatus(note, "off")
                     }
                 } catch {
                     Live.shared.netOk = false

@@ -219,8 +219,8 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         if let b = best, let bAt = Self.atOf(b), relay.snapAt == nil || bAt > Double(relay.snapAt ?? 0) { relay.adopt(b) }
         guard let b = best, let bAt = Self.atOf(b) else {
             _ = try? await relay.latestState(since: "2h")
-            if relay.pinScan.seen > 0 && relay.pinScan.matched == 0 {
-                relay.setStatus("信箱里有 \(relay.pinScan.seen) 条消息但 PIN 对不上——检查设置里的 PIN", "off")
+            if let note = relay.pinMismatchNote() {
+                relay.setStatus(note, "off")
                 return
             }
             let lb = lastBeat()
