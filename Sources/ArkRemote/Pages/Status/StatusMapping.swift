@@ -7,6 +7,12 @@ import Foundation
 /// view.js OWNER_OF: game name in the plan text → script name in a shift's 脚本.
 let statusOwnerOf = ["明日方舟": "MAA", "终末地": "MaaEnd", "鸣潮": "OK-WW"]
 
+/// relay config.py GAME_PROCS / SCRIPT_PROCS (401-413) without .exe → what the user knows them as.
+let statusProcName = [
+    "Endfield": "终末地", "Client-Win64-Shipping": "鸣潮", "Wuthering Waves": "鸣潮启动器",
+    "dnplayer": "雷电模拟器（明日方舟）", "MAA": "MAA（明日方舟）", "MaaEnd": "MaaEnd（终末地）", "ok-ww": "OK-WW（鸣潮）",
+]
+
 /// view.js timeHHMM(s): "8:30" / "08:30" → "08:30", anything else nil.
 func statusTimeHHMM(_ s: String) -> String? {
     let p = s.trimmingCharacters(in: .whitespaces).split(separator: ":", omittingEmptySubsequences: false)
@@ -88,7 +94,17 @@ extension StatusData {
         d.refreshing = live.busy
 
         // notices
-        d.busy = (snap?["run"]?["在跑的"]?.array ?? []).compactMap { $0.string }
+        // 审查 B7: run.在跑的 is the process table at the moment of the push (phone.py:1052-1053), so it holds only while the
+        // machine is on and the state is fresh (Live.freshMs): a 2-hour-old list kept 「现在跑一趟」 refused as 「正在跑别的」
+        // after the machine was off. Its names are exe names (config.py:401-413, .exe dropped by snapshot.py:181): shown as
+        // the games and scripts they are.
+        let fresh = relay.snapAt.map { Double(nowSec() - $0) * 1000 < Live.freshMs } ?? false
+        if live.alive && fresh {
+            for n in (snap?["run"]?["在跑的"]?.array ?? []).compactMap({ $0.string }) {
+                let name = statusProcName[n] ?? n
+                if !d.busy.contains(name) { d.busy.append(name) }
+            }
+        }
         if let ef = relayObj?["刷声骸"], let until = ef["到"]?.string, !until.isEmpty {
             let from = ef["从"]?.string ?? ""
             d.echoFarm = StatusEchoFarm(name: ef["名字"]?.string ?? "?",
