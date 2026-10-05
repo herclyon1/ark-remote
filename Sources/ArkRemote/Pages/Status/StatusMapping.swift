@@ -189,7 +189,7 @@ extension StatusData {
         // 审查 B3: the tile reads 「<shift> · 下一趟 <time>」, so the time is that shift's own row (blocks.first was the plan's
         // first row whatever the shift: 「晚班 · 下一趟 09:00」), on the phone's clock (the 东京 time the plan gives, B4)
         if d.nextAt.isEmpty, let mine = blocks.first(where: { $0.queueName == d.currentQueue && !$0.time.isEmpty }) {
-            d.nextAt = mine.tokyo.isEmpty ? mine.time : mine.tokyo
+            d.nextAt = mine.shownTime
         }
         d.plan = blocks
         d.planFoot = foot
@@ -274,7 +274,7 @@ extension StatusData {
             // clock, else tomorrow's first (审查 B3), on the phone's clock (B4)
             let timed = d.plan.filter { !$0.time.isEmpty && $0.runsToday }
             let now = machineNowHHMM()
-            let next = (timed.first(where: { $0.time > now }) ?? timed.first).map { $0.tokyo.isEmpty ? $0.time : $0.tokyo } ?? ""
+            let next = (timed.first(where: { $0.time > now }) ?? timed.first).map { $0.shownTime } ?? ""
             let head = rc == nil ? "已下令停止 · 等机器回执"
                 : (rc?["ok"]?.truthy ?? false) ? "已停止 · 下一趟\(next.isEmpty ? "" : " " + next) 照常" : "没停干净 · 见下方回执"
             d.estopNote = StatusEstopNote(title: head,

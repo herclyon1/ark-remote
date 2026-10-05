@@ -265,8 +265,9 @@ struct StatusPage: View {
             if let q = b.queueName {
                 Toggle(isOn: Binding(get: { b.runsToday }, set: { actions.setRunsToday(q, $0) })) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(b.time.isEmpty ? q : "\(q) · \(b.time)")   // a skipped shift's row has no time (StatusMapping, 审查 B2)
-                        Text([b.tokyo.isEmpty ? "" : "东京 \(b.tokyo)", b.runsToday ? "今天照常" : "今天跳过，明天照常", b.after]
+                        // a skipped shift's row has no time (StatusMapping, 审查 B2); the lead time is 东京, as the tile (B4)
+                        Text(b.shownTime.isEmpty ? q : "\(q) · \(b.shownTime)")
+                        Text([b.machineNote, b.runsToday ? "今天照常" : "今天跳过，明天照常", b.after]
                                 .filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(.footnote).foregroundStyle(.secondary)
                         tagLine(StatusSwitchID.queue(q))
@@ -275,8 +276,8 @@ struct StatusPage: View {
                 .listRowBackground(rowGround(StatusSwitchID.queue(q)))
             } else {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(b.time)
-                    let sub = [b.tokyo.isEmpty ? "" : "东京 \(b.tokyo)", b.after].filter { !$0.isEmpty }.joined(separator: " · ")
+                    Text(b.shownTime)
+                    let sub = [b.machineNote, b.after].filter { !$0.isEmpty }.joined(separator: " · ")
                     if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(.secondary) }
                 }
             }

@@ -28,6 +28,11 @@ struct StatusPlanBlock: Hashable, Identifiable {
     /// The block's 「⏻ 跑完自动关机」 line (plan.py:674-675), without the mark; "" when the shift does not shut down.
     var after: String = ""
     var id: String { (queueName ?? "") + time }
+    /// The time a row leads with: the plan's 东京 time when it gives one (the page's times are the phone's clock, 审查 B4;
+    /// the tile's 「下一趟」 uses the same), else the machine's.
+    var shownTime: String { tokyo.isEmpty ? time : tokyo }
+    /// 「机器 09:00」 under it when the lead is the 东京 time, else "".
+    var machineNote: String { tokyo.isEmpty || time.isEmpty ? "" : "机器 \(time)" }
 }
 
 /// One stamina tile (明日方舟 理智 / 终末地 理智 / 鸣潮 波片).

@@ -75,7 +75,8 @@ enum StatusCommands {
         }
         a.selectQueue = { storedQueue.wrappedValue = $0 }
         a.setRunsToday = { name, on in
-            let label = data.plan.first(where: { $0.queueName == name && !$0.time.isEmpty }).map { "\(name) · \($0.time)" } ?? name
+            // the time as the row shows it (StatusPlanBlock.shownTime), so the review's 「今天不跑：早班（10:00）」 matches the row
+            let label = data.plan.first(where: { $0.queueName == name && !$0.time.isEmpty }).map { "\(name) · \($0.shownTime)" } ?? name
             let body: JSONValue = on
                 ? .object(["action": .string("unskip_today"), "queue": .string(name)])
                 : .object(["action": .string("skip_today"), "queue": .string(name), "day": .string(statusBeijingToday())])
@@ -91,7 +92,7 @@ enum StatusCommands {
             // 23:00 became the next day's 08:30, a farm of ~24 h over the morning shift (审查 A3; boot_stages.py:692-694,
             // echofarm.py:329 → 114-124). The relay is to refuse a stale one; the App does not send it at all.
             if data.machineOff {
-                ask.wrappedValue = StatusAsk.notice("机器关着", "刷声骸要机器开着才能开始。关机时发出的要等下次开机才执行，那时收工时刻按开机那一刻重新算，可能一刷就是一整天。开机后再按。")
+                ask.wrappedValue = StatusAsk.notice("机器关着", "刷声骸要机器开着才能开始：关机时发出的要等开机才执行，所以这次没有发。开机后再按。")
                 return
             }
             ask.wrappedValue = StatusAsk(
