@@ -443,10 +443,13 @@ struct EWSaveBar: ViewModifier {
     /// view.js:1619 goArmedAt: while the review lists a 今天不跑 / 今天照常跑, a tap on 寄出 in its first 400 ms is not a
     /// confirm (the 08:46 skips, 检查 09-30); the sheet stays. The web judges by when the press began (view.js:2953-2955
     /// goPressAt), so a slow press started early and let go late is no confirm either: here 寄出 stays disabled for those
-    /// 400 ms, counted from when the sheet is up (showModal), and a press that began on a disabled button never fires.
+    /// 400 ms, counted from when the sheet is up (showModal), and a press that began on a disabled button never fires
+    /// on iOS; on Android go() also checks the press's start (ReviewPress).
     @State var armed = true
     /// Bumped on each ✓, so a 400 ms wait left over from a sheet closed early cannot arm a newer one.
     @State var armGen = 0
+    /// RecKit.mono() when the 400 ms gate opened; 0 = no gate this review (nothing to skip listed).
+    @State var armedAt = 0.0
 
     private var edits: [String: EWEdit] { EWEdits.shared.items }
 
@@ -462,7 +465,9 @@ struct EWSaveBar: ViewModifier {
                     ToolbarItem(placement: .confirmationAction) {
                         Button {
                             armed = !edits.values.contains(where: EWSave.isSkip)   // view.js:1619
+                            armedAt = 0
                             armGen += 1
+                            ReviewPress.reset()
                             reviewing = true
                         } label: { Image(systemName: "checkmark") }
                             .accessibilityLabel("完成")
@@ -507,12 +512,22 @@ struct EWSaveBar: ViewModifier {
                         }
                     }
                 }
+                #if os(Android)
+                // where each press on the sheet began (ReviewPress); the sheet is its own dialog window, which the
+                // activity's touch feed (Main.kt dispatchTouchEvent) never sees
+                .simultaneousGesture(DragGesture(minimumDistance: 0)
+                    .onChanged { _ in ReviewPress.down() }
+                    .onEnded { _ in ReviewPress.up() })
+                #endif
                 .onAppear {
                     guard !armed else { return }
                     let gen = armGen
                     Task {
                         try? await Task.sleep(nanoseconds: 400_000_000)
-                        if gen == armGen { armed = true }
+                        if gen == armGen {
+                            armedAt = RecKit.mono()
+                            armed = true
+                        }
                     }
                 }
                 .presentationDetents([.medium, .large])
@@ -529,6 +544,12 @@ struct EWSaveBar: ViewModifier {
     /// #go (view.js:2954-3016): a tap in the first 400 ms while a skip is listed does nothing and the sheet stays.
     private func go() {
         guard armed else { return }
+        #if os(Android)
+        // view.js:2953-2955 judges by when the press began. On Android `.disabled` alone did not hold: of six presses begun
+        // 0.35-0.40 s after ✓ and let go after the gate opened, three sent (test pass 1, 问题 11), so the start is checked here.
+        // No recorded start (the gesture saw nothing, e.g. TalkBack's activate) falls back to `armed` alone, as before.
+        if armedAt > 0, let began = ReviewPress.began, began < armedAt { return }
+        #endif
         let pool = EWEdits.shared
         guard !pool.saving else { return }   // 2026-09-01: three taps sent three times; one flag across the tabs
         pool.saving = true
@@ -555,6 +576,24 @@ struct EWSaveBar: ViewModifier {
             content
         }
     }
+}
+
+/// When the current press on the review sheet began (Android). skip-ui's simultaneous DragGesture with minimumDistance 0
+/// reports the down itself on the Initial pass and consumes nothing (Gesture.swift:972-984 detectSimultaneousDragGestures),
+/// then every move: only the first report of a press is its start. The press's up reaches this parent (Initial pass)
+/// before the 寄出 button's click, so `began` still holds that press's start when go() runs. One review sheet is up at a
+/// time; main thread only.
+enum ReviewPress {
+    nonisolated(unsafe) static var began: Double? = nil
+    nonisolated(unsafe) static var pressing = false
+
+    static func reset() { began = nil; pressing = false }
+    static func down() {
+        guard !pressing else { return }
+        pressing = true
+        began = RecKit.mono()
+    }
+    static func up() { pressing = false }
 }
 
 /// The 库存 page (stockpile.js): sections of materials, or a loading / empty state.
