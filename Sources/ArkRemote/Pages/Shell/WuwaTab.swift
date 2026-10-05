@@ -31,7 +31,8 @@ struct WuwaTab: View {
 
     var body: some View {
         let relay = Relay.shared
-        let master = EWMaster.from(snap: relay.snap, game: Self.game)
+        // decoded once per snapshot, not per body (EWMaster.live, EWLastGood): every switch to this tab runs the body afresh
+        let master = EWMaster.live(Self.game)
         let lastGood = EWLastGood.load(Self.game)
         let bits = RelayBits(relay.snap)
         // the switch shows unsaved → sent → reported, like the config rows; the sent value stays on the switch also when the
@@ -105,6 +106,6 @@ struct WuwaTab: View {
         // view.js:576: the machine's 第几个周本, for the receipt check of a sent 周本 change (only when the relay reports it)
         let r = relay.snap?["relay"]
         if let n = (r?["周常"]?["周本"] ?? r?["周本"])?["第几个周本"]?.number { extra[Self.bossKey] = .int(Int(n)) }
-        ewSyncLive(game: Self.game, master: EWMaster.from(snap: relay.snap, game: Self.game), extra: extra)
+        ewSyncLive(game: Self.game, master: EWMaster.live(Self.game), extra: extra)
     }
 }
