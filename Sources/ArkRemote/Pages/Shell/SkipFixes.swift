@@ -1,4 +1,7 @@
 import SwiftUI
+#if !os(Android) && canImport(UIKit)
+import UIKit
+#endif
 
 // Places where the same SwiftUI code draws differently through Skip on Android, with the way around each.
 // scripts/check-android-symbols.py guards the symbol names.
@@ -138,6 +141,28 @@ struct SheetLink<Destination: View, Label: View>: View {
             // Relay.toast by its `at`, so two of them never fight.
             .overlay { ToastLayer() }
         }
+    }
+}
+
+extension View {
+    /// iOS: a 完成 key over the keyboard. The number pads (.numberPad) have no return key, and tapping blank space or
+    /// dragging the list did not hide them either: the keyboard covered the tab bar until the App was restarted (test
+    /// pass 1, 问题 3). One per page, on its List: keyboard toolbar items from several views add up. resignFirstResponder
+    /// sent to the first responder, so no page has to bind its fields' @FocusState here (their blur checks still run on
+    /// the focus change). Android's keypad has its own ✓ (IME action) and clearsFocusOnOutsideTap.
+    func keyboardDone() -> some View {
+        #if !os(Android) && canImport(UIKit)
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            }
+        }
+        #else
+        self
+        #endif
     }
 }
 

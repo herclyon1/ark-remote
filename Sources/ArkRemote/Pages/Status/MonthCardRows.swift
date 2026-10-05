@@ -147,6 +147,7 @@ struct MonthCardPage: View {
             }
         }
         .clearsFocusOnOutsideTap()
+        .keyboardDone()
         .navigationTitle("\(game)月卡")
         .alert(ask?.title ?? "", isPresented: Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })) {
             if let a = ask {

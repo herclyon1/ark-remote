@@ -65,6 +65,7 @@ struct EndfieldPage: View {
         }
         // On the List, not a Section or row (skip-ui's List finds its sections by type, MonthCardRows.swift; SwiftUI wants
         // navigationDestination outside lazy containers); in body so $values, onChange, onResend and live stay in scope.
+        .keyboardDone()
         .navigationDestination(for: EndfieldRoute.self) { route in
             switch route {
             case .stockpile:
@@ -181,6 +182,7 @@ struct EndfieldMorePage: View {
                 }
             }
         }
+        .keyboardDone()
         // the ✕ / ✓ of 「待保存」 here too, so a change made on this page is saved from it
         .modifier(EWSaveBar(title: name))
     }

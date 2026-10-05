@@ -138,6 +138,7 @@ struct WuwaPage: View {
             weeklyCard
         }
         // skip-ui animates scrollTo only inside withAnimation (List.swift:242) and ignores the anchor (ScrollView.swift:163)
+        .keyboardDone()
         .onChange(of: reselect) { withAnimation { proxy.scrollTo(topID, anchor: .top) } }
         .onChange(of: data.master.values) { _, _ in
             values = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:]

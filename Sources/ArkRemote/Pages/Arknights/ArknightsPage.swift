@@ -56,6 +56,7 @@ struct ArknightsPage: View {
         }
         // skip-ui animates scrollTo only inside withAnimation (List.swift:242) and ignores the anchor (ScrollView.swift:163);
         // Form is skip-ui's List (Form.swift:9-14), the same ScrollViewReader support
+        .keyboardDone()
         .onChange(of: reselect) {
             if let id = topID { withAnimation { proxy.scrollTo(id, anchor: .top) } }
         }

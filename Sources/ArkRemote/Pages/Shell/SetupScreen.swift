@@ -49,6 +49,7 @@ struct SetupScreen: View {
             #if os(Android)
             .topNotices()   // the update notice under the top bar (Logic/AppUpdate.swift); iOS never shows it
             #endif
+            .keyboardDone()
             .navigationTitle("第一次使用")
             .alert("剪贴板里没有免输入链接", isPresented: $noLinkShown) {
                 Button("好") {}
