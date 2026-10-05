@@ -30,7 +30,7 @@ struct StatusPage: View {
             deviceCard
             notices
             // view.js:362: the 月卡 0–5 days reminder card, after the notices and before the tiles (Pages/Status/MonthCard*.swift)
-            MonthCardReminder()
+            MonthCardReminder(today: MonthCardStore.today())
             actionTiles
             staminaSection
             // top-level conditional sections go through listSection (Pages/Shell/SkipFixes.swift): a bare `if` leaves
@@ -57,7 +57,7 @@ struct StatusPage: View {
             echoFarmSection
             machineSection
             // view.js:404: the 月卡 rows, after the 机器 section (and its config note) and before 明日安排
-            MonthCardRows()
+            MonthCardRows(today: MonthCardStore.today())
             tomorrow
             receiptsSection
         }
