@@ -54,9 +54,11 @@ enum StatusCommands {
                 return
             }
             ask.wrappedValue = StatusAsk(
-                title: "现在跑一趟？", message: "让「\(queue)」现在多跑一趟。会真的花掉理智／波片；机器关着就变成下次开机跑。",
+                title: "现在跑一趟？", message: "让「\(queue)」现在多跑一趟。会真的花掉理智／波片；机器关着的话，12 小时内开机才会跑，再晚就作废。",
                 ok: "跑一趟",
                 body: .object(["action": .string("run_now"), "confirmed": .bool(true), "queue": .string(queue)]),
+                // the mailbox keeps a message 12 hours (ntfy.sh's cache; Pending.swift isStale) and nothing tracks a one-shot
+                // order: 「下次开机跑」 promised a run that a machine off longer never got (edge audit 23)
                 okText: "已派：现在跑一趟")   // view.js:1215: one line, the confirm before it already says what happens when off
         }
         a.refresh = { Task { await Live.shared.ping() } }
