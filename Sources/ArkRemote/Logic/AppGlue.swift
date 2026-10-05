@@ -160,7 +160,10 @@ import SwiftUI
         let pb = UIPasteboard.general
         guard pb.hasStrings, pb.changeCount != clipChange else { return }
         clipChange = pb.changeCount
-        pb.detectPatterns(for: [.probableWebURL]) { r in
+        // @Sendable: UIKit calls this back on a background queue; written inside a @MainActor func the closure would
+        // otherwise be inferred main-actor isolated, and Swift 6's runtime isolation check traps (SIGTRAP on open
+        // whenever the clipboard holds text - 0.4.4 second test pass, iOS 27 simulator).
+        pb.detectPatterns(for: [.probableWebURL]) { @Sendable r in
             guard case .success(let found) = r, found.contains(.probableWebURL) else { return }
             Task { @MainActor in PhoneLink.takeClipboardLink() }
         }
