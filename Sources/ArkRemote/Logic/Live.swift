@@ -83,7 +83,14 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
     /// "I have no network", and in a weak-signal spot shows a flat 「关机」.
     var netOk = true
     /// navigator.onLine; the page sets it from the system's network state.
-    var deviceOnline = true { didSet { if deviceOnline != oldValue { netOk = deviceOnline; updateLive() } } }
+    var deviceOnline = true {
+        didSet {
+            guard deviceOnline != oldValue else { return }
+            netOk = deviceOnline
+            updateLive()
+            if deviceOnline { backOnline() }
+        }
+    }
     /// The current verdict (the 「现在在跑」 card follows it).
     var alive = false
     /// The refresh button's busy state while `ping` runs.
@@ -438,9 +445,34 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         updateLive()
     }
 
+    /// The network came back: after a spell off (a subway ride) longer than the machine's 10-minute watch lease it beats
+    /// no more, and the line read 「关机」 until the 8-minute renewal (edge audit 5). Ask at once, and read the beat on COS.
+    private func backOnline() {
+        guard foreground, relay.config != nil else { return }
+        askWatch()
+        Task { [weak self] in await self?.readCosHb() }
+    }
+
+    /// Another mailbox was taken (a pasted / opened 免输入链接, AppShell): what was shown and waited for belongs to the old
+    /// machine. Its state is no longer newer-than-checked against (Relay.adopt), its sent changes no longer wait for
+    /// a receipt, and its last beat is not this machine's (edge audit 6).
+    func mailboxChanged() {
+        relay.snap = nil
+        relay.saveCache()
+        relay.pinScan = PinScan()
+        relay.cosPinBad = false
+        pending.clearAll()
+        lastHb = 0
+        hbSeen = 0
+        UserDefaults.standard.removeObject(forKey: Self.hbSeenKey)
+    }
+
     /// live.js visibilitychange handler (also the boot sequence): stream, heartbeat history, watch.
+    /// Checks `foreground` before and after each wait: the call is queued (AppGlue.enterForeground), and a quick switch
+    /// away ran enterBackground's stop() first, so this reopened the stream and sent `watch` in the background, where
+    /// Android keeps the process and the machine kept beating into ntfy's daily quota (edge audit 20).
     func becameVisible() async {
-        guard relay.config != nil else { return }
+        guard relay.config != nil, foreground else { return }
         startLive()
         // the newest state the machine stored, once per open (no timer)
         let r = relay
@@ -451,7 +483,9 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
             }
         }
         await probeHb()
+        guard foreground else { stopLive(); return }
         await readCosHb(show: false)   // after probeHb, which sets lastHb from ntfy's last 90 s
+        guard foreground else { stopLive(); return }
         updateLive()
         askWatch()
     }

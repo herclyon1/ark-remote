@@ -188,9 +188,14 @@ struct AppShell: View {
                 default: break
                 }
             }
-            .onChange(of: Relay.shared.config != nil) { _, has in
-                // first setup: the mailbox appears while already in the foreground
-                if has && scenePhase == .active { Task { await Live.shared.becameVisible() } }
+            // the whole config, not only whether there is one: a 免输入链接 taken later (PhoneLink.open) changes the mailbox
+            // or the PIN of a config already there, and the stream kept the old topic and filtered by the old PIN
+            // (startLive keeps the cfg it opened with) until the next trip to the background (edge audit 6)
+            .onChange(of: Relay.shared.config ?? RelayConfig(topic: "", pin: "")) { old, new in
+                guard !new.topic.isEmpty else { return }
+                if !old.topic.isEmpty && old.topic != new.topic { Live.shared.mailboxChanged() }
+                // first setup or a new mailbox / PIN while in the foreground (in the background, enterForeground does it)
+                if scenePhase == .active { Task { await Live.shared.becameVisible() } }
             }
     }
 }
