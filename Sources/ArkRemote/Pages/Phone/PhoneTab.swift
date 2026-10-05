@@ -118,7 +118,7 @@ enum PhoneLink {
            let t = j["t"]?.string, !t.isEmpty, let p = j["p"].map({ $0.string ?? jsStr($0) }), !p.isEmpty {
             // the same mailbox and PIN: leave the config alone, so the page on screen is not redrawn from scratch
             let cur = Relay.shared.config
-            if cur?.topic != t.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if cur?.topic != t.trimmingCharacters(in: .whitespacesAndNewlines)
                 || cur?.pin != p.trimmingCharacters(in: .whitespacesAndNewlines) {
                 Relay.shared.saveConfig(topic: t, pin: p)
             }
