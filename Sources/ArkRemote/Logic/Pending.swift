@@ -215,12 +215,42 @@ struct PendingBar: Sendable, Equatable {
                 // pending.js:101: one line ≤ 13 at 28 pt (the native HUD never wraps); the value is on the row
                 let t = "「\(p.label)」已生效"
                 relay.showToast(t.count <= 13 ? t : "改动已生效")
-            } else if p.mismatchAt != at {
+            } else if p.mismatchAt != at && machineActed(on: p) {
                 items[key]?.mismatchAt = at
                 changed = true
             }
         }
         if changed { savePending() }
+    }
+
+    /// Whether this state can say a change did not take: the machine has a receipt of the change's action sent at or after
+    /// its (re)send (relay.最近指令, modes.py add_receipt). A newer state alone is no proof (审查 B5): the boot state goes out
+    /// before the backlog runs (boot_stages.py:688, then 689-694 one state after it), so every change made while the machine
+    /// was off read 「没生效」 for that first state — and stayed red when the second did not get out; a state pushed while
+    /// the order still waits (an order sent during a run) is the same. The receipt is written before the state after the
+    /// order (boot_stages.py:615, then :621). `sent` is the envelope's ts, the phone's clock taken just before the POST
+    /// (Net.send), while sentAt is taken after it, so the minute compared is that of sentAt − 60 s. A receipt without
+    /// `sent` (an older relay) counts by `at`, which is never before its send. A match only ever clears an item, so a
+    /// matching value is taken as applied without a receipt, as before.
+    func machineActed(on p: PendingEdit) -> Bool {
+        let action: String
+        switch p.src {
+        case "relay": action = p.body?["action"]?.string ?? ""
+        case "wb": action = "weekly_boss"
+        case "master": action = "set_master"
+        default: action = "set_config"
+        }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = machineZone
+        f.dateFormat = "MM-dd HH:mm"   // modes.py:584-587
+        let from = f.string(from: Date(timeIntervalSince1970: TimeInterval((p.resentAt ?? p.sentAt) - 60)))
+        let rcs = relay.snap?["relay"]?["最近指令"]?.array ?? []
+        return rcs.contains { r in
+            guard r["action"]?.jsString == action else { return false }
+            let s = r["sent"]?.jsString ?? ""
+            return (s.isEmpty ? (r["at"]?.jsString ?? "") : s) >= from
+        }
     }
 
     /// 「再发一次」.
