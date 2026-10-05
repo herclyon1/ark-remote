@@ -19,8 +19,9 @@ struct StatusPage: View {
     @FocusState var newTimeFocus: Bool
     /// Bumped every 30 s by a local timer so 「X 分钟前」 follows the clock (no network: view.js ago() redrawn on render).
     @State var tick = 0
-    /// A reselect of the 状态 tab at its root (ContentView.reselect, D39): scroll to the top.
-    @Environment(\.tabReselect) var reselect
+    /// A reselect of the 状态 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
+    /// redraws this page (Pages/Shell/TabReselect.swift).
+    private var reselect: Int { TabReselect.shared.status }
 
     /// The first row of the page, always drawn and in a section without a header. skip-ui's ScrollViewProxy finds ids of
     /// rows only (LazySupport.swift:250-288; a section header is a count, :283), so this is the top it can reach: the

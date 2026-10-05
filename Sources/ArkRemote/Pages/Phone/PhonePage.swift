@@ -37,8 +37,9 @@ struct PhonePage: View {
     @State var manualShown = false
     @State var pasteErr = ""
     @State var pasteErrShown = false
-    /// A reselect of the 手机 tab at its root (ContentView.reselect, D39): scroll to the top.
-    @Environment(\.tabReselect) var reselect
+    /// A reselect of the 手机 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
+    /// redraws this page (Pages/Shell/TabReselect.swift).
+    private var reselect: Int { TabReselect.shared.phone }
 
     /// The 页面版本 row: first on the page and always drawn. skip-ui's ScrollViewProxy finds ids of rows only
     /// (LazySupport.swift:250-288; a section header is a count, :283), so on Android this row lands flush under the top

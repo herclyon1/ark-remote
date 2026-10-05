@@ -99,8 +99,9 @@ struct WuwaPage: View {
     @State var values: [String: EWValue]
     @State var tacetShots: Bool
     @State var bossIndex: String
-    /// A reselect of the 鸣潮 tab at its root (ContentView.reselect, D39): scroll to the top.
-    @Environment(\.tabReselect) var reselect
+    /// A reselect of the 鸣潮 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
+    /// redraws this page (Pages/Shell/TabReselect.swift).
+    private var reselect: Int { TabReselect.shared.wuwa }
 
     private static let tacetID = "wuwa-tacet"
     private static let unreadableID = "wuwa-unreadable"

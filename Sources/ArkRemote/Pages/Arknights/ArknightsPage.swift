@@ -11,8 +11,9 @@ struct ArknightsPage: View {
     var onResend: (String) -> Void = { _ in }
     /// Paths with an unsaved edit: 「待保存」 under the row and a tinted row (view.js:1268-1275).
     var edited: Set<String> = []
-    /// A reselect of the 方舟 tab at its root (ContentView.reselect, D39): scroll to the top.
-    @Environment(\.tabReselect) var reselect
+    /// A reselect of the 方舟 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
+    /// redraws this page (Pages/Shell/TabReselect.swift).
+    private var reselect: Int { TabReselect.shared.arknights }
 
     /// The first row the page draws, worked out in the page's own order from the same conditions the sections use; nil =
     /// nothing drawn. Every section here has a header, so on Android this row lands flush under the top bar with its

@@ -22,8 +22,9 @@ struct EndfieldPage: View {
     var live: (() -> EndfieldPageData)?
 
     @State var values: [String: EWValue]
-    /// A reselect of the 终末地 tab at its root (ContentView.reselect, D39): scroll to the top.
-    @Environment(\.tabReselect) var reselect
+    /// A reselect of the 终末地 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
+    /// redraws this page (Pages/Shell/TabReselect.swift).
+    private var reselect: Int { TabReselect.shared.endfield }
 
     /// The 库存 row: first on the page, always drawn, in a section without a header. skip-ui's ScrollViewProxy finds ids of
     /// rows only (LazySupport.swift:250-288; a section header is a count, :283): the row lands flush under the top bar, the
