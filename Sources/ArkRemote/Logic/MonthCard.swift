@@ -306,7 +306,7 @@ struct MonthCardEntry: Sendable, Equatable {
         // (monthcard.py:150-156, the same rule as after()), and with no `at` it is not dropped as older. Sent with this
         // phone's `last` and `at`, two phones topping up before either synced each sent its own sum and the newest
         // replaced the other: one purchase was lost (edge audit 13).
-        let bare = add != nil && mine(g) == nil
+        let bare = add != nil && (mine(g).map { caughtUp($0, Self.fromRelay(g)) } ?? true)
         remember(g, last: last, at: at, sentAt: at)
         Relay.shared.showToast("\(g)月卡已登记")   // one line; the date and days left are on the rows
         do {
