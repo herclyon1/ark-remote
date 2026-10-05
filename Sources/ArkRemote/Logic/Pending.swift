@@ -211,6 +211,7 @@ struct PendingBar: Sendable, Equatable {
 
     /// The machine reported a state newer than the send: check each item against it.
     func reconcile() {
+        pruneAcked()   // nothing else called it: acked only grew, and every save wrote all of it (edge audit 27)
         guard let at = relay.snapAt, at != 0 else { return }
         var changed = false
         for (key, p) in items {
