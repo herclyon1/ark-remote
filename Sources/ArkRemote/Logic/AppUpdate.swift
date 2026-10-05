@@ -156,7 +156,10 @@ struct TopNotices<Content: View>: View {
         #else
         content.safeAreaInset(edge: .top, spacing: 0) {
             if let bar = Pending.shared.bar {
-                PendingBarView(bar: bar).background(.bar)
+                // ignoresSafeAreaEdges: [] — a ShapeStyle background spreads into the safe area by default
+                // (background(_:ignoresSafeAreaEdges: .all)), so the material ran up over the navigation bar and blurred
+                // out the large title on every tab while the line showed (test pass 1, 问题 2: i18 vs i26)
+                PendingBarView(bar: bar).background(.bar, ignoresSafeAreaEdges: [])
             }
         }
         #endif
