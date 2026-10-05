@@ -135,6 +135,7 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
 
     /// live.js why(err): the browser's English error text means nothing to the user.
     nonisolated static func why(_ error: Error) -> String {
+        if let l = error as? NtfyLimit { return l.errorDescription ?? "发得太频繁，被限流了" }
         if let u = error as? URLError {
             switch u.code {
             case .timedOut, .cancelled: return "等太久没回应"
@@ -150,6 +151,18 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         if m.contains("429") { return "发得太频繁，被限流了" }
         if low.contains("abort") || low.contains("timeout") || low.contains("timed out") { return "等太久没回应" }
         return m.isEmpty ? "原因不明" : m
+    }
+
+    /// The request ended because its task was cancelled (a page's .task when the page goes away), not by the network.
+    nonisolated static func isCancel(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
+    /// The failure is this side's network (why() says 「网络不通」 / 「等太久没回应」), not a refusal by ntfy (429, 5xx):
+    /// only then is the line 「先看看你这边有没有网」 (edge audit 8, 12).
+    nonisolated static func isNetwork(_ error: Error) -> Bool {
+        let w = why(error)
+        return w == "网络不通" || w == "等太久没回应"
     }
 
     // MARK: ping
@@ -313,7 +326,8 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
                     if me.lastHb > before { break }
                 }
             } catch {
-                self?.netOk = false
+                // a 429 is ntfy's quota, not our network: the verdict stays with the beats (the one on COS goes on)
+                if Self.isNetwork(error) { self?.netOk = false }
                 self?.updateLive()
             }
         }

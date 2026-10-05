@@ -190,8 +190,22 @@ struct AppError: LocalizedError, Sendable {
 /// The `e.message` of a thrown error.
 func errorMessage(_ error: Error) -> String {
     if let e = error as? AppError { return e.message }
+    if let e = error as? NtfyLimit { return e.errorDescription ?? "" }
     if let e = error as? URLError { return "URLError \(e.code.rawValue): \(e.localizedDescription)" }
     return error.localizedDescription
+}
+
+/// ntfy refused a send with 429. Its body says which limit (maa-automation relay/ark_relay/phone.py _ntfy_code, ntfy
+/// server/errors.go): 42901 the request burst, back in seconds; 42908 the day's messages per IP, back at UTC midnight
+/// ("every day at midnight (UTC)", docs.ntfy.sh/config visitor-message-daily-limit). 「歇几秒再点」 was wrong for the
+/// second, the one usually hit (edge audit 26); and a limit is not a lost network (edge audit 12).
+struct NtfyLimit: LocalizedError, Sendable {
+    let daily: Bool
+    var errorDescription: String? {
+        guard daily else { return "太频繁了，歇几秒再点（429）" }
+        let next = (nowSec() / 86400 + 1) * 86400   // the next UTC midnight, said on this phone's clock
+        return "今天信箱的发送额度用完了，\(clockHHMM(ms: Double(next) * 1000)) 恢复（429）"
+    }
 }
 
 // MARK: - HTTP
@@ -346,10 +360,9 @@ struct PinScan: Sendable, Equatable {
         guard let cfg = config else { throw AppError("还没设置信箱") }
         let msg: JSONValue = .object(["v": .int(1), "kind": .string("cmd"), "pin": .string(cfg.pin),
                                       "ts": .int(nowSec()), "body": body])
-        let (_, status) = try await httpFetch("\(ntfyBase)/\(cfg.topic)", method: "POST", body: msg.encoded())
-        if !(200..<300).contains(status) {
-            throw AppError(status == 429 ? "太频繁了，歇几秒再点（429）" : "HTTP \(status)")
-        }
+        let (data, status) = try await httpFetch("\(ntfyBase)/\(cfg.topic)", method: "POST", body: msg.encoded())
+        if status == 429 { throw NtfyLimit(daily: (try? JSONValue.parse(data))?["code"]?.number == 42908) }
+        if !(200..<300).contains(status) { throw AppError("HTTP \(status)") }
     }
 
     /// net.js readMessages(since): the `message` events of the topic. `cache: no-store` plus a changing

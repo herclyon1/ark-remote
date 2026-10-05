@@ -36,8 +36,11 @@ struct StatusTab: View {
                         relay.setStatus(note, "off")
                     }
                 } catch {
-                    Live.shared.netOk = false
-                    relay.setStatus("读不到信箱 · " + Live.why(error) + "，先看看你这边有没有网", "")
+                    // leaving the tab cancels this .task: that is no network failure (edge audit 8)
+                    if Live.isCancel(error) { return }
+                    let net = Live.isNetwork(error)
+                    if net { Live.shared.netOk = false }
+                    relay.setStatus("读不到信箱 · " + Live.why(error) + (net ? "，先看看你这边有没有网" : ""), "")
                 }
                 _ = await StaminaStore.shared.refresh()
             }
