@@ -219,20 +219,13 @@ struct DiagOverlay: View {
 struct DiagRoom: ViewModifier {
     func body(content: Content) -> some View {
         let on = DiagUI.shared.on
-        #if os(Android)
-        // skip-ui has no safeAreaInset / safeAreaPadding (SafeArea.swift:73-97, unavailable). contentMargins is an
-        // environment value (ScrollView.swift:322-336 → _contentMargins) that List adds to its LazyColumn contentPadding
-        // (List.swift:290-294); every tab page is a List / Form. It also reaches Lists in sheets shown from a page
-        // (a blank gap at their end while 诊断记录 is on; the sheet covers the overlay anyway). 0 adds nothing.
+        // contentMargins on both: an environment value that reaches the List inside the NavigationStack. On iOS a
+        // .safeAreaInset here did not (test pass 4, iOS 27: the last rows sat at the same y with 诊断记录 on and off);
+        // on Android skip-ui has no safeAreaInset / safeAreaPadding (SafeArea.swift:73-97, unavailable) and its
+        // contentMargins (ScrollView.swift:322-336 → _contentMargins) is added to the LazyColumn contentPadding
+        // (List.swift:290-294; pass 4 Android: last row 291 px = 111 pt higher with it on). Every tab page is a List /
+        // Form. It also reaches Lists in sheets shown from a page (a blank gap at their end while 诊断记录 is on; the
+        // sheet covers the overlay anyway). 0 adds nothing.
         content.contentMargins(.bottom, on ? DiagOverlay.reach : 0)
-        #else
-        // a bottom safe-area inset: the List scrolls its last row above it and still draws under it; sheets do not
-        // inherit it (same pattern as the top bar in TopNotices)
-        content.safeAreaInset(edge: .bottom, spacing: 0) {
-            if on {
-                Color.clear.frame(height: DiagOverlay.reach).allowsHitTesting(false)
-            }
-        }
-        #endif
     }
 }

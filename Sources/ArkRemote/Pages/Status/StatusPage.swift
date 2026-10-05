@@ -485,14 +485,21 @@ private struct StatusPlanGameRow: Identifiable {
 /// (view.js rcWhen); a skip receipt that no longer holds is grey with the reason under it (view.js:451-452, index.html:377
 /// `.row.stale > label{color:var(--dim)}`, `.sf.stale` dim icon).
 func receiptRow(_ r: StatusReceipt, at: String) -> some View {
-    HStack {
+    // a long time (「18:04 发出 · 10-05 18:05 执行」) goes under the text: kept on the right beside a two-line text it
+    // overran the text and the card on Android (test pass 4, receipt-row-overlap.png)
+    let when = r.when(at)
+    let below = when.contains(" 发出 · ")   // StatusModels.swift:78, the two-time form
+    return HStack {
         receiptIcon(r).fixedSize(horizontal: true, vertical: false)
         VStack(alignment: .leading, spacing: 2) {
             Text(r.text).foregroundStyle(r.note == nil ? Color.primary : Color.secondary)
             if let note = r.note { Text(note).font(.footnote).foregroundStyle(.secondary) }
+            if below { Text(when).font(.footnote).foregroundStyle(.secondary) }
         }
         Spacer()
-        Text(r.when(at)).foregroundStyle(.secondary).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+        if !below {
+            Text(when).foregroundStyle(.secondary).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+        }
     }
 }
 
