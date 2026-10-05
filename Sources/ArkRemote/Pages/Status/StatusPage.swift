@@ -142,7 +142,8 @@ struct StatusPage: View {
             Section("刷声骸") {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("正在刷「\(ef.name)」")
-                    Text(ef.from.isEmpty ? "刷到 \(ef.until) 为止" : "刷到 \(ef.until) 为止，\(ef.from) 开始")
+                    // the phone's clock, with the machine's 到 the 改收工 field below uses (审查 B4)
+                    Text("刷到 \(ef.untilLocal) 为止（机器时间 \(ef.until)）" + (ef.fromLocal.isEmpty ? "" : "，\(ef.fromLocal) 开始"))
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Button("改收工时刻") { actions.changeEchoFarmUntil(echoNewUntil.isEmpty ? ef.until : echoNewUntil) }
@@ -335,7 +336,7 @@ struct StatusPage: View {
                 HStack(spacing: 12) {
                     // echofarm.py retime (363-384) resolves the time like a start: one already past is tomorrow's (审查 A2: the
                     // old 「已经过了的时刻＝立刻收工」 sent a farm on for another day); stopping now is 「提前收工」
-                    rowTitle("改成刷到几点", "提前或延后都行，填 21:00 这种。已经过了的时刻算明天；要马上停按「提前收工」")
+                    rowTitle("改成刷到几点（机器时间）", "提前或延后都行，填 21:00 这种。已经过了的时刻算明天；要马上停按「提前收工」")
                     // view.js:398 #efnew value = the current 到; :1235 data-time: a bad entry rolls back with a toast when it is left
                     TextField(ef.until, text: $echoNewUntil)
                         .onAppear { if echoNewUntil.isEmpty { echoNewUntil = ef.until } }
@@ -438,7 +439,7 @@ struct StatusPage: View {
             Section {
                 // view.js:458 nowRow sits above the newest three
                 if let actual = data.todayActual { todayActualRow(actual) }
-                ForEach(data.receipts.prefix(3)) { r in receiptRow(r, at: r.at) }
+                ForEach(data.receipts.prefix(3)) { r in receiptRow(r, at: r.shownAt) }
                 if data.receipts.count > 3 {
                     // by value (StatusRoute.receipts; the page is built in body's navigationDestination), so a reselect can pop it
                     NavigationLink(value: StatusRoute.receipts) {
@@ -542,7 +543,7 @@ struct StatusReceiptsPage: View {
 
     private var days: [String] {
         var seen: [String] = []
-        for r in receipts { let d = String(r.at.prefix(5)); if !seen.contains(d) { seen.append(d) } }
+        for r in receipts { let d = String(r.shownAt.prefix(5)); if !seen.contains(d) { seen.append(d) } }
         return seen
     }
 
@@ -557,7 +558,7 @@ struct StatusReceiptsPage: View {
             ForEach(days, id: \.self) { d in
                 Section(dayName(d)) {
                     if d == today, let actual = todayActual { todayActualRow(actual) }
-                    ForEach(receipts.filter { $0.at.hasPrefix(d) }) { r in receiptRow(r, at: String(r.at.dropFirst(6))) }
+                    ForEach(receipts.filter { $0.shownAt.hasPrefix(d) }) { r in receiptRow(r, at: String(r.shownAt.dropFirst(6))) }
                 }
             }
         }

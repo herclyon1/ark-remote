@@ -251,7 +251,8 @@ struct ArknightsPage: View {
                 Text("明日方舟 · 周常")
             } footer: {
                 // one row: the hint goes to the footer without the 「剿灭：」 prefix (view.js:989)
-                Text("打满本周剿灭后自动停掉，下周一 04:00 自动恢复")
+                // annihilation.py:56-65 counts the week from Monday 04:00 Beijing = 05:00 Tokyo (审查 B4)
+                Text("打满本周剿灭后自动停掉，下周一 05:00（东京时间）自动恢复")
             }
         }
     }

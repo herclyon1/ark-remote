@@ -90,9 +90,12 @@ extension StatusData {
         // notices
         d.busy = (snap?["run"]?["在跑的"]?.array ?? []).compactMap { $0.string }
         if let ef = relayObj?["刷声骸"], let until = ef["到"]?.string, !until.isEmpty {
+            let from = ef["从"]?.string ?? ""
             d.echoFarm = StatusEchoFarm(name: ef["名字"]?.string ?? "?",
-                                        from: String((ef["从"]?.string ?? "").dropFirst(11)),
-                                        until: String(until.dropFirst(11)))
+                                        from: String(from.dropFirst(11)),
+                                        until: String(until.dropFirst(11)),
+                                        fromLocal: from.isEmpty ? "" : localClock(fromMachineFull: from),
+                                        untilLocal: localClock(fromMachineFull: until))
         }
 
         // shifts
@@ -205,7 +208,9 @@ extension StatusData {
         let rcs = relayObj?["最近指令"]?.array ?? []
         d.receipts = rcs.reversed().map { r in
             StatusReceipt(ok: r["ok"]?.truthy ?? false, text: r["text"]?.jsString ?? "", at: r["at"]?.jsString ?? "",
-                          sent: r["sent"]?.jsString ?? "", action: r["action"]?.jsString ?? "")
+                          sent: r["sent"]?.jsString ?? "", action: r["action"]?.jsString ?? "",
+                          atLocal: phoneStamp(fromMachine: r["at"]?.jsString ?? ""),
+                          sentLocal: (r["sent"]?.jsString).map { phoneStamp(fromMachine: $0) } ?? "")
         }
         // view.js:418-438: a skip receipt is the machine's answer at that moment, not what holds now. Per day and queue only
         // the last successful skip / unskip stays; earlier ones go grey with what replaced them, and a today's one that the
@@ -221,7 +226,7 @@ extension StatusData {
             if day == todayMD { skipToday = true }
             if !r.ok { continue }
             if let later = lastOk[key] {
-                d.receipts[i].note = "已被 \(String(later.at.dropFirst(6))) 的「\(later.action == "skip_today" ? "跳过" : "取消跳过")\(q)」取代"
+                d.receipts[i].note = "已被 \(String(later.shownAt.dropFirst(6))) 的「\(later.action == "skip_today" ? "跳过" : "取消跳过")\(q)」取代"
                 continue
             }
             lastOk[key] = r
@@ -233,7 +238,9 @@ extension StatusData {
         if (skipToday || !skipped.isEmpty) && !d.queues.isEmpty {
             d.todayActual = d.queues.map { "\($0.name) \(skipped.contains($0.name) ? "跳过" : "照常")" }.joined(separator: " · ")
         }
-        d.receiptsToday = todayMD
+        // the 回执 page groups by the phone's day (shownAt), so today's group is the phone's today
+        let md = Calendar.current.dateComponents([.month, .day], from: Date())
+        d.receiptsToday = "\(pad2(md.month ?? 0))-\(pad2(md.day ?? 0))"
 
         // 停止一切 note for 6 hours
         if estopAt > 0, nowSec() - estopAt < 6 * 3600 {
@@ -254,7 +261,7 @@ extension StatusData {
             let head = rc == nil ? "已下令停止 · 等机器回执"
                 : (rc?["ok"]?.truthy ?? false) ? "已停止 · 下一趟\(next.isEmpty ? "" : " " + next) 照常" : "没停干净 · 见下方回执"
             d.estopNote = StatusEstopNote(title: head,
-                                          receipt: rc.map { "回执 \($0["at"]?.jsString ?? "")：\($0["text"]?.jsString ?? "")" }
+                                          receipt: rc.map { "回执 \(phoneStamp(fromMachine: $0["at"]?.jsString ?? ""))：\($0["text"]?.jsString ?? "")" }
                                               ?? "等机器回执：停干净没有以回执为准")
         }
 

@@ -47,6 +47,10 @@ struct StatusReceipt: Hashable, Identifiable {
     var at: String            // "MM-DD HH:MM", when the machine acted on it
     var sent: String = ""     // "MM-DD HH:MM", the envelope's own time (modes.add_receipt sent=); older receipts have none
     var action: String = ""   // the command's action (skip_today / unskip_today / estop …)
+    /// `at` / `sent` on the phone's clock, for display only (Logic/MachineTime.swift, 审查 B4); "" = not converted, show raw.
+    /// The raw Beijing strings stay for the skip notes, the estop match and the Beijing day.
+    var atLocal: String = ""
+    var sentLocal: String = ""
     /// view.js rcNote: a skip receipt that no longer holds, drawn grey with this under it
     /// (「已被 HH:MM 的「跳过早班」取代」 / 「机器现在：早班今天照常」).
     var note: String? = nil
@@ -54,18 +58,25 @@ struct StatusReceipt: Hashable, Identifiable {
 
     /// view.js rcWhen(r, at): 「HH:MM 发出 · <at> 执行」 when the phone's send time differs from the run's; the send's date
     /// shows only when it is another day. `at` is the time as the row shows it (full on the 状态 page, HH:MM in 回执).
+    /// Both on the phone's clock (atLocal / sentLocal), as the `at` passed in.
     func when(_ at: String) -> String {
         if sent.isEmpty || sent == self.at { return at }
-        let s = String(sent.prefix(5)) == String(self.at.prefix(5)) ? String(sent.dropFirst(6)) : sent
+        let a = atLocal.isEmpty ? self.at : atLocal, sl = sentLocal.isEmpty ? sent : sentLocal
+        let s = String(sl.prefix(5)) == String(a.prefix(5)) ? String(sl.dropFirst(6)) : sl
         return "\(s) 发出 · \(at) 执行"
     }
+    /// atLocal, else the raw `at`.
+    var shownAt: String { atLocal.isEmpty ? at : atLocal }
 }
 
 /// 刷声骸 state from relay.刷声骸.
 struct StatusEchoFarm: Hashable {
     var name: String          // 名字
     var from: String          // 从 (HH:MM), may be empty
-    var until: String         // 到 (HH:MM)
+    var until: String         // 到 (HH:MM), machine time: the 改收工 field starts from it and sends machine time
+    /// 从 / 到 on the phone's clock (「明天 08:30」 when not today), for the notice (审查 B4).
+    var fromLocal: String = ""
+    var untilLocal: String = ""
 }
 
 /// A 4C boss: 序号 = position in the game's 讨伐强敌 list.
@@ -135,7 +146,7 @@ struct StatusData {
     var todayFailed = 0                       // 今天.失败
     /// view.js nowRow 「今天实际」: 「早班 照常 · 晚班 跳过」 while a skip is in play today, else nil.
     var todayActual: String? = nil
-    var receiptsToday = ""                    // beijingToday "MM-DD": the 回执 page puts 今天实际 in that day's group
+    var receiptsToday = ""                    // today "MM-DD" on the phone's clock: the 回执 page puts 今天实际 in that day's group
 
     static let ownerName = ["MAA": "明日方舟", "MaaEnd": "终末地", "OK-WW": "鸣潮"]
 }
