@@ -13,8 +13,14 @@ scripts/replay/run.py --platform ios --device <udid> --topic zz-replay-ios-$(ope
 scripts/replay/run.py --platform android --serial emulator-5554 --topic zz-replay-and-$(openssl rand -hex 6) \
     [--install path/to/app-release.apk]
 
-# ntfy's anonymous quota spent (the runner refuses and says so): no ntfy at all
-scripts/replay/run.py --platform ios --device <udid> --topic zz-replay-ios-$(openssl rand -hex 6) --offline
+# the local ntfy server (one time: Go + build, ~1 minute; Homebrew's ntfy has no server on macOS)
+brew install go && scripts/replay/ntfy_local.py build          # -> ~/.local/bin/ntfy-server
+scripts/replay/ntfy_local.py flood 300                          # 300 posts back to back, no 429
+
+# ntfy.sh instead of the local server (anonymous daily quota; the runner checks it first)
+scripts/replay/run.py ... --ntfy-public
+# no ntfy at all (states injected into the app's cache, sends stop at the confirmation)
+scripts/replay/run.py ... --offline
 
 # the plan only (no device, no network)
 scripts/replay/run.py --platform ios --dry-run
@@ -29,9 +35,22 @@ Android app data could not be put back (the backup path is printed).
 A step reads 对, 不对, 跳过（reason） (it ran but is not judged, e.g. 额度) or 不判（reason） (not judgeable on this
 device, e.g. the 400 ms guard on the Android emulator, which draws 2-3 frames a second). The summary counts all four.
 
+## The local ntfy server (default)
+
+By default the runner starts the real ntfy server (`ntfy_local.py`, v2.28.0 built from source) on `127.0.0.1:8932`
+with a throwaway cache in a temporary directory, and points the app at it through its UserDefaults key `ark-ntfy-base`
+(Net.swift `ntfyBase`; only 127.0.0.1 / localhost / 10.0.2.2 are taken, anything else falls back to ntfy.sh):
+`http://127.0.0.1:8932` on the iOS simulator, `http://10.0.2.2:8932` on the Android emulator (its alias of the host's
+loopback). The runner's own posts and its subscription go to the same server. Loopback is exempt from ntfy's request
+and daily message limits there, so there is no quota: every send step runs and is judged. If a server already answers
+on 8932 (another run) it is reused; a run stops only the server it started, at exit. The key is in `RESET_KEYS`;
+afterwards it is deleted on iOS and restored with `defaults.xml` on Android, so the app goes back to ntfy.sh.
+Caveat: a run that started the server stops it when it ends, even under a concurrent run that reused it; start
+`ntfy_local.py serve` in a terminal first when running iOS and Android side by side.
+
 ## --offline
 
-The app's ntfy server is fixed (Net.swift), so when ntfy.sh's anonymous daily quota is spent (HTTP 429 on IPv4 and IPv6;
+With `--ntfy-public`, when ntfy.sh's anonymous daily quota is spent (HTTP 429 on IPv4 and IPv6;
 the runner checks before it starts) nothing can be posted to or sent through the throwaway mailbox. With `--offline`:
 
 * No quota check and no ntfy traffic from the runner. A machine state (`base`, `dup`, `noef`, `farm` = 刷声骸 in
@@ -79,6 +98,7 @@ the runner checks before it starts) nothing can be posted to or sent through the
   the morning shift without 终末地, `farm`, `times`), receipts (also D207 `queued`), heartbeats, the commands the app
   sent; `OfflineMailbox` writes the states into the app's cache instead (`--offline`).
 * `guard.py` — the real-topic check.
+* `ntfy_local.py` — the local ntfy server (`serve`, `flood <n>`, `build`); port 8932.
 
 ## What it covers
 

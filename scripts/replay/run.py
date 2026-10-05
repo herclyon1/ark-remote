@@ -5,10 +5,12 @@
   scripts/replay/run.py --platform android --serial emulator-5554 --topic zz-replay-and-<random>
   scripts/replay/run.py --platform ios --dry-run            # print the plan, touch nothing
 
-See README.md. The app must never talk to the real machine: the runner refuses to start when --topic or the app's
+See README.md. By default the app and the runner use a local ntfy server (ntfy_local.py, port 8932: no daily quota);
+--ntfy-public uses ntfy.sh. The app must never talk to the real machine: the runner refuses to start when --topic or the app's
 stored mailbox is the real one, publishes only to --topic, and re-checks the stored mailbox after every step.
 """
 import argparse
+import atexit
 import json
 import os
 import signal
@@ -25,7 +27,9 @@ import steps as stepsmod   # noqa: E402
 
 BACKGROUND_ACTIONS = {"refresh", "watch"}      # sent by the app on its own (open / refresh), never a test failure
 RESET_KEYS = ["ark-remote-pending", "ark-remote-acked", "ark-remote-estop", "ark-remote-cfg-queue", "ark-remote-cfg-snap",
-              "tab", "ark-diag", "ark-diag-events", "ark-remote-tokens", "ark-remote-link-taken", "ark-remote-hb"]
+              "tab", "ark-diag", "ark-diag-events", "ark-remote-tokens", "ark-remote-link-taken", "ark-remote-hb",
+              "ark-ntfy-base"]
+NTFY_BASE_KEY = "ark-ntfy-base"                # Net.swift ntfyBase: the app's mailbox server (the local one by default)
 DIAG_BLACKHOLE = "http://127.0.0.1:9"          # ark-diag-bucket override: diag / crash / fluency uploads go nowhere
 
 
@@ -580,7 +584,7 @@ class Runner:
 
     def app_posts(self, since, until):
         """The app's own send log: 诊断记录 (DiagLog, key ark-diag-events) fetch events with method POST to the mailbox
-        (url ntfy.sh/<信箱>) between since and until (epoch s). DiagLog saves at most every 5 s, on the next event, so
+        (url <ntfy host>/<信箱>) between since and until (epoch s). DiagLog saves at most every 5 s, on the next event, so
         this waits until the saved log reaches past `until`. Returns [(t, status or error)], or None if the log
         never caught up (诊断记录 off?)."""
         deadline = time.time() + 20
@@ -971,6 +975,9 @@ def main():
     p.add_argument("--to", dest="stop", help="stop after this step id")
     p.add_argument("--timeout", type=float, default=8, help="default seconds to wait for a step's expected texts")
     p.add_argument("--port", type=int, help="iOS runner HTTP port (default derived from the UDID)")
+    p.add_argument("--ntfy-public", action="store_true",
+                   help="use ntfy.sh (anonymous daily quota, HTTP 429 when spent) instead of the local ntfy server "
+                        "ntfy_local.py starts on 127.0.0.1:8932 (the default: no quota, every send step runs)")
     p.add_argument("--offline", action="store_true",
                    help="post nothing to ntfy (anonymous quota used up): states go into the app's cache, send steps stop "
                         "at their confirm / review sheet and count as 跳过（额度）")
@@ -1022,16 +1029,27 @@ def main():
             base = mbmod.fetch_real_state(g.real_topic_for_read())
             with open(cache, "w", encoding="utf-8") as f:
                 json.dump(base, f, ensure_ascii=False)
+    local = None
     if a.offline:
         mb = mbmod.OfflineMailbox(g, a.topic, a.pin, base)
         print("离线：不往 ntfy 发任何东西；机器状态写进 App 的缓存，寄出类步骤停在确认单、记「跳过（额度）」", flush=True)
+    elif not a.ntfy_public:
+        # the local ntfy server: no daily quota, so the send steps run (the app is pointed at it through NTFY_BASE_KEY)
+        import ntfy_local
+        try:
+            local = ntfy_local.LocalNtfy(log=lambda m: print(m, flush=True)).start()
+            atexit.register(local.stop)   # stop() is idempotent and stops only the PID it started
+        except RuntimeError as e:
+            print("拒绝运行：", e)
+            return 2
+        mb = mbmod.Mailbox(g, a.topic, a.pin, base, server=local.url)
     else:
         mb = mbmod.Mailbox(g, a.topic, a.pin, base)
         q, fam = mbmod.quota()
         print(f"ntfy.sh 今天还能发：IPv4 {q.get(4)} 条，IPv6 {q.get(6)} 条；本脚本走 IPv{fam}", flush=True)
         if fam is None or (q.get(fam) or 0) < 60:
             print("拒绝运行：ntfy.sh 本机今天的匿名消息额度不够跑一遍（一遍约 40 条状态 / 心跳 + App 自己寄出的 20 来条）；"
-                  "可加 --offline")
+                  "去掉 --ntfy-public 用本机 ntfy")
             return 2
         app_fam = 6 if (a.platform == "ios" and q.get(6) is not None) else 4
         if (q.get(app_fam) or 0) < 25:
@@ -1070,6 +1088,9 @@ def main():
         drv.delete_defaults(RESET_KEYS)
         drv.write_default("ark-remote-cfg", json.dumps({"topic": a.topic, "pin": a.pin}, separators=(",", ":")))
         drv.write_default("ark-diag-bucket", DIAG_BLACKHOLE)
+        if local:
+            drv.write_default(NTFY_BASE_KEY, ntfy_local.base_for(a.platform))
+            print(f"App 的信箱服务器：{ntfy_local.base_for(a.platform)}（本机 ntfy）", flush=True)
         r.check_stored_config()
         drv.clear_clipboard()
         mb.listen(t_start - 5)
@@ -1102,8 +1123,15 @@ def main():
             except Exception as e:
                 print("偏好恢复失败：", e, "备份在", prefs_saved)
                 rc = rc or 4
+        if local and not prefs_saved:
+            try:   # iOS: the simulator's app goes back to ntfy.sh (Android: the defaults.xml restore above did it)
+                drv.delete_defaults([NTFY_BASE_KEY])
+            except Exception:
+                pass
         drv.stop()
         mb.stop()
+        if local:
+            local.stop()
     took = time.time() - t_start
     bad = [x for x in r.results if not x["ok"]]
     n_ok = sum(1 for x in r.results if x.get("verdict") == "对")

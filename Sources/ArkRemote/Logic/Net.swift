@@ -16,7 +16,19 @@ import Observation
 import SkipFuse   // @Observable types only drive the Android UI with SkipFuse imported (skipstone warning)
 
 /// view.js: `const NTFY = "https://ntfy.sh"`.
-let ntfyBase = "https://ntfy.sh"
+let ntfyDefaultBase = "https://ntfy.sh"
+
+/// The mailbox server: ntfy.sh, unless the replay test (scripts/replay/run.py) has pointed UserDefaults
+/// "ark-ntfy-base" at its local ntfy server (scripts/replay/ntfy_local.py). Only this machine's loopback or the Android
+/// emulator's alias of the host (10.0.2.2) is taken, so the key can never send a mailbox anywhere else; nothing in
+/// the app writes it.
+var ntfyBase: String {
+    var v = (UserDefaults.standard.string(forKey: "ark-ntfy-base") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    while v.hasSuffix("/") { v.removeLast() }
+    guard !v.isEmpty, let u = URL(string: v), u.scheme == "http" || u.scheme == "https",
+          ["127.0.0.1", "localhost", "10.0.2.2"].contains(u.host ?? "") else { return ntfyDefaultBase }
+    return v
+}
 
 /// The Tencent COS bucket the machine stores its whole state in (maa-automation relay/ark_relay/phone.py
 /// `state_cos`, COS_BUCKET / COS_REGION of the machine's .env). Since 2026-10-02 (the user, 22:22) a big state
