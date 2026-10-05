@@ -1,9 +1,11 @@
-"""Android emulator driver: adb input + uiautomator dump (derived from the pass-1 driver). Coordinates are pixels.
+"""Android emulator driver: adb input + uiautomator dump (derived from the pass-1 driver). Coordinates are pixels; the
+runner finds every element by its text / content-desc in dump() (run.py find / locate), never by a fixed position.
 
 The app's UserDefaults are Skip's SharedPreferences file shared_prefs/defaults.xml. The release APK is not debuggable,
 so reading / writing it needs `adb root` (Google APIs emulator images allow it; Google Play images do not).
 """
 import html
+import json
 import os
 import re
 import subprocess
@@ -12,6 +14,10 @@ import xml.sax.saxutils as su
 
 PKG = "com.herclyon.arkremote"
 PREFS = f"/data/data/{PKG}/shared_prefs/defaults.xml"
+
+
+class GateUnavailable(RuntimeError):
+    """Raw touches cannot be written on this device: the 400 ms gate is not judged here."""
 
 
 def find_adb():
@@ -218,29 +224,238 @@ class AndroidDriver:
         if self.keyboard_up([]):
             self.back()
 
+    # ---- the Material3 time picker dialog (skip-ui RenderTimePicker, DatePicker.swift:235-246)
+    # The 「刷到几点」 / 「改成刷到几点」 rows are a text button showing the time in the phone's 12/24-hour format
+    # ("8:30 AM" / "08:30"). Tapping it opens a dialog with only a TimePicker: no OK / Cancel, every change is written
+    # back at once, back / a tap outside closes it. uiautomator sees (ark37, en-US, 2026-10-05):
+    #   header  View 'Select hour' > TextView '08' desc "8 o'clock"; View 'Select minutes' > TextView '30' desc
+    #           '30 minutes'; View 'Select AM or PM' > TextView 'AM' / 'PM' (12-hour only; `selected` is not exposed)
+    #   dial    hour mode: Views desc "12 o'clock" .. "11 o'clock" (24-hour: also the inner ring);
+    #           minute mode: Views desc '0 minutes', '5 minutes' .. '55 minutes'
+    def clock_24h(self):
+        """The phone shows 24-hour times (settings time_12_24 = 24); unset = the locale's default (en-US: 12-hour)."""
+        return self.sh("settings get system time_12_24").strip() == "24"
+
+    @staticmethod
+    def time_label(hh, mm, h24=False):
+        """The row's text for HH:MM: "8:30 AM" / "12:05 AM" (12-hour) or "08:30" (24-hour)."""
+        if h24:
+            return f"{hh:02d}:{mm:02d}"
+        return f"{hh % 12 or 12}:{mm:02d} {'AM' if hh < 12 else 'PM'}"
+
+    def _descs(self, nodes, pat):
+        out = []
+        for n in nodes:
+            for t in n["texts"]:
+                m = re.fullmatch(pat, t)
+                if m:
+                    out.append((int(m.group(1)), n))
+        return out
+
+    @staticmethod
+    def _dial_point(marks, value, per_turn):
+        """Where `value` sits on a dial whose labelled marks are [(value, node)]: centre = mean of the marks, radius =
+        their mean distance, 0 at the top, clockwise."""
+        import math
+        cx = sum(n["x"] for _, n in marks) / len(marks)
+        cy = sum(n["y"] for _, n in marks) / len(marks)
+        r = sum(math.hypot(n["x"] - cx, n["y"] - cy) for _, n in marks) / len(marks)
+        a = 2 * math.pi * (value % per_turn) / per_turn
+        return int(round(cx + r * math.sin(a))), int(round(cy - r * math.cos(a)))
+
+    def time_dialog_open(self, nodes=None):
+        nodes = nodes if nodes is not None else self.dump()["nodes"]
+        return any("Select hour" in n["texts"] for n in nodes)
+
+    def set_time_dialog(self, hh, mm, close=True):
+        """With the time dialog open, dial it to hh:mm (24-hour values) by the dial's own labels: tap the hour header,
+        the hour on the dial, the minute on the dial (multiples of 5 by label, others by angle), AM / PM. Checks the
+        header reads hh:mm, then closes the dialog with back when close. Returns the header as "HH:MM[ AM|PM]"."""
+        nodes = self.dump()["nodes"]
+        if not self.time_dialog_open(nodes):
+            raise RuntimeError("the time dialog is not open (no 'Select hour')")
+        h24 = not any(n["texts"] == ["AM"] for n in nodes)
+        head = [n for n in nodes if "Select hour" in n["texts"]][0]
+        self.tap(head["x"], head["y"])
+        time.sleep(0.6)
+        nodes = self.dump()["nodes"]
+        want_h = hh if h24 else (hh % 12 or 12)
+        hours = [(v, n) for v, n in self._descs(nodes, r"(\d+) (?:o'clock|hours?)") if not n["value"]]
+        hit = [n for v, n in hours if v == want_h or (h24 and v % 24 == want_h % 24)]
+        if hit:
+            self.tap(hit[0]["x"], hit[0]["y"])
+        elif len(hours) >= 3 and not h24:
+            self.tap(*self._dial_point(hours, want_h, 12))
+        else:
+            raise RuntimeError(f"hour {want_h} not on the dial ({len(hours)} labels)")
+        time.sleep(0.6)
+        nodes = self.dump()["nodes"]
+        mins = [(v, n) for v, n in self._descs(nodes, r"(\d+) minutes?") if not n["value"]]
+        if not mins:      # the picker did not move on to minutes by itself
+            sel = [n for n in nodes if "Select minutes" in n["texts"]]
+            if sel:
+                self.tap(sel[0]["x"], sel[0]["y"])
+                time.sleep(0.6)
+                nodes = self.dump()["nodes"]
+                mins = [(v, n) for v, n in self._descs(nodes, r"(\d+) minutes?") if not n["value"]]
+        if len(mins) < 3:
+            raise RuntimeError("the minute dial did not show")
+        hit = [n for v, n in mins if v == mm]
+        if hit:
+            self.tap(hit[0]["x"], hit[0]["y"])
+            time.sleep(0.5)
+        else:
+            # a tap on the minute dial snaps to a multiple of 5 (tapping at 7 gave 05); a drag keeps single minutes
+            # but lands about one short (a drag ending at 7 gave 06): drag from the previous label, re-aim by the miss
+            aim = mm + 0.5
+            for _ in range(4):
+                x0, y0 = self._dial_point(mins, mm - mm % 5, 60)
+                x1, y1 = self._dial_point(mins, aim, 60)
+                self.swipe(x0, y0, x1, y1, 400)
+                time.sleep(0.6)
+                cur = self._descs([n for n in self.dump()["nodes"] if n["value"]], r"(\d+) minutes?")
+                if not cur or cur[0][0] == mm:
+                    break
+                aim += mm - cur[0][0]
+        if not h24:
+            nodes = self.dump()["nodes"]
+            ap = [n for n in nodes if n["texts"] == ["AM" if hh < 12 else "PM"]]
+            if not ap:
+                raise RuntimeError("no AM / PM in the dialog")
+            self.tap(ap[0]["x"], ap[0]["y"])
+            time.sleep(0.5)
+        nodes = self.dump()["nodes"]
+        hv = [n["value"] for n in nodes if n["value"] and "Select hour" not in n["texts"] and self._descs([n], r"(\d+) (?:o'clock|hours?)")]
+        mv = [n["value"] for n in nodes if n["value"] and self._descs([n], r"(\d+) minutes?")]
+        got = f"{hv[0] if hv else '?'}:{mv[0] if mv else '?'}"
+        want = f"{want_h:02d}:{mm:02d}"
+        if got != want:
+            raise RuntimeError(f"the dialog reads {got}, wanted {want}")
+        if close:
+            self.back()
+            time.sleep(0.6)
+        # the selected AM / PM is not exposed in the tree; the row's text after closing shows it
+        return got if h24 else f"{got} {'AM' if hh < 12 else 'PM'}"
+
+    # ---- cached machine state (offline: the ntfy quota is spent, the app's mailbox host is fixed)
+    # The app keeps the newest machine state it saw in UserDefaults ark-remote-cfg-snap (Net.swift:275 snapKey, the
+    # state body as JSON text, "at" = the machine's epoch seconds) and shows it on the next launch until something
+    # newer arrives from ntfy / COS. Writing it needs the app stopped (it rewrites the file from memory). Only the
+    # one key is rewritten (write_default replaces <string name=KEY> by name): pass 8 rewrote every "at": in the file
+    # and broke ark-monthcard's 13-digit ms. ark-remote-hb is a Double stored as raw long bits next to an int
+    # __unrepresentable__:ark-remote-hb = 1; these helpers never touch it (writing it needs both entries).
+    SNAP_KEY = "ark-remote-cfg-snap"
+
+    def prefs_backup(self, path=None):
+        """Copy the whole defaults.xml to out/ (path) as the original to restore. Returns the path."""
+        path = path or os.path.join(self.out, "defaults-backup.xml")
+        raw = self._prefs()
+        if not raw.strip():
+            raise RuntimeError("defaults.xml is empty or unreadable (adb root?)")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(raw)
+        self._prefs_backup = path
+        return path
+
+    def prefs_restore(self, path=None, launch=True):
+        """Stop the app, put the backed-up defaults.xml back byte for byte, start the app again."""
+        path = path or getattr(self, "_prefs_backup", None) or os.path.join(self.out, "defaults-backup.xml")
+        with open(path, encoding="utf-8") as f:
+            xml = f.read()
+        self.terminate()
+        self._push_prefs(xml)
+        if self._prefs() != xml:
+            raise RuntimeError("defaults.xml differs from the backup after the restore")
+        if launch:
+            self.launch()
+
+    def read_snap(self):
+        raw = self.read_default(self.SNAP_KEY)
+        return json.loads(raw) if raw else None
+
+    def _write_snap(self, body, launch):
+        self.terminate()
+        self.write_default(self.SNAP_KEY, json.dumps(body, ensure_ascii=False, separators=(",", ":")))
+        if launch:
+            self.launch()
+
+    def inject_state(self, body, at=None, launch=True):
+        """Stop the app, store `body` (a machine state object; "at" set to `at` or now) as the cached state, relaunch."""
+        body = dict(body)
+        body["at"] = int(at if at is not None else time.time())
+        self._write_snap(body, launch)
+        return body
+
+    def inject_receipt(self, receipt, launch=True):
+        """Append a receipt (mailbox.receipt_for shape) to relay.最近指令 of the cached state, at = now, relaunch."""
+        body = self.read_snap()
+        if body is None:
+            raise RuntimeError("no cached state to add a receipt to")
+        body.setdefault("relay", {}).setdefault("最近指令", []).append(receipt)
+        return self.inject_state(body, launch=launch)
+
+    def age_state(self, seconds_ago, launch=True):
+        """Make the cached state `seconds_ago` old (the machine-off branch reads its age); only its top-level "at"."""
+        body = self.read_snap()
+        if body is None:
+            raise RuntimeError("no cached state to age")
+        return self.inject_state(body, at=time.time() - seconds_ago, launch=launch)
+
     def gate_press(self, x1, y1, x2, y2, gap_ms, hold_ms):
         self.sh(f"input tap {x1} {y1}; sleep {gap_ms / 1000:.3f}; input motionevent DOWN {x2} {y2}; "
                 f"sleep {hold_ms / 1000:.3f}; input motionevent UP {x2} {y2}")
 
     # ---- the 400 ms gate, measured (raw touches + the app's own frame stats)
-    def touch_dev(self):
-        """/dev/input/eventN of the touchscreen InputReader maps to the main display (Touch Input Mapper mode DIRECT)."""
+    def touch_dev(self, wait_s=15):
+        """/dev/input/eventN of the touchscreen InputReader maps to the main display (Touch Input Mapper mode DIRECT).
+
+        ark37 (API 37) lists eleven virtio_input_multi_touch_N devices; ten belong to the emulator's extra (virtual)
+        displays and read `mode - DISABLED`, one (virtio_input_multi_touch_1 = /dev/input/event1 on 2026-10-05) is
+        DIRECT. Right after a boot / snapshot load InputReader may not have configured the viewport yet and every
+        touch mapper reads DISABLED (out/probe-and.log 17:2x), so poll up to wait_s; then fall back to the device whose
+        Motion Ranges X span the display width. Raises GateUnavailable when none is found: the 400 ms gate steps then
+        fail on their own and the run goes on (the manual passes already ruled the gate unjudgeable on the emulator,
+        which draws 2-3 frames a second)."""
         if getattr(self, "_touch_dev", None):
             return self._touch_dev
-        text = self.sh("dumpsys input")
-        path = None
-        # InputReader lists "  Device N: <name>" blocks with their mappers; EventHub lists "    N: <name>" then "Path:"
-        for block in re.split(r"\n  Device \d+: ", text)[1:]:
-            if "Touch Input Mapper (mode - DIRECT)" in block:
-                name = block.split("\n", 1)[0].strip()
-                m = re.search(r"\n\s+\d+: " + re.escape(name) + r"\n(?:[^\n]*\n){0,12}?\s+Path: (/dev/input/event\d+)", text)
-                if m:
-                    path = m.group(1)
-                    break
+        end = time.time() + wait_s
+        text = ""
+        while True:
+            text = self.sh("dumpsys input")
+            path = self._touch_path(text, direct=True)
+            if path or time.time() > end:
+                break
+            time.sleep(1)
+        path = path or self._touch_path(text, direct=False)
         if not path:
-            raise RuntimeError("no DIRECT touchscreen in dumpsys input")
+            raise GateUnavailable("no DIRECT touchscreen in dumpsys input (gate not judged on this emulator)")
         self._touch_dev = path
         return path
+
+    def _touch_path(self, text, direct=True):
+        """EventHub path of an InputReader device: direct=True the one whose touch mapper is DIRECT; direct=False the
+        one with a TOUCHSCREEN source whose X motion range spans the display width."""
+        for block in re.split(r"\n  Device -?\d+: ", text)[1:]:
+            name = block.split("\n", 1)[0].strip()
+            if direct:
+                if "Touch Input Mapper (mode - DIRECT)" not in block:
+                    continue
+            else:
+                m = re.search(r"\n\s+X: source=[^\n]*TOUCHSCREEN[^\n]*max=([\d.]+)", block)
+                if not m or abs(float(m.group(1)) - (self.size[0] - 1)) > 2:
+                    continue
+            m = re.search(r"\n\s+-?\d+: " + re.escape(name) + r"\n(?:[^\n]*\n){0,12}?\s+Path: (/dev/input/event\d+)", text)
+            if m:
+                return m.group(1)
+        return None
+
+    def gate_supported(self):
+        """True when raw touches can be written (a touchscreen device was found)."""
+        try:
+            self.touch_dev(wait_s=3)
+            return True
+        except GateUnavailable:
+            return False
 
     def _touch_blob(self, path, events):
         """Write raw input_event structs (arm64: timeval 16 bytes, type u16, code u16, value s32) to a device file; one
