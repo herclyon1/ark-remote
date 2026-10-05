@@ -33,17 +33,17 @@ struct ContentView: View {
 
     /// Each tab's pushed pages, bound to its NavigationStack so a reselect can pop them (D39). One @State per tab rather
     /// than a dictionary of paths: a binding into a dictionary element is not one Skip is known to transpile safely.
-    @State private var statusPath = NavigationPath()
-    @State private var arknightsPath = NavigationPath()
-    @State private var endfieldPath = NavigationPath()
-    @State private var wuwaPath = NavigationPath()
-    @State private var phonePath = NavigationPath()
+    @State var statusPath = NavigationPath()
+    @State var arknightsPath = NavigationPath()
+    @State var endfieldPath = NavigationPath()
+    @State var wuwaPath = NavigationPath()
+    @State var phonePath = NavigationPath()
     /// Bumped by a reselect of a tab at its root; the root page scrolls to its top on the change (\.tabReselect).
-    @State private var statusTop = 0
-    @State private var arknightsTop = 0
-    @State private var endfieldTop = 0
-    @State private var wuwaTop = 0
-    @State private var phoneTop = 0
+    @State var statusTop = 0
+    @State var arknightsTop = 0
+    @State var endfieldTop = 0
+    @State var wuwaTop = 0
+    @State var phoneTop = 0
 
     /// The selection: a tab that has just gone (the shift changed while it was open) reads as 状态, like the web
     /// page falling back to its first tab (view.js:998; the stored tab is set back in `dropGoneTabs`).
