@@ -201,8 +201,18 @@ class AndroidDriver:
         self.sh(f"input swipe {x0} {y0} {x1} {y1} {ms}")
 
     def type(self, text):
+        """`input text`, then read the focused field back: in the offline pass (2026-10-05 21:52, Mac load ~6) 「CE-6」
+        typed into 关卡 right after 理智药 arrived as 「CE」. When the focused EditText does not end with the text,
+        clear it and type once more."""
         safe = text.replace(" ", "%s")
         self.sh(f"input text '{safe}'")
+        for _ in range(2):
+            time.sleep(0.3)
+            f = [n for n in self.dump()["nodes"] if n["kind"] == "EditText" and n["focused"]]
+            if not f or f[0]["value"].endswith(text):
+                return
+            self.clear_field(len(f[0]["value"]) + 2)
+            self.sh(f"input text '{safe}'")
 
     def clear_field(self, n=12):
         self.sh("input keyevent KEYCODE_MOVE_END; input keyevent " + " ".join(["KEYCODE_DEL"] * n))
