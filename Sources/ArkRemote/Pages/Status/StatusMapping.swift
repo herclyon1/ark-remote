@@ -138,7 +138,12 @@ extension StatusData {
         if d.nextAt.isEmpty, let first = blocks.first { d.nextAt = first.time }
         for i in blocks.indices {
             let owners = blocks[i].games.compactMap { statusOwnerOf[$0.name] }.sorted().joined(separator: "|")
-            if let q = d.queues.first(where: { $0.scripts.sorted().joined(separator: "|") == owners }) {
+            // the plan names no shift, only its games: two shifts running the same games both matched and the first won,
+            // so the second time row's switch sent skip_today for the first shift (edge audit 29). A tie is broken by
+            // 定时 (only scheduled shifts have time rows); one still tied gets no switch rather than the wrong one.
+            var hits = d.queues.filter { $0.scripts.sorted().joined(separator: "|") == owners }
+            if hits.count > 1 { hits = hits.filter { $0.scheduled } }
+            if hits.count == 1, let q = hits.first {
                 let id = StatusSwitchID.queue(q.name)
                 let on = !skipped.contains(q.name)
                 if record { pending.liveVals[id] = .bool(on) }
