@@ -277,7 +277,7 @@ struct EWChoiceList: View {
                 }
                 // the checkmark is said as the row's selected state, as a native selection list does
                 // (AccessibilityTraits.isSelected: "The accessibility element is currently selected.")
-                .accessibilityAddTraits(draft.contains(c.value) ? .isSelected : [])
+                .accessibilityAddTraits(draft.contains(c.value) ? .isSelected : Self.noTraits)
             }
         }
         .navigationTitle(title)
@@ -287,6 +287,19 @@ struct EWChoiceList: View {
                     .accessibilityLabel("完成")   // icon-only: named as EWLive's ✓ (index.html:921 aria-label 完成)
             }
         }
+    }
+
+    /// No traits. On Android not `[]`: skip-fuse-ui's AccessibilityTraits (SkipSwiftUI/System/Accessibility.swift:899-901)
+    /// defines `init() { self = [] }`, and `[]` is SetAlgebra's init(arrayLiteral:), which calls init() — so an empty
+    /// literal recursed until the main thread's stack overflowed (SIGSEGV in libSkipFuseUI.so, audit/android-crash-150820.txt):
+    /// every row not ticked crashed the page, 鸣潮 无音区 on opening and 终末地 执行周期 on unticking a day (test pass 1, 问题 12).
+    /// `rawValue: 0` is the same empty set without the literal; iOS keeps SwiftUI's own `[]`.
+    static var noTraits: AccessibilityTraits {
+        #if os(Android)
+        AccessibilityTraits(rawValue: 0)
+        #else
+        []
+        #endif
     }
 
     private func toggle(_ v: String) {
