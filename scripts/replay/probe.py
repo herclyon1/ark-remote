@@ -16,6 +16,7 @@
     backup / restore                save defaults.xml to out/probe-android/ / put it back byte for byte (app restarted)
     kbd / crash                     is the keyboard up (dumpsys input_method mInputShown) / crash lines since serve began
 
+  serve uses the local ntfy server (ntfy_local.py, 127.0.0.1:8932, no daily quota) unless --ntfy-public.
   serve --offline: post nothing to ntfy (anonymous quota used up): no quota check, states go into the app's cache
   (mailbox.OfflineMailbox), heartbeats are dropped, `cmds` is empty. serve backs up defaults.xml before it resets
   the app's keys and, with --restore, puts the backup back when it stops.
@@ -63,6 +64,12 @@ def serve(a):
             raise SystemExit("--offline needs mailbox.OfflineMailbox")
         mb = mbmod.OfflineMailbox(g, a.topic, a.pin, base, drv)
         print("offline: nothing is posted to ntfy", flush=True)
+    elif not a.ntfy_public:
+        import atexit
+        import ntfy_local
+        local = ntfy_local.LocalNtfy(log=lambda m: print(m, flush=True)).start()
+        atexit.register(local.stop)   # stops only the PID it started
+        mb = mbmod.Mailbox(g, a.topic, a.pin, base, server=local.url)
     else:
         mb = mbmod.Mailbox(g, a.topic, a.pin, base)
         print("ntfy quota", mbmod.quota(), flush=True)
@@ -83,6 +90,8 @@ def serve(a):
     drv.delete_defaults(runmod.RESET_KEYS)
     drv.write_default("ark-remote-cfg", json.dumps({"topic": a.topic, "pin": a.pin}, separators=(",", ":")))
     drv.write_default("ark-diag-bucket", runmod.DIAG_BLACKHOLE)
+    if not a.offline and not a.ntfy_public:
+        drv.write_default(runmod.NTFY_BASE_KEY, ntfy_local.base_for(a.platform))
     r.check_stored_config()
     mb.listen(t0 - 5)
     mb.publish_state("base")
@@ -249,6 +258,7 @@ if __name__ == "__main__":
     p.add_argument("--pin", default="0000")
     p.add_argument("--state")
     p.add_argument("--offline", action="store_true", help="post nothing to ntfy (states go into the app's cache)")
+    p.add_argument("--ntfy-public", action="store_true", help="use ntfy.sh instead of the local ntfy server (ntfy_local.py)")
     p.add_argument("--restore", action="store_true", help="Android: put the backed-up defaults.xml back when serve stops")
     p.add_argument("--port", type=int, default=int(os.environ.get("PROBE_PORT", "9390")))
     a = p.parse_args()

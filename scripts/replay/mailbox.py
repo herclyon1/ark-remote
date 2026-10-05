@@ -96,8 +96,9 @@ def farm_until_hhmm(now=None):
 
 
 class Mailbox:
-    def __init__(self, guard, topic, pin, base_state):
+    def __init__(self, guard, topic, pin, base_state, server=NTFY):
         self.guard = guard
+        self.server = server.rstrip("/")   # ntfy.sh, or the local server (ntfy_local.py) the app is pointed at too
         self.topic = topic
         self.pin = pin
         base = copy.deepcopy(base_state)
@@ -117,7 +118,7 @@ class Mailbox:
             since = int(since_ts)
             while self.listening:
                 try:
-                    with urllib.request.urlopen(f"{NTFY}/{self.topic}/json?since={since}", timeout=90) as r:
+                    with urllib.request.urlopen(f"{self.server}/{self.topic}/json?since={since}", timeout=90) as r:
                         self.listen_ok.set()
                         for raw in r:
                             if not self.listening:
@@ -207,7 +208,7 @@ class Mailbox:
 
     def _post(self, topic, data, title):
         self.guard.check_publish(topic)
-        req = urllib.request.Request(f"{NTFY}/{topic}", data=data, method="POST",
+        req = urllib.request.Request(f"{self.server}/{topic}", data=data, method="POST",
                                      headers={"User-Agent": "ark-replay", "Title": title})
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
@@ -215,7 +216,7 @@ class Mailbox:
                     raise RuntimeError(f"ntfy answered {r.status}")
         except urllib.error.HTTPError as e:
             if e.code == 429:
-                raise NtfyLimit(f"ntfy.sh 限额（429）：{e.read()[:200]!r}")
+                raise NtfyLimit(f"{self.server} 限额（429）：{e.read()[:200]!r}")
             raise
 
     # ---- what the app sent
@@ -224,7 +225,7 @@ class Mailbox:
         if self.listening:
             with self.lock:
                 return [(t, m) for _, t, m in self.seen if t >= int(since_ts)]
-        url = f"{NTFY}/{self.topic}/json?poll=1&since={int(since_ts)}"
+        url = f"{self.server}/{self.topic}/json?poll=1&since={int(since_ts)}"
         out = urllib.request.urlopen(url, timeout=20).read().decode()
         res = []
         for line in out.splitlines():
