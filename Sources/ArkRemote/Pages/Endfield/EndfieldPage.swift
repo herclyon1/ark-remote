@@ -1,5 +1,5 @@
 // The 终末地 (MaaEnd) tab. Same cards and rows as the web page's 终末地 tab (view.js:753 TABS /^终末地/):
-// the 库存 entry row (view.js:407), then 基质刷取, 协议空间, 另外两个任务 (schema.js:143-218).
+// the 库存 entry row (view.js:407), then 基质刷取, 协议空间, 另一个任务 (schema.js:143-218; the web's 「另外两个任务」 has one, 自动采集).
 // Data, saving and the tab bar are wired by 验收 once the logic layer lands; this page only draws and reports edits.
 
 import SwiftUI

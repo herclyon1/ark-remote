@@ -72,7 +72,8 @@ struct PhonePage: View {
             }
 
             Section {
-                PhoneValueRow(title: "已配置", hint: "体力数字由这台手机直接问森空岛和库街区，密钥只存在这台手机里",
+                // 「密钥」, not the web's 「已配置」 (view.js:608): with none stored the row read 「已配置 … 没有」 (test pass 1, 问题 7)
+                PhoneValueRow(title: "密钥", hint: "体力数字由这台手机直接问森空岛和库街区，密钥只存在这台手机里",
                               value: hasTokens ? data.staminaStatus : "没有")
                 Button("粘贴密钥串") {
                     pasteText = ""

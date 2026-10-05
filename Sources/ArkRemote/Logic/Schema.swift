@@ -218,7 +218,7 @@ let schema: [SchemaSection] = [
         SchemaField(path: "ProtocolSpace/SupplyPlanLimits",
                     hint: "每种材料攒到多少就不再刷，只填数字"),
     ]),
-    SchemaSection(title: "终末地 · 另外两个任务", owner: "MaaEnd", src: "master", game: "MaaEnd", fields: [
+    SchemaSection(title: "终末地 · 另一个任务", owner: "MaaEnd", src: "master", game: "MaaEnd", fields: [
         SchemaField(path: "AutoCollect/@enabled", type: "bool",
                     hint: "按下面的线路和周期自动采集材料"),
         SchemaField(path: "AutoCollect/AutoCollectSchedule", type: "pills",

@@ -57,7 +57,8 @@ enum EndfieldSchema {
                     hint: "每种材料攒到多少就不再刷，只填数字"),
     ])
 
-    static let otherTasks = EWGroupSpec(title: "终末地 · 另外两个任务", fields: [
+    // 「另一个任务」: the web's 「另外两个任务」 (schema.js:207) heads one task, 自动采集 (test pass 1, 问题 6)
+    static let otherTasks = EWGroupSpec(title: "终末地 · 另一个任务", fields: [
         EWFieldSpec(path: "AutoCollect/@enabled", type: .bool,
                     hint: "按下面的线路和周期自动采集材料"),
         EWFieldSpec(path: "AutoCollect/AutoCollectSchedule", type: .pills,
