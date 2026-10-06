@@ -160,14 +160,6 @@ struct ContentView: View {
         // seg-frames-logger.js #diagmark / #diagline on every tab: iOS the tab view's bottom accessory, Android an overlay
         // (Pages/Phone/PhoneDiagRows.swift)
         .modifier(DiagBottomAccessory())
-        // a note raised outside a page's own flow: Pending.resend's 「发不出去」 (pending.js:118). One alert at a time
-        // (Relay.showAlert).
-        .alert(Relay.shared.alert?.title ?? "", isPresented: Binding(get: { Relay.shared.alert != nil },
-                                                                     set: { if !$0 { Relay.shared.alert = nil } })) {
-            Button("好") {}
-        } message: {
-            Text(verbatim: Relay.shared.alert?.message ?? "")
-        }
     }
 }
 

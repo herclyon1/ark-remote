@@ -112,7 +112,7 @@ struct StatusPage: View {
         if outbox.sending[id] != nil {
             Text("正在寄出…").font(.footnote).foregroundStyle(.secondary)
         } else if let why = outbox.failed[id] {
-            Text("没寄出：\(why)").font(.footnote).foregroundStyle(.red)
+            Text(why).font(.footnote).foregroundStyle(.red)   // EWSave.send's sentence: 「没发出去（…）。」
         } else {
             switch data.switchTags[id] {
             case .applied(let t)?, .sent(let t, _)?:
@@ -561,7 +561,11 @@ struct ReceiptIcon: View {
             // no Material cancel icon in skip-ui's symbol table: a red disc with the mapped xmark
             ZStack {
                 Circle().fill(Color.red).frame(width: disc, height: disc)
-                Image(systemName: "xmark").font(.system(size: glyph, weight: .bold)).foregroundStyle(Color.white)
+                // sized as an image, not a font: skip-ui draws a resizable symbol through a painter that fills its frame
+                // (Components/Image.swift RenderScaledImageVector, .stretch), and @ScaledMetric keeps it growing with
+                // Dynamic Type
+                Image(systemName: "xmark").resizable().scaledToFit().frame(width: glyph, height: glyph)
+                    .foregroundStyle(Color.white)
                     .accessibilityHidden(true)
             }
             .frame(width: box, height: box)

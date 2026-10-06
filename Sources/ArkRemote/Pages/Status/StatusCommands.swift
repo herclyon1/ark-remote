@@ -19,9 +19,10 @@ struct StatusAsk: Equatable {
 /// What the page sent and has no answer for yet, shown where it was sent from (HIG Feedback: "Consider integrating status
 /// feedback into your interface."). In memory only; the machine's receipt is the lasting record.
 struct StatusOutbox: Equatable {
-    /// switch id → the value on its way: the switch shows it, disabled, until the send returns
+    /// switch id → the value on its way (queued or out through EWSave.apply): the switch shows it, disabled, until the
+    /// send returns. Filled from the pool by `withSwitches`.
     var sending: [String: Bool] = [:]
-    /// switch id → why the last send of that switch did not go out (the switch is back at its old value)
+    /// switch id → why the last send of that switch did not go out (the switch shows its old value). From the pool.
     var failed: [String: String] = [:]
     /// the last one-shot command (现在跑一趟 / 刷声骸 / 收工时刻 / 提前收工, or a failed 停止一切)
     var shot: StatusShot? = nil
@@ -94,7 +95,7 @@ enum StatusCommands {
             let body: JSONValue = on
                 ? .object(["action": .string("unskip_today"), "queue": .string(name)])
                 : .object(["action": .string("skip_today"), "queue": .string(name), "day": .string(statusBeijingToday())])
-            apply(outbox, StatusSwitchID.queue(name), label: label, on: on, body: body)
+            apply(StatusSwitchID.queue(name), label: label, on: on, body: body)
         }
         // the boss Picker and the time DatePicker always hold a valid value (bossIndex starts at 1; hhmmBinding writes HH:MM)
         a.startEchoFarm = { boss, until in
@@ -124,41 +125,47 @@ enum StatusCommands {
                 title: "现在收工？", message: "会关掉脚本和游戏，配置还原成你原来那份。", ok: "收工", destructive: true,
                 body: .object(["action": .string("echo_farm_stop")]), what: "提前收工")   // view.js:1246
         }
-        a.setSkipShutdown = { on in relaySwitch(outbox, StatusSwitchID.skipShutdown, on: on) }
-        a.setDebugMode = { on in relaySwitch(outbox, StatusSwitchID.debugMode, on: on) }
-        a.resend = { id in Task { await Pending.shared.resend(id) } }   // pending.js [data-again] → resend(key)
+        a.setSkipShutdown = { on in relaySwitch(StatusSwitchID.skipShutdown, on: on) }
+        a.setDebugMode = { on in relaySwitch(StatusSwitchID.debugMode, on: on) }
+        a.resend = { id in EWSave.resend(id) }   // pending.js [data-again] → resend(key)
         return a
     }
 
     /// A schema.js RELAY_SWITCHES row flipped: sent now (sw.on / sw.off).
-    static func relaySwitch(_ outbox: Binding<StatusOutbox>, _ id: String, on: Bool) {
+    static func relaySwitch(_ id: String, on: Bool) {
         guard let sw = relaySwitches.first(where: { $0.id == id }) else { return }
-        apply(outbox, id, label: sw.label, on: on, body: on ? sw.on : sw.off)
+        apply(id, label: sw.label, on: on, body: on ? sw.on : sw.off)
     }
 
-    /// A switch flipped (decision by 验收 10-07: native settings apply when changed): the order goes out at once and
-    /// Pending tracks it to its receipt, as a saved change did (EWSave.send's relay branch, Pages/Endfield/EWLive.swift):
-    /// a skip's Beijing day stamped as it goes (Pending.skipDayNow, edge audit 17), Pending.add with the body for
-    /// 「再发一次」, then one ask for a state reported after the send (view.js:2455-2457). The base is the sent-but-
-    /// unreceipted value while it is on its way, else the machine's (view.js:1254 / 1286 base()).
-    static func apply(_ outbox: Binding<StatusOutbox>, _ id: String, label: String, on: Bool, body raw: JSONValue) {
+    /// A switch flipped (decision by 验收 10-07: native settings apply when changed): the change goes to EWSave.apply, the
+    /// one way out every tab's changes take — its relay branch stamps a skip's Beijing day as it goes (Pending.skipDayNow,
+    /// edge audit 17), Pending.add keeps the body for 「再发一次」, and one ask follows for a state reported after the send
+    /// (Live.ping(afterSeconds:), view.js:2455-2457). The base is the sent-but-unreceipted value, else the machine's
+    /// (view.js:1254 / 1286 base()): a flip back to it drops a change that has not gone out. The switch is disabled while
+    /// its own order is out (StatusPage.switchRow), and a drop then would take the change being sent out of the pool.
+    static func apply(_ id: String, label: String, on: Bool, body raw: JSONValue) {
+        guard !EWSave.isSending(id) else { return }
         let from = (Pending.shared.items[id]?.to ?? Pending.shared.liveVals[id])?.truthy ?? false
-        outbox.wrappedValue.failed[id] = nil
-        guard on != from, outbox.wrappedValue.sending[id] == nil else { return }
-        outbox.wrappedValue.sending[id] = on
-        Task {
-            let body = Pending.skipDayNow(raw)
-            do {
-                try await Relay.shared.send(body)
-                Pending.shared.add(id, PendingEdit(label: label, src: "relay", to: .bool(on), sentAt: nowSec(), body: body))
-                outbox.wrappedValue.sending[id] = nil
-                // the mailbox is read in order, so this refresh comes after the order: the state it brings reflects it
-                await Live.shared.ping(minAt: nowSec())
-            } catch {
-                outbox.wrappedValue.sending[id] = nil
-                outbox.wrappedValue.failed[id] = Live.why(error)
+        if on == from {
+            if EWEdits.shared.items[id] != nil { EWSave.apply(id, nil) }
+            return
+        }
+        EWSave.apply(id, EWEdit(label: label, src: "relay", from: .bool(from), to: .bool(on), body: raw))
+    }
+
+    /// The outbox with the switches' orders from the pool (EWEdits / EWSendQueue): on their way, or did not go out.
+    static func withSwitches(_ outbox: StatusOutbox) -> StatusOutbox {
+        var box = outbox
+        let q = EWSendQueue.shared
+        for (id, e) in EWEdits.shared.items where id.hasPrefix("relay|") {
+            if let f = e.failure {
+                box.failed[id] = f
+            } else if q.queued.contains(id) {
+                box.sending[id] = e.to.truthy
             }
         }
+        for id in q.resending where id.hasPrefix("relay|") { box.sending[id] = (Pending.shared.items[id]?.to.truthy) ?? false }
+        return box
     }
 
     /// The switches show a value on its way on top of the machine's / sent values.

@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// The 方舟 tab: ArknightsPage filled from the relay snapshot (Relay.shared.snap). A change applies when it is made, as a
-/// switch in Settings does (验收 10-07): it goes out at once as a one-item send through EWSave.send (set_config for the
-/// 「明日方舟」 rows, set_master for 基建 and 奖励, view.js #go 2964-2966), and Pending then shows it sent and checks the
-/// receipt. No 「待保存」 pool, no review sheet.
+/// switch in Settings does (验收 10-07): it goes out at once through EWSave.apply, the one way out every tab's changes take
+/// (one order at a time; set_config for the 「明日方舟」 rows, set_master for 基建 and 奖励, view.js #go 2964-2966), and
+/// Pending then shows it sent and checks the receipt. A change that did not go out — the network, or a value the relay
+/// would refuse (EWSave.problem) — stays on its row with the reason under it (再发一次 / 不改了). No review sheet.
 struct ArknightsTab: View {
     /// The shift picked on the 状态 tab (view.js curQueue, localStorage "ark-remote-cfg-queue").
     @AppStorage("ark-remote-cfg-queue") var storedQueue = ""
@@ -20,23 +21,13 @@ struct ArknightsTab: View {
         b.pageData(withPending: true)
     }
 
-    /// What the page shows: `base` with the changes on their way and the refused ones on top. The page writes a change
-    /// into it; `apply` sends it.
+    /// What the page shows: `base` with this tab's changes in the pool (EWEdits: on their way, or not gone out) on top.
+    /// The page writes a change into it; `apply` hands it to EWSave.apply.
     @State var shown = ArknightsPageData()
-    /// Changes being sent (EWSave.send running), by field id: drawn over `base` until Pending holds them, and their row
-    /// is disabled meanwhile, so one row never has two sends out.
-    @State var sending: [String: ArknightsEdit] = [:]
-    /// Typed values the relay would refuse (EWSave.problem: a stage code off its pattern, 理智药 outside 0–999, an empty
-    /// number), by field id: kept in the row with the reason under it, not sent.
-    @State var refused: [String: ArknightsRefused] = [:]
 
     var body: some View {
-        ArknightsPage(data: $shown, status: status, busy: Set(sending.values.map { $0.field.path }), onResend: { key in
-            Task {
-                await Pending.shared.resend(key)
-                refresh()
-            }
-        }, onShowStatus: { tab = .status })
+        ArknightsPage(data: $shown, status: status, busy: busy, onResend: { key in EWSave.resend(key) },
+                      onShowStatus: { tab = .status })
             .navigationTitle("方舟")
             .task { await reload() }
             // Pull to refresh asks the machine to report again (view.js:1150 → live.js:21 ping: {action:"refresh"}, up to 11 s),
@@ -55,61 +46,76 @@ struct ArknightsTab: View {
             .onChange(of: Pending.shared.items) {
                 redraw()
             }
+            // a change went out, failed, or was dropped (EWSave.apply's drain, EWSave.drop): redraw now
+            .onChange(of: EWEdits.shared.items) {
+                redraw()
+            }
             // view.js:945-949: a new shift re-renders.
             .onChange(of: storedQueue) {
                 refresh()
             }
     }
 
-    /// The line under each row: the receipt (pending.js:47-67), else 「正在寄出」 or why a value was not sent.
+    /// The field of a pool / Pending key of this tab (ArknightsFieldRef.id, view.js:455), nil for another tab's key.
+    private static func field(_ key: String) -> ArknightsField? {
+        ArknightsField.allCases.first { $0.ref?.id == key }
+    }
+
+    /// This tab's changes in the pool, by field.
+    private var pooled: [(key: String, field: ArknightsField, edit: EWEdit)] {
+        EWEdits.shared.items.compactMap { k, e in Self.field(k).map { (k, $0, e) } }
+    }
+
+    /// The line under each row: 「正在寄出」 while its change is out, a change that did not go out with the reason, else
+    /// the receipt (pending.js:47-67).
     private var status: [String: GameRowStatus] {
         var out: [String: GameRowStatus] = [:]
         for (path, t) in shown.tags { out[path] = GameRowStatus(text: t.text, bad: t.bad, resendKey: t.resendKey) }
-        for e in sending.values { out[e.field.path] = .sendingNow }
-        for r in refused.values { out[r.edit.field.path] = GameRowStatus(text: r.why, bad: true) }
+        let q = EWSendQueue.shared
+        for p in pooled {
+            if let failure = p.edit.failure {
+                out[p.field.path] = GameRowStatus(text: failure, bad: true, retryKey: p.key)
+            } else if q.queued.contains(p.key) {
+                out[p.field.path] = .sendingNow
+            }
+        }
+        for k in q.resending { if let f = Self.field(k) { out[f.path] = .sendingNow } }
+        return out
+    }
+
+    /// Rows whose change is queued or out (not one that failed), and rows whose 再发一次 is out: disabled until it is
+    /// through, so one row never has two orders out.
+    private var busy: Set<String> {
+        let q = EWSendQueue.shared
+        var out = Set(pooled.filter { $0.edit.failure == nil && q.queued.contains($0.key) }.map { $0.field.path })
+        for k in q.resending { if let f = Self.field(k) { out.insert(f.path) } }
         return out
     }
 
     /// A step of `shown`: the fields that moved in it and now differ from `base` are changes made on the page (a redraw
-    /// moves fields to `base` plus what is already sending or refused, which is no new change). Each goes out on its own.
+    /// moves fields to `base` plus what the pool holds, which is no new change). Each goes to EWSave.apply on its own.
     private func apply(from old: ArknightsPageData, to new: ArknightsPageData) {
         let b = bridge
         let moved = Set(b.edits(from: old, to: new).map { $0.ref.id })
         guard !moved.isEmpty else { return }
         let wanted = b.edits(from: base(b), to: new)
-        for id in moved where sending[id] == nil {
-            // back to what the row showed before (view.js note(): no change)
-            guard let e = wanted.first(where: { $0.ref.id == id }) else { refused[id] = nil; continue }
-            if refused[id]?.edit == e { continue }
-            if let why = EWSave.problem(e.poolEdit) {
-                refused[id] = ArknightsRefused(edit: e, why: why)
+        let pool = EWEdits.shared.items
+        // a row whose order is out is disabled (busy); a nil for it would drop the change being sent from the pool
+        for id in moved where !EWSave.isSending(id) {
+            guard let e = wanted.first(where: { $0.ref.id == id }) else {
+                // back to what the row showed before (view.js note(): no change): a queued or failed change of it goes
+                if pool[id] != nil { EWSave.apply(id, nil) }
                 continue
             }
-            refused[id] = nil
-            send(e)
+            if let p = pool[id], p.to == e.to, p.failure == nil { continue }   // already on its way
+            EWSave.apply(id, e.poolEdit)
         }
     }
 
-    /// One change, sent alone. A failure puts the row back to its value before and says why (an alert, as Pending.resend
-    /// does for 「发不出去」).
-    private func send(_ e: ArknightsEdit) {
-        let id = e.ref.id
-        sending[id] = e
-        Task {
-            let r = await EWSave.send([id: e.poolEdit])
-            sending[id] = nil
-            if let failure = r.failure {
-                Relay.shared.showAlert("没发出去", gameSendFailure(e.label, failure))
-            }
-            redraw()
-        }
-    }
-
-    /// `base` with the changes on their way and the refused ones on top.
+    /// `base` with this tab's changes in the pool on top.
     private func redraw() {
         var page = base(bridge)
-        for e in sending.values { e.field.apply(e.to, to: &page) }
-        for r in refused.values { r.edit.field.apply(r.edit.to, to: &page) }
+        for p in pooled { p.field.apply(p.edit.to, to: &page) }
         shown = page
     }
 
@@ -134,10 +140,4 @@ struct ArknightsTab: View {
         Pending.shared.reconcile()
         redraw()
     }
-}
-
-/// A typed value that is not sent, and why (EWSave.problem).
-struct ArknightsRefused: Equatable {
-    var edit: ArknightsEdit
-    var why: String
 }

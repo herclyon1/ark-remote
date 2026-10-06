@@ -24,9 +24,11 @@ struct StatusTab: View {
         let relay = Relay.shared
         var data = StatusData.from(relay: relay, live: Live.shared, stamina: StaminaStore.shared, pending: Pending.shared,
                                    currentQueue: storedQueue, estopAt: estopAt)
-        let _ = StatusCommands.applyOutbox(outbox, to: &data)
+        // the switches' orders on their way or not gone out are in the shared pool (EWSave.apply), the one-shot in `outbox`
+        let box = StatusCommands.withSwitches(outbox)
+        let _ = StatusCommands.applyOutbox(box, to: &data)
         StatusPage(data: data, actions: StatusCommands.actions(data, ask: $ask, storedQueue: $storedQueue, outbox: $outbox),
-                   outbox: outbox, live: Self.liveData)
+                   outbox: box, live: Self.liveData)
             .navigationTitle("状态")
             // HIG Refresh content controls: "A refresh control lets people immediately reload content"
             .refreshable { await Live.shared.ping() }
