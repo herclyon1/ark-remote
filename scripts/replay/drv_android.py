@@ -88,6 +88,8 @@ class AndroidDriver:
     def adb(self, *a, timeout=60, binary=False):
         t = time.time()
         r = subprocess.run([self.adb_bin, "-s", self.serial, *a], capture_output=True, timeout=timeout)
+        if any(c in s for s in a for c in self.INPUT_CMDS):
+            self._last_input = time.time()
         if self.prof:
             self.prof.add(a, time.time() - t)
         return r.stdout if binary else r.stdout.decode("utf-8", "replace")
@@ -214,6 +216,8 @@ class AndroidDriver:
     # for the rest of the run.
     DUMPER_DEX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dumper", "replay-dumper.dex")
     DUMPER_IDLE_MS = (1000, 10000)   # DumpCommand's waitForIdle(1000, 10000)
+    DUMPER_SETTLE = 1.9              # s after the last input before the tree is read (a `uiautomator dump`'s floor)
+    INPUT_CMDS = ("input ", "am start", "am force-stop", "/dev/input/")
 
     def _dumper(self):
         if getattr(self, "_dp", None) is not None:
@@ -275,7 +279,8 @@ class AndroidDriver:
             return self.adb("exec-out", "uiautomator", "dump", "/dev/tty", timeout=30)
         t = time.time()
         try:
-            dp.stdin.write(("%d %d\n" % self.DUMPER_IDLE_MS).encode())
+            settle = max(0.0, getattr(self, "_last_input", 0) + self.DUMPER_SETTLE - time.time())
+            dp.stdin.write(("%d %d %d\n" % ((int(settle * 1000),) + self.DUMPER_IDLE_MS)).encode())
             dp.stdin.flush()
         except OSError:
             self._dumper_off("pipe closed")

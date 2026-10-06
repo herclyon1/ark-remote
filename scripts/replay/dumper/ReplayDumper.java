@@ -3,7 +3,10 @@
 // on getRootInActiveWindow, with the real display's rotation and size). Each `uiautomator dump` call pays ~0.86 s of
 // process start and service connect on ark37 before its 1 s idle wait (drv_android.py, measured 2026-10-06).
 //
-// Request: "<idle ms> <max wait ms>"  (DumpCommand uses waitForIdle(1000, 10000))
+// Request: "<settle ms> <idle ms> <max wait ms>": sleep settle ms first (the runner's time left until 1.9 s after its
+//          last input: a `uiautomator dump` never read the tree sooner than ~1.9 s after it was asked), drop the
+//          connection's node cache (a long-lived connection otherwise answers from it: the old tree, 6 ms, while an
+//          alert was already up), then waitForIdle(idle, max) as DumpCommand does with (1000, 10000).
 // Start:   a line "<<REPLAY-READY <pid>>>" (the runner kills that pid on the device when it is done with it)
 // Reply:   the XML, then a line "<<REPLAY-END ok|timeout|error <ms>>>"
 // Run:     CLASSPATH=/system/framework/uiautomator.jar:/data/local/tmp/replay-dumper.dex app_process /system/bin ReplayDumper
@@ -43,14 +46,19 @@ public class ReplayDumper {
         byte[] buf = new byte[65536];
         while ((line = in.readLine()) != null) {
             String[] p = line.trim().split("\\s+");
-            if (p.length < 2) {
+            if (p.length < 3) {
                 continue;
             }
             long t0 = System.nanoTime();
             String status = "ok";
             try {
+                long settle = Long.parseLong(p[0]);
+                if (settle > 0) {
+                    Thread.sleep(settle);
+                }
+                ua.clearCache();
                 try {
-                    ua.waitForIdle(Long.parseLong(p[0]), Long.parseLong(p[1]));
+                    ua.waitForIdle(Long.parseLong(p[1]), Long.parseLong(p[2]));
                 } catch (TimeoutException e) {
                     status = "timeout";      // DumpCommand prints "could not get idle state" and writes nothing
                 }
