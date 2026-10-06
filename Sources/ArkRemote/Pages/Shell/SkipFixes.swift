@@ -305,6 +305,36 @@ extension View {
         self
         #endif
     }
+
+    /// D39 on Android: a reselect of `tab` at its root (TabReselect.bump) also opens the large title again, as iOS's
+    /// tab bar does when it scrolls a root page to its top. No-op on iOS. Goes on the tab's NavigationStack.
+    ///
+    /// The root page's new List (its .id(reselect)) starts at the top, but the title's collapse is not the List's: it is
+    /// skip-ui's Compose LargeTopAppBar (Containers/Navigation.swift:512) with an exitUntilCollapsed scroll behavior
+    /// remembered per navigation entry in RenderEntry (:242, :298), tied to the List only through nestedScroll (:323).
+    /// So the title stayed collapsed over a list back at its top. skip-ui's public `material3TopAppBar` (:1493) hands
+    /// that very behavior to its closure (:304-307), which is called before the entry's content is composed - so the
+    /// modifier is read from the NavigationStack, not from the page.
+    func expandsTopBarOnReselect(_ tab: ContentTab) -> some View {
+        #if os(Android)
+        composeModifier { ExpandTopBarOnReselect(tab: tab.reselectIndex) }
+        #else
+        self
+        #endif
+    }
+}
+
+extension ContentTab {
+    /// The tab's slot in TopBarReselect (Android), whose bridged API takes an Int.
+    var reselectIndex: Int {
+        switch self {
+        case .status: return 0
+        case .arknights: return 1
+        case .endfield: return 2
+        case .wuwa: return 3
+        case .phone: return 4
+        }
+    }
 }
 
 #if SKIP
@@ -312,6 +342,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -364,6 +397,50 @@ struct ClearFocusOnPress: ContentModifier {
                     }
                 }
             }
+        }
+    }
+}
+/// The reselect counts as Compose state, for the top bar closure below. TabReselect (an @Observable in compiled Swift) is
+/// not bridged to Kotlin (its TabReselect.kt has no class), and an environment value set on the NavigationStack did not
+/// reach the tab roots on Android (TabReselect.swift:1-6), so TabReselect.bump bumps these too.
+/// Public, not internal: Kotlin names an internal member `bump$ArkRemote` on the JVM, while the generated Swift bridge
+/// looks the method up as `bump` and force-unwraps it - the first reselect trapped (SIGTRAP from the tab bar's click).
+public final class TopBarReselect {
+    private static let counts = [mutableIntStateOf(0), mutableIntStateOf(0), mutableIntStateOf(0), mutableIntStateOf(0), mutableIntStateOf(0)]
+
+    public static func bump(_ tab: Int) {
+        counts[tab].intValue += 1
+    }
+
+    /// Read in a composable: the reader recomposes on a bump.
+    public static func value(_ tab: Int) -> Int {
+        return counts[tab].intValue
+    }
+}
+
+/// See `expandsTopBarOnReselect(_:)`. The closure is called twice per composition (Navigation.swift:305 and :494, the
+/// second return value dropped at :497), both times with the entry's own scroll behavior, so it only resets the one it is
+/// handed and never makes a new one. `seen` starts at the count of the first composition: an entry composed again
+/// (back from another tab, its List scrolled where it was) does not open its title; only a later bump does.
+// SKIP INSERT: @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+struct ExpandTopBarOnReselect: ContentModifier {
+    let tab: Int
+
+    func modify(view: any View) -> any View {
+        view.material3TopAppBar { options in
+            let count = TopBarReselect.value(tab)
+            let seen = remember { mutableStateOf(count) }
+            let behavior = options.scrollBehavior
+            LaunchedEffect(count) {
+                if seen.value != count {
+                    seen.value = count
+                    if let b = behavior, !b.isPinned {
+                        b.state.heightOffset = Float(0.0)
+                        b.state.contentOffset = Float(0.0)
+                    }
+                }
+            }
+            return options
         }
     }
 }

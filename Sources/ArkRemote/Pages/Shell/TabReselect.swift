@@ -27,5 +27,8 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         case .wuwa: wuwa += 1
         case .phone: phone += 1
         }
+        #if os(Android)
+        TopBarReselect.bump(t.reselectIndex)   // the large title opens again too (SkipFixes.swift expandsTopBarOnReselect)
+        #endif
     }
 }

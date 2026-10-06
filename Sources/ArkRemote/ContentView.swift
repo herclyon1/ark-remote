@@ -131,6 +131,7 @@ struct ContentView: View {
             NavigationStack(path: $statusPath) {
                 StatusTab().noticed()
             }
+            .expandsTopBarOnReselect(.status)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
             .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
             .tabItem { Label { Text("状态") } icon: { tabIcon("tab-status") } }
             .tag(ContentTab.status)
@@ -139,6 +140,7 @@ struct ContentView: View {
             NavigationStack(path: $arknightsPath) {
                 ArknightsTab().noticed()
             }
+            .expandsTopBarOnReselect(.arknights)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
             .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
             .tabItem { Label { Text("方舟") } icon: { tabIcon("tab-arknights") } }
             .tag(ContentTab.arknights)
@@ -148,6 +150,7 @@ struct ContentView: View {
             NavigationStack(path: $endfieldPath) {
                 EndfieldTab().noticed()
             }
+            .expandsTopBarOnReselect(.endfield)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
             .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
             .tabItem { Label { Text("终末地") } icon: { tabIcon("tab-endfield") } }
             .tag(ContentTab.endfield)
@@ -157,6 +160,7 @@ struct ContentView: View {
             NavigationStack(path: $wuwaPath) {
                 WuwaTab().noticed()
             }
+            .expandsTopBarOnReselect(.wuwa)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
             .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
             .tabItem { Label { Text("鸣潮") } icon: { tabIcon("tab-wuwa") } }
             .tag(ContentTab.wuwa)
@@ -171,6 +175,7 @@ struct ContentView: View {
                     .modifier(EWSaveBar(title: "游戏机遥控"))
                     .noticed()
             }
+            .expandsTopBarOnReselect(.phone)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
             .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
             .tabItem { Label { Text("手机") } icon: { tabIcon("tab-phone") } }
             .tag(ContentTab.phone)
