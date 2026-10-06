@@ -15,6 +15,14 @@ struct SetupScreen: View {
     private var trimmedTopic: String { topic.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedPin: String { pin.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    /// What is wrong with what is typed, said under the fields as it is typed (HIG Text fields: "Validate fields when it
+    /// makes sense"); nil = both are fine. Empty fields are not an error yet: the button stays disabled.
+    /// A PIN still being typed is not short yet: that is said once the field is left.
+    private var problem: String? { SetupScreen.problem(topic: trimmedTopic, pin: trimmedPin, pinTyping: focus == .pin) }
+    private var ready: Bool {
+        !trimmedTopic.isEmpty && !trimmedPin.isEmpty && SetupScreen.problem(topic: trimmedTopic, pin: trimmedPin) == nil
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -37,9 +45,13 @@ struct SetupScreen: View {
                         // the config appearing, and AppShell starts Live on that change (Logic/AppGlue.swift).
                         Relay.shared.saveConfig(topic: trimmedTopic, pin: trimmedPin)
                     }
-                    .disabled(trimmedTopic.isEmpty || trimmedPin.isEmpty)
+                    .disabled(!ready)
                 } footer: {
-                    Text("填一次就好，之后不再问。这两样只存在这台手机里。")
+                    if let problem {
+                        Text(problem).foregroundStyle(.red)
+                    } else {
+                        Text("填一次就好，之后不再问。这两样只存在这台手机里。")
+                    }
                 }
                 // The web page is entered with the 免输入链接 (#k=…); on Android that link opens the browser, not the app
                 // (no assetlinks.json on herclyon1.github.io), so the app takes the same link from the clipboard instead.
@@ -75,6 +87,21 @@ struct SetupScreen: View {
 }
 
 extension SetupScreen {
+    /// The mailbox is an ntfy topic: ntfy takes only `^[-_A-Za-z0-9]{1,64}$` (ntfy server/server.go:87 topicRegex), so
+    /// anything else could never reach the machine. The PIN is the 4 digits the field's prompt asks for (「4 位数字」, the
+    /// web page's placeholder, view.js setupScreen). An empty field is not reported (nothing typed yet).
+    static func problem(topic: String, pin: String, pinTyping: Bool = false) -> String? {
+        let topicChars = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+        if !topic.isEmpty && (topic.count > 64 || !topic.allSatisfy { topicChars.contains($0) }) {
+            return "信箱名只能有英文字母、数字、- 和 _，最长 64 个。"
+        }
+        let digits = pin.allSatisfy { "0123456789".contains($0) }
+        if !pin.isEmpty && (!digits || pin.count > 4 || (pin.count < 4 && !pinTyping)) {
+            return "PIN 要 4 位数字。"
+        }
+        return nil
+    }
+
     /// A 免输入链接 (…#k=…) → PhoneLink.open, the same path as an opened link. True when it took.
     @MainActor static func take(_ text: String) -> Bool {
         let s = text.trimmingCharacters(in: .whitespacesAndNewlines)

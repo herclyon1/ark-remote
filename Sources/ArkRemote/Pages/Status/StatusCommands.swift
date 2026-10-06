@@ -14,6 +14,9 @@ struct StatusAsk: Equatable {
     /// What the outbox row in the 回执 section names while the order is on its way (「现在跑一趟」).
     var what: String
     var isEstop = false
+
+    /// The order's action (「run_now」 / 「estop」 / 「echo_farm」 / 「echo_farm_stop」): which button's dialog shows it.
+    var action: String { body["action"]?.string ?? "" }
 }
 
 /// What the page sent and has no answer for yet, shown where it was sent from (HIG Feedback: "Consider integrating status

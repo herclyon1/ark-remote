@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The 状态 tab: StatusPage fed from Relay / Live / StaminaStore / Pending; commands send what the web page's buttons send
 /// (view.js wire(): #runnow, #estop, #echofarm, #echofarmuntil, #echofarmstop). Switches and pickers apply when changed
-/// (StatusCommands.apply); the commands that spend or stop a run ask first in a confirmation dialog. The mapping and the
-/// send code live in Pages/Status/.
+/// (StatusCommands.apply); the commands that spend or stop a run ask first in a confirmation dialog, attached by
+/// StatusPage to the button that asked (StatusPage.asking). The mapping and the send code live in Pages/Status/.
 struct StatusTab: View {
     @AppStorage("ark-remote-cfg-queue") var storedQueue = ""
     @AppStorage("ark-remote-estop") var estopAt = 0
@@ -28,7 +28,15 @@ struct StatusTab: View {
         let box = StatusCommands.withSwitches(outbox)
         let _ = StatusCommands.applyOutbox(box, to: &data)
         StatusPage(data: data, actions: StatusCommands.actions(data, ask: $ask, storedQueue: $storedQueue, outbox: $outbox),
-                   outbox: box, live: Self.liveData)
+                   outbox: box, live: Self.liveData, ask: $ask, confirm: { a in
+                       let pressed = nowSec()
+                       let head = data.receipts.first?.id
+                       Task {
+                           // only an order that went out waits for its receipt: written before the send, a failed one
+                           // still read 「已下令停止 · 等机器回执」 for 6 hours (edge audit 4, 审查 B8)
+                           if await StatusCommands.shoot(a, head: head, outbox: $outbox), a.isEstop { estopAt = pressed }
+                       }
+                   })
             .navigationTitle("状态")
             // HIG Refresh content controls: "A refresh control lets people immediately reload content"
             .refreshable { await Live.shared.ping() }
@@ -54,25 +62,6 @@ struct StatusTab: View {
                     relay.setStatus("读不到信箱 · " + Live.why(error) + (net ? "，先看看你这边有没有网" : ""), "")
                 }
                 _ = await StaminaStore.shared.refresh()
-            }
-            // HIG Action sheets: "Use an action sheet — not an alert — to offer choices related to an intentional action."
-            // A send that fails shows in the 回执 section's outbox row (StatusShot), not in a second alert.
-            .confirmationDialog(ask?.title ?? "", isPresented: Binding(get: { ask != nil }, set: { if !$0 { ask = nil } }),
-                                titleVisibility: .visible) {
-                if let a = ask {
-                    Button(a.ok, role: a.destructive ? .destructive : nil) {
-                        let pressed = nowSec()
-                        let head = data.receipts.first?.id
-                        Task {
-                            // only an order that went out waits for its receipt: written before the send, a failed one
-                            // still read 「已下令停止 · 等机器回执」 for 6 hours (edge audit 4, 审查 B8)
-                            if await StatusCommands.shoot(a, head: head, outbox: $outbox), a.isEstop { estopAt = pressed }
-                        }
-                    }
-                    Button("取消", role: .cancel) {}
-                }
-            } message: {
-                Text(ask?.message ?? "")
             }
     }
 }

@@ -552,7 +552,11 @@ struct EndfieldStockpilePage: View {
             case .zero(let text):
                 Text(text).foregroundStyle(.secondary)
             case .empty(let title, let text, let button, let action):
+                #if os(Android)
                 empty(title: title, text: text, button: button, action: action)
+                #else
+                EmptyView()   // iOS: the empty state is the List's overlay (below), centred on the page
+                #endif
             case .list(let sections, let footnote):
                 ForEach(sections) { sec in
                     Section {
@@ -587,6 +591,16 @@ struct EndfieldStockpilePage: View {
                 }
             }
         }
+        #if !os(Android)
+        // the system empty state over the (empty) List, centred on the page, the way the
+        // ContentUnavailableView documentation places it (`.overlay { if … { ContentUnavailableView.search } }`); the
+        // List under it keeps pull to refresh
+        .overlay {
+            if case .empty(let title, let text, let button, let action) = s.content {
+                empty(title: title, text: text, button: button, action: action)
+            }
+        }
+        #endif
         .navigationTitle(Stockpile.title)
         // pull to refresh is the page's one refresh (HIG Refresh content controls); no 刷新 button beside it
         .refreshable { await s.load(force: true) }
@@ -611,7 +625,6 @@ struct EndfieldStockpilePage: View {
         } actions: {
             emptyAction(button: button, action: action)
         }
-        .listRowBackground(Color.clear)
         #endif
     }
 

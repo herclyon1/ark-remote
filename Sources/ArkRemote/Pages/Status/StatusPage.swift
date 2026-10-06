@@ -12,6 +12,10 @@ struct StatusPage: View {
     /// collects (Navigation.swift:869-872, NavigationDestination.equals is always true), so one capturing `data` showed
     /// the receipts of the App's first draw, even pushed afresh (test pass 1, 问题 9). nil: `data` (previews).
     var live: (() -> StatusData)? = nil
+    /// The command waiting for a yes (StatusTab's state) and what a yes does (StatusTab sends it). Each confirmation is
+    /// attached to the button that asked (asking(_:action:)).
+    var ask: Binding<StatusAsk?> = .constant(nil)
+    var confirm: (StatusAsk) -> Void = { _ in }
 
     @State var bossIndex = 1
     @State var echoUntil = "08:30"
@@ -198,6 +202,7 @@ struct StatusPage: View {
                            },
                            displayedComponents: .hourAndMinute)
                 Button("提前收工", role: .destructive) { actions.stopEchoFarm() }
+                    .modifier(Asking(ask: ask, action: "echo_farm_stop", confirm: confirm))
             } header: {
                 Text("刷声骸")
             } footer: {
@@ -222,6 +227,7 @@ struct StatusPage: View {
             }
             // HIG Alerts: "Avoid using an alert merely to provide information." The reason is the row's subtitle.
             .disabled(!data.busy.isEmpty)
+            .modifier(Asking(ask: ask, action: "run_now", confirm: confirm))
             Button(role: .destructive) { actions.stopAll() } label: {
                 Label {
                     titled("停止一切", data.machineOff ? "机器关着，没有在跑的" : "脚本和游戏")
@@ -230,6 +236,7 @@ struct StatusPage: View {
                 }
             }
             .disabled(data.machineOff)
+            .modifier(Asking(ask: ask, action: "estop", confirm: confirm))
         }
     }
 
@@ -381,6 +388,7 @@ struct StatusPage: View {
                 // started while the machine is off it would run at the next boot with the time resolved then (审查 A3)
                 Button("开始刷") { actions.startEchoFarm(bossIndex, echoUntil) }
                     .disabled(data.machineOff)
+                    .modifier(Asking(ask: ask, action: "echo_farm", confirm: confirm))
             } header: {
                 Text("刷 4C 声骸")
             } footer: {
@@ -509,6 +517,34 @@ private struct StatusPlanGameRow: Identifiable {
     var block: String
     var game: StatusPlanGame
     var id: String { block + "/" + game.id }
+}
+
+/// A command's confirmation, attached to the button that asks for it so the dialog comes from that button (SwiftUI
+/// confirmationDialog(_:isPresented:titleVisibility:actions:message:): the documented example attaches the modifier to the
+/// Button that presents it, and "In regular size classes in iOS, the system renders confirmation dialogs as a popover"
+/// that points at that view).
+/// HIG Action sheets: "Use an action sheet — not an alert — to offer choices related to an intentional action." Shown
+/// while the asked command is this button's (StatusAsk.action).
+struct Asking: ViewModifier {
+    var ask: Binding<StatusAsk?>
+    var action: String
+    var confirm: (StatusAsk) -> Void
+
+    func body(content: Content) -> some View {
+        let mine = ask.wrappedValue?.action == action ? ask.wrappedValue : nil
+        content
+            .confirmationDialog(mine?.title ?? "",
+                                isPresented: Binding(get: { ask.wrappedValue?.action == action },
+                                                     set: { if !$0, ask.wrappedValue?.action == action { ask.wrappedValue = nil } }),
+                                titleVisibility: .visible) {
+                if let a = mine {
+                    Button(a.ok, role: a.destructive ? .destructive : nil) { confirm(a) }
+                    Button("取消", role: .cancel) {}
+                }
+            } message: {
+                Text(mine?.message ?? "")
+            }
+    }
 }
 
 /// A receipt shows its whole text, wrapping onto as many lines as it needs (user, 10-02 20:49: a cut-off receipt, with
