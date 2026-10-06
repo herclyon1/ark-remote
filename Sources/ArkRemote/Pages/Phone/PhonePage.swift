@@ -87,12 +87,14 @@ struct PhonePage: View {
         // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
         // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).
         .id(reselect)
+        // view.js:1150-1153 pullRefresh: a pull on any tab but the pushed 库存 page is ping(), the 手机 tab too.
+        // Inside the sheets below: a sheet's content inherits the refresh action, and the 自检结果 sheet's ScrollView
+        // (DiagSheetBox) then kept room for a refresh control, its title cut at the sheet's top edge (diagsheet frames4).
+        .refreshable { await Live.shared.ping() }
         // 运行自检's result (PhoneDiagRows), here outside .id(reselect) so a reselect mid-run keeps it (SelfCheckRun)
         .sheet(isPresented: Binding(get: { selfCheckShown }, set: { SelfCheckRun.shared.shown = $0 })) {
             SelfCheckSheet { SelfCheckRun.shared.shown = false }
         }
-        // view.js:1150-1153 pullRefresh: a pull on any tab but the pushed 库存 page is ping(), the 手机 tab too
-        .refreshable { await Live.shared.ping() }
         // the title (「游戏机遥控」, or 「待保存 N 项」 while changes wait, view.js:1283 / 1554) is set by ContentView's EWSaveBar
         // view.js #tokpaste: prompt("把 KUROBBS_TOKEN=… 和 KUROBBS_DID=… 两行粘贴到这里：") — a multi-line editor here,
         // so the two lines stay two lines (a one-line field would join them)

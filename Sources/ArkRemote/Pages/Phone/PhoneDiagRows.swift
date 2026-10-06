@@ -138,26 +138,23 @@ struct DiagSheetBox: View {
         // A sheet with no detents is .large: three lines and a button row came up full screen over a blank page
         // (sheet06 cell 5). It is fitted to the content instead, .height(_:) from the measured text and row
         // (developer.apple.com/documentation/swiftui/view/presentationdetents(_:), PresentationDetent.height(_:)).
-        // The text is in a ScrollView with the row pinned under it in every case, so the layout does not change shape
-        // with the decision (a switch to scrolling would shrink the measured height and flip it back), and a long
-        // 自检结果 past half the screen opens at .medium, draggable to .large, scrolling and never cut.
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(title).font(.headline)
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)   // its whole height, not what a detent leaves it
+        // Short text sits in a plain VStack fitted to it; a long 自检结果 (isLong) scrolls over the pinned row at .medium,
+        // draggable to .large, never cut.
+        Group {
+            if Self.isLong(message) {
+                // a long 自检结果: the text scrolls over the pinned row, the sheet at .medium, draggable to .large
+                ScrollView { textBlock }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .safeAreaInset(edge: .bottom, spacing: 0) { actionRow }
+            } else {
+                // a few lines: no ScrollView (one inside the 自检结果 sheet kept its text scrolled down by about 30 pt,
+                // the title cut at the sheet's top edge over a gap above the buttons, diagsheet frames4 / frames5)
+                VStack(spacing: 0) {
+                    textBlock
+                    actionRow
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding([.horizontal, .top], 16)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { textHeight = $0 }
-        }
-        .scrollBounceBehavior(.basedOnSize)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            actions
-                .padding(.top, 10).padding([.horizontal, .bottom], 16)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowHeight = $0 }
         }
         // as the Android branch: the toast layer and the 「分享没成」 alert ride on the sheet
         .overlay { ToastLayer() }
@@ -172,6 +169,29 @@ struct DiagSheetBox: View {
     }
 
     #if !os(Android)
+    /// Past about four lines on a phone the text would not fit a fitted sheet under half the screen: it scrolls instead.
+    /// Decided from the text, not from a measured height, so the layout never flips while it is measured.
+    private static func isLong(_ message: String) -> Bool { message.count > 160 }
+
+    private var textBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.headline)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)   // its whole height, not what a detent leaves it
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding([.horizontal, .top], 16)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { textHeight = $0 }
+    }
+
+    private var actionRow: some View {
+        actions
+            .padding(.top, 10).padding([.horizontal, .bottom], 16)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowHeight = $0 }
+    }
+
     private var actions: some View {
         HStack(spacing: 8) {
             Button("复制") {
@@ -200,7 +220,7 @@ struct DiagSheetBox: View {
         let fit = textHeight + rowHeight
         guard textHeight > 0, rowHeight > 0 else { return [.height(Self.firstHeight)] }
         let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.height ?? 0
-        if screen > 0, fit > screen / 2 { return [.medium, .large] }
+        if Self.isLong(message) || (screen > 0 && fit > screen / 2) { return [.medium, .large] }
         return [.height(fit)]
     }
     #endif
