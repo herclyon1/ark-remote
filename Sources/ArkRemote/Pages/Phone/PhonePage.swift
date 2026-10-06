@@ -44,6 +44,8 @@ struct PhonePage: View {
     private var hasTokens: Bool { !data.staminaStatus.isEmpty }
 
     var body: some View {
+        // read here so its change redraws this page (the sheet's Binding is read outside body)
+        let selfCheckShown = SelfCheckRun.shared.shown
         List {
             Section {
                 PhoneValueRow(title: "页面版本", hint: "这个安装包的版本号；App 里更新过就会变", value: data.pageVersion)
@@ -85,6 +87,10 @@ struct PhonePage: View {
         // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
         // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).
         .id(reselect)
+        // 运行自检's result (PhoneDiagRows), here outside .id(reselect) so a reselect mid-run keeps it (SelfCheckRun)
+        .sheet(isPresented: Binding(get: { selfCheckShown }, set: { SelfCheckRun.shared.shown = $0 })) {
+            SelfCheckSheet { SelfCheckRun.shared.shown = false }
+        }
         // view.js:1150-1153 pullRefresh: a pull on any tab but the pushed 库存 page is ping(), the 手机 tab too
         .refreshable { await Live.shared.ping() }
         // the title (「游戏机遥控」, or 「待保存 N 项」 while changes wait, view.js:1283 / 1554) is set by ContentView's EWSaveBar

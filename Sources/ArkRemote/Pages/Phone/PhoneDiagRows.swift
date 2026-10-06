@@ -6,8 +6,6 @@ struct PhoneDiagRows: View {
     var appVersion: String
 
     @State var diagOn = DiagLog.shared.enabled
-    @State var checking = false
-    @State var checkShown = false
     @State var recordShown = false
     /// 「清空诊断记录」 asks first: right under 「分享诊断记录」, one stray tap wiped the record that was to be sent (edge audit 40).
     @State var clearAsk = false
@@ -24,7 +22,6 @@ struct PhoneDiagRows: View {
             PhoneRowLabel(title: "诊断记录", hint: "开着时记下这台手机收发消息、网络通断和机器状态的变化，可复制 / 分享给我们")
         }
         .onAppear { if diagOn { DiagWatch.start(); DiagUI.shared.start() } }
-        .sheet(isPresented: $checkShown) { SelfCheckSheet { checkShown = false } }
         if diagOn {
             // the web opens this sheet from a tap on the bottom line (DiagOverlay); this row is the same sheet from the page
             Button("分享诊断记录（\(count) 条）") {
@@ -39,17 +36,20 @@ struct PhoneDiagRows: View {
                 } message: {
                     Text("这台手机记下的 \(count) 条都会删掉，还没分享的就找不回来了。")
                 }
-            // view.js:602 #selfcheck is hidden while 诊断记录 is off
-            Button(checking ? "正在自检…" : "运行自检") {
-                guard !checking else { return }
-                checking = true
+            // view.js:602 #selfcheck is hidden while 诊断记录 is off. The running flag and the result sheet live in
+            // SelfCheckRun and the sheet is on PhonePage outside its .id(reselect): a reselect of 手机 rebuilds this List
+            // on Android (D39), and @State here went back to 「运行自检」 mid-run, the result sheet never coming up.
+            let run = SelfCheckRun.shared
+            Button(run.checking ? "正在自检…" : "运行自检") {
+                guard !run.checking else { return }
+                run.checking = true
                 Task {
                     _ = await SelfCheck.run()   // kept in LastSelfCheck; the sheet reads it from there
-                    checking = false
-                    checkShown = true
+                    run.checking = false
+                    run.shown = true
                 }
             }
-            .disabled(checking)
+            .disabled(run.checking)
         }
     }
 }

@@ -254,6 +254,17 @@ final class OnceFlag: @unchecked Sendable {
     }
 }
 
+/// A 运行自检 in progress and its 「自检结果」 sheet (PhoneDiagRows' button, PhonePage's sheet). Not @State in the rows:
+/// a reselect of the 手机 tab gives PhonePage's List a new identity on Android (D39, PhonePage .id(reselect)), which
+/// dropped a row's @State mid-run - the button read 「运行自检」 again and the result sheet never came up.
+@MainActor @Observable final class SelfCheckRun {
+    static let shared = SelfCheckRun()
+
+    var checking = false
+    /// The 「自检结果」 sheet is up.
+    var shown = false
+}
+
 /// This phone's last 运行自检, kept for the next start (the web keeps accept.js's result in localStorage ark-accept and
 /// every diagnostic record carries it, view.js:3045-3053 lastSelfcheck).
 enum LastSelfCheck {
