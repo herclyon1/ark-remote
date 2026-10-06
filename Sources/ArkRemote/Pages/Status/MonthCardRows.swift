@@ -3,19 +3,19 @@ import SwiftUI
 // The 月卡 views of the 状态 page (web monthcard.js banner() / section() / pageHtml(); view.js:362 and :404 place them).
 // The data and the sends are Logic/MonthCard.swift.
 
-/// The tone of a 月卡 line (monthcard.js tone()): orange from 5 days left (.mc-soon, --ios-orange), red once lapsed
-/// (.mc-bad, --bad), else the subtitle grey.
+/// The tone of a 月卡 line (monthcard.js tone()): orange from 5 days left, red once lapsed, else secondary.
 private func monthCardTone(_ e: MonthCardEntry?) -> Color {
     guard let e else { return .secondary }
     if e.expired { return .red }
     return e.left <= 5 ? .orange : .secondary
 }
 
-/// The card at the top of the 状态 page while a card has 0–5 days left (spec §4; monthcard.js banner(), drawn with view.js
-/// notice(): caption, title, body). Nothing when no card is that close. Goes right after the 刷声骸 card (view.js:362).
+/// The section at the top of the 状态 page while a card has 0–5 days left (spec §4; monthcard.js banner()): one row per
+/// card that opens its registration page (HIG Writing: "If you need to direct someone to a setting, provide a direct link
+/// or button, rather than trying to describe its location."). Nothing when no card is that close.
 struct MonthCardReminder: View {
-    /// MonthCardStore.today(), passed in: 还剩 X 天 counts from it, and a view with no input that changes was not redrawn by
-    /// the page's 30-s tick, so past midnight it kept yesterday's count (edge audit 22).
+    /// MonthCardStore.today(), passed in: 还剩 X 天 counts from it, and a view with no input that changes was not redrawn
+    /// past midnight, so it kept yesterday's count (edge audit 22).
     var today: String
 
     var body: some View {
@@ -23,11 +23,13 @@ struct MonthCardReminder: View {
         // listSection, not `if`: a bare `if` leaves an empty grey section on Android (Pages/Shell/SkipFixes.swift)
         listSection("status-monthcard-soon", if: !soon.isEmpty) {
             Section("月卡快到期") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(soon.map { "\($0.game)还剩 \($0.entry.left) 天" }.joined(separator: "、"))
-                    Text(soon.map { "\($0.game)最后一次领取是 \(MonthCardStore.md($0.entry.last))" }.joined(separator: "；")
-                         + "。续费后点下面的月卡行登记")
-                        .font(.footnote).foregroundStyle(.secondary)
+                ForEach(soon.indices, id: \.self) { i in
+                    NavigationLink(value: StatusRoute.monthCard(soon[i].game)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(soon[i].game)还剩 \(soon[i].entry.left) 天")
+                            Text("最后一次领取 \(MonthCardStore.md(soon[i].entry.last))").font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
         }
@@ -76,16 +78,21 @@ struct MonthCardRows: View {
     }
 }
 
-/// The pushed page of one game (monthcard.js pageHtml() / open()): what is registered, 「登记充值」 with a stepper and
-/// 「按游戏里的天数对准」 with the day count the game shows; each asks before it registers.
+/// The pushed page of one game (monthcard.js pageHtml()): what is registered, 「登记充值」 with a stepper and 「按游戏里的
+/// 天数对准」 with the day count the game shows. Each registers on its button, no confirm (HIG Alerts: "Avoid displaying
+/// alerts for common, undoable actions"): the rows above show the new date at once, and either form corrects the other.
 struct MonthCardPage: View {
     var game: String
 
     /// 「充值了 N 次」, 1–12 (monthcard.js open(): n starts at 1, back to 1 after a registration).
     @State var count = 1
-    @State var leftText = ""
+    /// The day count typed (0–400, MonthCardStore.maxLeft); nil = empty or not a number.
+    @State var left: Int? = nil
     @FocusState var leftFocus: Bool
-    @State var ask: MonthCardAsk? = nil
+    /// Bumped on each registration: the success haptic (HIG Playing haptics; .sensoryFeedback).
+    @State var registered = 0
+
+    private var leftOK: Bool { left.map { (0...MonthCardStore.maxLeft).contains($0) } ?? false }
 
     var body: some View {
         let store = MonthCardStore.shared
@@ -94,39 +101,30 @@ struct MonthCardPage: View {
         List {
             Section {
                 if let e {
-                    HStack {
-                        Text("最后一次领取")
-                        Spacer()
-                        Text(MonthCardStore.md(e.last)).foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("还剩")
-                        Spacer()
+                    LabeledContent("最后一次领取", value: MonthCardStore.md(e.last))
+                    LabeledContent("还剩") {
                         Text(e.expired ? "已过期" : "\(e.left) 天").foregroundStyle(monthCardTone(e))
                     }
                     if e.local {
                         Text(MonthCardStore.syncNote).font(.footnote).foregroundStyle(.secondary)
                     }
                 } else {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("还没登记")
-                        Text("买过月卡的话，用下面任一种登记一次").font(.footnote).foregroundStyle(.secondary)
-                    }
+                    Text("还没登记")
                 }
             } footer: {
                 Text("有效期内每天登录领一次；还剩 1 天＝明天登录那次是最后一次领取。还剩 5 天起每天提醒一次。")
             }
             Section {
-                // UIStepper row (monthcard.js .mc-step): minus off at 1, plus off at 12
                 Stepper(value: $count, in: 1...MonthCardStore.maxAdd) {
                     Text("充值了 \(count) 次")
                 }
                 Button("登记") {
                     let n = count
-                    let to = store.after(game, add: n)
-                    ask = MonthCardAsk(title: "登记充值 \(n) 次？",
-                                       message: "\(game)月卡加 \(MonthCardStore.days * n) 天，最后一次领取改到 \(MonthCardStore.md(to))。",
-                                       ok: "登记", add: n, left: nil, last: to)
+                    let g = game
+                    let to = store.after(g, add: n)
+                    count = 1
+                    registered += 1
+                    Task { await MonthCardStore.shared.register(g, add: n, left: nil, last: to) }
                 }
             } header: {
                 Text("登记充值")
@@ -134,44 +132,34 @@ struct MonthCardPage: View {
                 Text("付完钱在这里登记。买一次加 \(MonthCardStore.days) 天，接在最后一次领取日后面；已经过期的从登记当天算第 1 天。")
             }
             Section {
-                HStack(spacing: 6) {
-                    Text("游戏里显示还剩").frame(maxWidth: .infinity, alignment: .leading)
+                LabeledContent("游戏里显示还剩") {
                     dayField
-                    Text("天").foregroundStyle(.secondary)
                 }
                 Button("对准") { setLeft() }
+                    .disabled(!leftOK)
             } header: {
                 Text("按游戏里的天数对准")
             } footer: {
-                Text("第一次用或者日期对不上时，照游戏里显示的「还剩 X 天」填。")
+                // the error next to the field, as it is typed (HIG Writing: "Show errors right next to the field")
+                if let x = left, !leftOK {
+                    Text("\(x) 天超出范围：填 0–\(MonthCardStore.maxLeft)。").foregroundStyle(.red)
+                } else {
+                    Text("第一次用或者日期对不上时，照游戏里显示的「还剩 X 天」填。")
+                }
             }
         }
+        // Android: a tap outside the field or back with the keyboard up ends the editing (Pages/Shell/SkipFixes.swift)
         .clearsFocusOnOutsideTap()
         .keyboardDone()
         .navigationTitle("\(game)月卡")
-        .alert(ask?.title ?? "", isPresented: Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })) {
-            if let a = ask {
-                Button(a.ok) {
-                    let g = game
-                    Task {
-                        await MonthCardStore.shared.register(g, add: a.add, left: a.left, last: a.last)
-                    }
-                    if a.add != nil { count = 1 } else { leftText = ""; leftFocus = false }
-                }
-                Button("取消", role: .cancel) {}
-            }
-        } message: {
-            Text(ask?.message ?? "")
-        }
+        .sensoryFeedback(.success, trigger: registered)
     }
 
-    /// index.html .row input.short with inputmode="numeric", placeholder 「天数」, 64–80 px wide.
+    /// A number field (TextField(value:format:), skip-fuse-ui TextField.swift:64-79 parses with try? on Android).
     @ViewBuilder private var dayField: some View {
-        let field = TextField("天数", text: $leftText)
+        let field = TextField("天数", value: $left, format: .number)
             .focused($leftFocus)
             .multilineTextAlignment(.trailing)
-            .autocorrectionDisabled()
-            .frame(width: 72)
         #if os(macOS)
         field
         #else
@@ -179,33 +167,14 @@ struct MonthCardPage: View {
         #endif
     }
 
-    /// monthcard.js #mcset: full-width digits count, 0–400 only, else a toast and the field keeps the keyboard.
+    /// monthcard.js #mcset: the last claim day from the day count the game shows.
     private func setLeft() {
-        var s = ""
-        for u in leftText.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars {
-            if u.value >= 0xFF10 && u.value <= 0xFF19, let a = Unicode.Scalar(u.value - 0xFEE0) {
-                s.unicodeScalars.append(a)
-            } else {
-                s.unicodeScalars.append(u)
-            }
-        }
-        guard (1...3).contains(s.count), s.allSatisfy({ $0.isASCII && $0.isNumber }), let x = Int(s), x <= MonthCardStore.maxLeft else {
-            Relay.shared.showToast("填 0–\(MonthCardStore.maxLeft) 的整数")
-            leftFocus = true
-            return
-        }
+        guard let x = left, leftOK else { return }
+        let g = game
         let to = MonthCardStore.plus(MonthCardStore.today(), x)
-        ask = MonthCardAsk(title: "对准为还剩 \(x) 天？", message: "\(game)月卡最后一次领取改到 \(MonthCardStore.md(to))。",
-                           ok: "对准", add: nil, left: x, last: to)
+        left = nil
+        leftFocus = false
+        registered += 1
+        Task { await MonthCardStore.shared.register(g, add: nil, left: x, last: to) }
     }
-}
-
-/// One confirm of the registration page (web ask(title, msg, okLabel)).
-struct MonthCardAsk: Equatable {
-    var title: String
-    var message: String
-    var ok: String
-    var add: Int?
-    var left: Int?
-    var last: String
 }
