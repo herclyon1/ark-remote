@@ -1,57 +1,43 @@
 import SwiftUI
 
-/// The 方舟 tab: ArknightsPage filled from the relay snapshot (Relay.shared.snap).
-/// A change waits in the page's one pool of unsaved changes (Logic/Edits.swift, view.js `edits`) with the other tabs'
-/// ones; the shared edit bar (EWSaveBar: ✕ / 「待保存 N 项」 / ✓, view.js:1551-1555) reviews them in 「确认这次修改」 and
-/// sends them all in one go (view.js doSave 1609, #go 2954), set_config / set_master each; one that could not be sent stays.
+/// The 方舟 tab: ArknightsPage filled from the relay snapshot (Relay.shared.snap). A change applies when it is made, as a
+/// switch in Settings does (验收 10-07): it goes out at once as a one-item send through EWSave.send (set_config for the
+/// 「明日方舟」 rows, set_master for 基建 and 奖励, view.js #go 2964-2966), and Pending then shows it sent and checks the
+/// receipt. No 「待保存」 pool, no review sheet.
 struct ArknightsTab: View {
     /// The shift picked on the 状态 tab (view.js curQueue, localStorage "ark-remote-cfg-queue").
     @AppStorage("ark-remote-cfg-queue") var storedQueue = ""
+    /// The selected tab (ContentView): 「换班次」 switches to 状态.
+    @AppStorage("tab") var tab = ContentTab.status
 
     private var bridge: ArknightsBridge {
         ArknightsBridge(snap: Relay.shared.snap, queue: storedQueue, lastGoodMaster: ArknightsBridge.lastGoodMaster(),
                         lastGoodConfig: ArknightsBridge.lastGoodConfig())
     }
 
-    /// This tab's entries in the pool, by the web's id (`${src}|MAA|${path}`).
-    private var mine: [String: EWEdit] {
-        var out: [String: EWEdit] = [:]
-        for f in ArknightsField.allCases {
-            if let id = f.ref?.id, let e = EWEdits.shared.items[id] { out[id] = e }
-        }
-        return out
-    }
-
     /// The machine's values with the sent-but-unconfirmed ones on top (view.js render; pending.js applyPending).
     private func base(_ b: ArknightsBridge) -> ArknightsPageData {
-        b.pageData(withPending: true, editing: Set(mine.keys))
+        b.pageData(withPending: true)
     }
 
-    /// What the page shows: `base` with the unsaved changes on top (view.js applyEdits after every render). Kept as the
-    /// page typed it (a number box holds 「012」 until the next render, like the web's <input>); its difference from
-    /// `base` is written into the pool on every change.
+    /// What the page shows: `base` with the changes on their way and the refused ones on top. The page writes a change
+    /// into it; `apply` sends it.
     @State var shown = ArknightsPageData()
-
-    /// The difference between `base` and what the page shows, as pool entries (view.js note(): back to the old value = no entry).
-    private func changes(_ page: ArknightsPageData) -> [String: EWEdit] {
-        let b = bridge
-        var out: [String: EWEdit] = [:]
-        for e in b.edits(from: base(b), to: page) { out[e.ref.id] = e.poolEdit }
-        return out
-    }
+    /// Changes being sent (EWSave.send running), by field id: drawn over `base` until Pending holds them, and their row
+    /// is disabled meanwhile, so one row never has two sends out.
+    @State var sending: [String: ArknightsEdit] = [:]
+    /// Typed values the relay would refuse (EWSave.problem: a stage code off its pattern, 理智药 outside 0–999, an empty
+    /// number), by field id: kept in the row with the reason under it, not sent.
+    @State var refused: [String: ArknightsRefused] = [:]
 
     var body: some View {
-        let edited = Set(ArknightsField.allCases.compactMap { f -> String? in
-            guard let id = f.ref?.id, mine[id] != nil else { return nil }
-            return f.path
-        })
-        ArknightsPage(data: $shown, onResend: { key in
+        ArknightsPage(data: $shown, status: status, busy: Set(sending.values.map { $0.field.path }), onResend: { key in
             Task {
                 await Pending.shared.resend(key)
                 refresh()
             }
-        }, edited: edited)
-            .modifier(EWSaveBar(title: "游戏机遥控"))   // view.js:1554: one title for every page, 「待保存 N 项」 while editing
+        }, onShowStatus: { tab = .status })
+            .navigationTitle("方舟")
             .task { await reload() }
             // Pull to refresh asks the machine to report again (view.js:1150 → live.js:21 ping: {action:"refresh"}, up to 11 s),
             // as the 状态 tab does (StatusTab.swift:23); the state it adopts redraws through onChange(of: snapAt).
@@ -59,39 +45,71 @@ struct ArknightsTab: View {
                 await Live.shared.ping()
                 refresh()
             }
-            // a change on the page goes into the pool (view.js note → edits[id])
-            .onChange(of: shown) {
-                let next = changes(shown)
-                for f in ArknightsField.allCases {
-                    guard let id = f.ref?.id else { continue }
-                    if EWEdits.shared.items[id] != next[id] { ewPutEdit(id, next[id]) }   // a row changed again keeps its place
-                }
-            }
-            // the pool changed from elsewhere — ✕ on any tab, or ✓ sent them (view.js:2950 / 3003 then render()): redraw
-            .onChange(of: mine) {
-                if changes(shown) != mine { redraw() }
+            .onChange(of: shown) { old, new in
+                apply(from: old, to: new)
             }
             .onChange(of: Relay.shared.snapAt) {
                 refresh()
             }
-            // the sent changes changed outside this tab — 「不等了，清掉」 on the bar (pending.js:85 `pending = {}; savePending();
-            // render();`): redraw now, so the rows' 「已寄出」 line, green ground and sent value go at once, not with the next state
+            // the sent changes changed — one went out, a receipt came, or 「不等了，清掉」 (pending.js:85): redraw now
             .onChange(of: Pending.shared.items) {
                 redraw()
             }
-            // view.js:945-949: a new shift re-renders; the unsaved changes stay in the pool.
+            // view.js:945-949: a new shift re-renders.
             .onChange(of: storedQueue) {
                 refresh()
             }
     }
 
-    /// `base` with the pool's changes on top (view.js: `const keep = { ...edits }; render(); edits = keep`).
+    /// The line under each row: the receipt (pending.js:47-67), else 「正在寄出」 or why a value was not sent.
+    private var status: [String: GameRowStatus] {
+        var out: [String: GameRowStatus] = [:]
+        for (path, t) in shown.tags { out[path] = GameRowStatus(text: t.text, bad: t.bad, resendKey: t.resendKey) }
+        for e in sending.values { out[e.field.path] = .sendingNow }
+        for r in refused.values { out[r.edit.field.path] = GameRowStatus(text: r.why, bad: true) }
+        return out
+    }
+
+    /// A step of `shown`: the fields that moved in it and now differ from `base` are changes made on the page (a redraw
+    /// moves fields to `base` plus what is already sending or refused, which is no new change). Each goes out on its own.
+    private func apply(from old: ArknightsPageData, to new: ArknightsPageData) {
+        let b = bridge
+        let moved = Set(b.edits(from: old, to: new).map { $0.ref.id })
+        guard !moved.isEmpty else { return }
+        let wanted = b.edits(from: base(b), to: new)
+        for id in moved where sending[id] == nil {
+            // back to what the row showed before (view.js note(): no change)
+            guard let e = wanted.first(where: { $0.ref.id == id }) else { refused[id] = nil; continue }
+            if refused[id]?.edit == e { continue }
+            if let why = EWSave.problem(e.poolEdit) {
+                refused[id] = ArknightsRefused(edit: e, why: why)
+                continue
+            }
+            refused[id] = nil
+            send(e)
+        }
+    }
+
+    /// One change, sent alone. A failure puts the row back to its value before and says why (an alert, as Pending.resend
+    /// does for 「发不出去」).
+    private func send(_ e: ArknightsEdit) {
+        let id = e.ref.id
+        sending[id] = e
+        Task {
+            let r = await EWSave.send([id: e.poolEdit])
+            sending[id] = nil
+            if let failure = r.failure {
+                Relay.shared.showAlert("没发出去", gameSendFailure(e.label, failure))
+            }
+            redraw()
+        }
+    }
+
+    /// `base` with the changes on their way and the refused ones on top.
     private func redraw() {
         var page = base(bridge)
-        let pool = mine
-        for f in ArknightsField.allCases {
-            if let id = f.ref?.id, let e = pool[id] { f.apply(e.to, to: &page) }
-        }
+        for e in sending.values { e.field.apply(e.to, to: &page) }
+        for r in refused.values { r.edit.field.apply(r.edit.to, to: &page) }
         shown = page
     }
 
@@ -116,4 +134,10 @@ struct ArknightsTab: View {
         Pending.shared.reconcile()
         redraw()
     }
+}
+
+/// A typed value that is not sent, and why (EWSave.problem).
+struct ArknightsRefused: Equatable {
+    var edit: ArknightsEdit
+    var why: String
 }
