@@ -190,11 +190,15 @@ struct DiagSheetBox: View {
         .buttonStyle(.bordered)
     }
 
-    /// .medium until both parts are measured; then the content's height, or .medium / .large when that is over half
-    /// the screen (the window scene's screen; UIScreen.main is deprecated).
+    /// Until both parts are measured, about the two-line sheet's own height (168 pt measured on the 诊断记录已生成 sheet,
+    /// simulator shots-1006): from .medium it would open at half the screen and then shrink to fit. Then the
+    /// content's height, or .medium / .large when that is over half the screen (the window scene's screen;
+    /// UIScreen.main is deprecated).
+    private static let firstHeight: CGFloat = 168
+
     private var detents: Set<PresentationDetent> {
         let fit = textHeight + rowHeight
-        guard textHeight > 0, rowHeight > 0 else { return [.medium] }
+        guard textHeight > 0, rowHeight > 0 else { return [.height(Self.firstHeight)] }
         let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.height ?? 0
         if screen > 0, fit > screen / 2 { return [.medium, .large] }
         return [.height(fit)]
