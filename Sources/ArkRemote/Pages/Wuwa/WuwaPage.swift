@@ -1,7 +1,7 @@
 // The 鸣潮 (OK-WW) tab. Same cards and rows as the web page's 鸣潮 tab (view.js:754 TABS /^鸣潮/):
 // the 「鸣潮」 card (schema.js:220-239) with the relay's 无音区结算截图 switch at its end (RELAY_SWITCHES, view.js:514),
 // then 「鸣潮 · 周常」 (view.js:524-535). 刷 4C 声骸 is not here: its header matches no tab, so the web page puts it on 状态.
-// Data, saving and the tab bar are wired by 验收 once the logic layer lands; this page only draws and reports edits.
+// The page draws and reports changes; WuwaTab (Pages/Shell) feeds it and sends each change as it is made.
 
 import SwiftUI
 
@@ -70,7 +70,7 @@ enum WuwaSchema {
     ])
 }
 
-/// Placeholder input for the page: snap.master["OK-WW"], the relay's own switch and the weekly block (relay["周常"]).
+/// Input for the page: snap.master["OK-WW"], the relay's own switch and the weekly block (relay["周常"]).
 struct WuwaPageData {
     var master: EWMaster
     var lastGoodMaster: EWMaster? = nil
@@ -82,23 +82,33 @@ struct WuwaPageData {
     var weeklyBossDone = false
     /// relay["周常"]["周本"]["第几个周本"]
     var weeklyBossIndex = 1
-    /// path (or "relay|tacet_shots", "wb|OK-WW|第几个周本") -> the small lines under that row.
-    var tags: [String: EWRowTag] = [:]
+    /// Row key (a config path, WuwaPage.tacetKey, WuwaPage.bossKey) -> the line under that row.
+    var status: [String: GameRowStatus] = [:]
+    /// Row keys whose change is on its way: the control is disabled until it has gone.
+    var busy: Set<String> = []
 
     static let sample = WuwaPageData(master: .wuwaSample)
 }
 
+/// The 鸣潮 tab as a Settings page: the 「鸣潮」 section with the relay's 无音区结算截图 switch at its end, then 「鸣潮 · 周常」.
+/// Each row's explanation sits under its name (brief 1007); a change applies when it is made — a switch, a menu or a pick
+/// at once, a text field (a config row the machine gives no choices for) when it is submitted (验收 10-07). WuwaTab sends it.
 struct WuwaPage: View {
+    static let tacetKey = "relay|tacet_shots"
+    static let bossKey = "wb|OK-WW|第几个周本"
+
     var data: WuwaPageData
+    /// A config row's new value (path, value), to send now.
     var onChange: (String, EWValue) -> Void
     /// (switch id as the web page names it, new state): "relay|tacet_shots"
     var onRelaySwitch: (String, Bool) -> Void
     var onWeeklyBossIndex: (Int) -> Void
     var onResend: (String) -> Void
 
+    /// The rows' working copy (EWRowView writes into it as the control changes).
     @State var values: [String: EWValue]
-    @State var tacetShots: Bool
-    @State var bossIndex: String
+    /// Text rows typed in and not yet submitted, by path.
+    @State var typed: [String: EWValue] = [:]
     /// A reselect of the 鸣潮 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.wuwa }
@@ -114,8 +124,6 @@ struct WuwaPage: View {
         self.onWeeklyBossIndex = onWeeklyBossIndex
         self.onResend = onResend
         _values = State(initialValue: ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:])
-        _tacetShots = State(initialValue: data.tacetShots)
-        _bossIndex = State(initialValue: String(data.weeklyBossIndex))
     }
 
     var body: some View {
@@ -128,11 +136,16 @@ struct WuwaPage: View {
         // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).
         .id(reselect)
         .keyboardDone()
+        // a text row goes out when it is submitted (onSubmit reaches every text field in the List)
+        .onSubmit {
+            let out = typed
+            typed = [:]
+            for (path, v) in out { onChange(path, v) }
+        }
         .onChange(of: data.master.values) { _, _ in
             values = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:]
+            typed = [:]
         }
-        .onChange(of: data.tacetShots) { _, v in tacetShots = v }
-        .onChange(of: data.weeklyBossIndex) { _, v in bossIndex = String(v) }
     }
 
     /// OK-WW declares which sub-items belong to which 「体力刷什么」 choice (sub_configs); the others are hidden (view.js:436-443).
@@ -147,23 +160,20 @@ struct WuwaPage: View {
     private var gameCard: some View {
         let (m, notes) = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster)
         let rows = gameRows(m, notes)
-        // view.js:976-995: the hints sit under the card, 「行名：」 in front; the 无音区结算截图 switch is one of its rows.
-        // Only when the 母本 is readable: otherwise the card is the one warning line.
-        let cardRows = rows.filter { $0.kind != .warning }
-        let foot = m == nil ? "" : ewFoot(cardRows.map { EWFootItem(label: $0.label, hint: $0.hint) }
-            + [EWFootItem(label: "无音区结算截图", hint: "开着：日报后面带上无音区打完的两张结算图")], rows: cardRows.count + 1)
         Section {
             if let m {
                 ForEach(rows) { row in
-                    EWRowView(row: row, values: $values, readonly: m.readonly, onChange: onChange,
-                              tag: data.tags[row.path], onResend: onResend, showHint: false)
+                    EWRowView(row: row, values: $values, readonly: m.readonly,
+                              onChange: { path, v in changed(row, path, v) }, onResend: onResend, showHint: true)
+                        .disabled(data.busy.contains(row.path))
+                        .gameRowStatus(row.kind == .warning ? nil : data.status[row.path], onResend: onResend)
                 }
                 // The relay's own switch for OK-WW (schema.js RELAY_SWITCHES tab "OK-WW"); not part of any config file.
-                tagged("relay|tacet_shots") {
-                    Toggle(isOn: Binding(get: { tacetShots }, set: { tacetShots = $0; onRelaySwitch("relay|tacet_shots", $0) })) {
-                        EWRowTitle(label: "无音区结算截图", hint: nil)
-                    }
+                Toggle(isOn: Binding(get: { data.tacetShots }, set: { onRelaySwitch(Self.tacetKey, $0) })) {
+                    EWRowTitle(label: "无音区结算截图", hint: "日报后面带上无音区打完的两张结算图")
                 }
+                .disabled(data.busy.contains(Self.tacetKey))
+                .gameRowStatus(data.status[Self.tacetKey], onResend: onResend)
             } else {
                 // view.js:478-480: no 母本 and no earlier copy → the card is only this line; the switch is not drawn either
                 warningLabel("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改")
@@ -171,8 +181,14 @@ struct WuwaPage: View {
             }
         } header: {
             Text(WuwaSchema.group.title)
-        } footer: {
-            if !foot.isEmpty { Text(verbatim: foot) }
+        }
+    }
+
+    /// A switch, menu or pick goes out at once; a text row waits for its submit.
+    private func changed(_ row: EWRow, _ path: String, _ v: EWValue) {
+        switch row.kind {
+        case .text, .number, .box: typed[path] = v
+        default: onChange(path, v)
         }
     }
 
@@ -183,54 +199,39 @@ struct WuwaPage: View {
             + ewRows(WuwaSchema.group, m, values: values, hidden: hidden(m))
     }
 
+    /// 周本打第几个: weeklyboss.py:219 takes 1–20; a value the machine reports outside that is listed too, as it is.
+    private var bossChoices: [Int] {
+        let n = data.weeklyBossIndex
+        return Array(1...20) + ((1...20).contains(n) ? [] : [n])
+    }
+
     /// Weekly items: done this week stops them, Monday 04:00 brings them back (view.js:510-535).
     private var weeklyCard: some View {
         Section {
-            HStack {
-                EWRowTitle(label: "周常乐园", hint: nil)
-                Spacer()
-                Text(data.parkDone ? "本周已完成" : "本周还没做").foregroundStyle(.secondary)
+            LabeledContent {
+                Text(data.parkDone ? "本周已完成" : "本周还没做")
+            } label: {
+                EWRowTitle(label: "周常乐园", hint: "不花体力。做完就停到下周一")
             }
-            HStack {
-                EWRowTitle(label: "周本 战歌重奏", hint: nil)
-                Spacer()
-                Text(data.weeklyBossDone ? "本周已领满" : "本周还没领满").foregroundStyle(.secondary)
+            LabeledContent {
+                Text(data.weeklyBossDone ? "本周已领满" : "本周还没领满")
+            } label: {
+                EWRowTitle(label: "周本 战歌重奏", hint: "花体力。一周领 3 次奖励、每次 60 结晶波片、固定打 90 级，领满就停到下周一")
             }
-            tagged("wb|OK-WW|第几个周本") {
-            HStack {
-                EWRowTitle(label: "周本打第几个", hint: nil)
-                Spacer()
-                TextField("1", text: Binding(get: { bossIndex }, set: { v in
-                    bossIndex = v
-                    let n = Int(v) ?? 0   // view.js:1083 `Number(el.value) || 1`: emptied or 0 is 1
-                    onWeeklyBossIndex(n == 0 ? 1 : n)
-                }))
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 60)
-                #if !os(macOS)
-                .keyboardType(.numberPad)
-                #endif
+            // a small range: a menu Picker, not a text field (brief 1007 "Numbers: … Picker for small ranges")
+            // menuPicker (SkipFixes.swift): inside the row's VStack (its status line) a bare Picker loses its title on Android
+            menuPicker(selection: Binding(get: { data.weeklyBossIndex }, set: { onWeeklyBossIndex($0) })) {
+                ForEach(bossChoices, id: \.self) { n in
+                    Text(verbatim: "\(n)").tag(n)
+                }
+            } title: {
+                EWRowTitle(label: "周本打第几个",
+                           hint: "游戏里按 F2 打开周本列表，从上往下数，第一个是 1。新 Boss 上线顺序会变，换本时记得来改")
             }
-            }
+            .disabled(data.busy.contains(Self.bossKey))
+            .gameRowStatus(data.status[Self.bossKey], onResend: onResend)
         } header: {
             Text("鸣潮 · 周常")
-        } footer: {
-            // view.js:976-995; the row name is taken without its <small> (「周本」, not 「周本 战歌重奏」)
-            Text(verbatim: ewFoot([EWFootItem(label: "周常乐园", hint: "不花体力。做完就停到下周一"),
-                                   EWFootItem(label: "周本", hint: "花体力。一周领 3 次奖励、每次 60 结晶波片、固定打 90 级，领满就停到下周一"),
-                                   EWFootItem(label: "周本打第几个", hint: "游戏里按 F2 打开周本列表，从上往下数，第一个填 1。新 Boss 上线顺序会变，换本时记得来改")],
-                                  rows: 3))
         }
-    }
-
-    /// A row with its small lines under it, same as the config rows (EWRowView); one shape either way so the 周本 field keeps focus.
-    private func tagged<Row: View>(_ key: String, @ViewBuilder _ row: () -> Row) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            row()
-            if let tag = data.tags[key] {
-                EWTagLine(tag: tag, onResend: onResend)
-            }
-        }
-        .listRowBackground(rowBackground(EWTagLine.tint(data.tags[key])))   // never nil on Android (SkipFixes.swift)
     }
 }
