@@ -1,5 +1,8 @@
 import SwiftUI
 import SkipFuse
+#if !os(Android) && canImport(UIKit)
+import UIKit
+#endif
 
 /// 诊断记录 switch, 运行自检 and the record sheet, in the 这台手机 section (web: #diagsw, #selfcheck, view.js:600-602, 1310-1322).
 struct PhoneDiagRows: View {
@@ -90,7 +93,14 @@ struct DiagSheetBox: View {
     var canShare: Bool
     var close: () -> Void
 
+    #if !os(Android)
+    /// The title + message's own height and the button row's (padding in both), measured to fit the sheet to them.
+    @State private var textHeight: CGFloat = 0
+    @State private var rowHeight: CGFloat = 0
+    #endif
+
     var body: some View {
+        #if os(Android)
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.headline)
             Text(message)
@@ -124,7 +134,72 @@ struct DiagSheetBox: View {
         } message: {
             Text(verbatim: DiagShare.shared.failNote ?? "")
         }
+        #else
+        // A sheet with no detents is .large: three lines and a button row came up full screen over a blank page
+        // (sheet06 cell 5). It is fitted to the content instead, .height(_:) from the measured text and row
+        // (developer.apple.com/documentation/swiftui/view/presentationdetents(_:), PresentationDetent.height(_:)).
+        // The text is in a ScrollView with the row pinned under it in every case, so the layout does not change shape
+        // with the decision (a switch to scrolling would shrink the measured height and flip it back), and a long
+        // 自检结果 past half the screen opens at .medium, draggable to .large, scrolling and never cut.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title).font(.headline)
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)   // its whole height, not what a detent leaves it
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding([.horizontal, .top], 16)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { textHeight = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            actions
+                .padding(.top, 10).padding([.horizontal, .bottom], 16)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowHeight = $0 }
+        }
+        // as the Android branch: the toast layer and the 「分享没成」 alert ride on the sheet
+        .overlay { ToastLayer() }
+        .alert("分享没成", isPresented: Binding(get: { DiagShare.shared.failNote != nil },
+                                                set: { if !$0 { DiagShare.shared.failNote = nil } })) {
+            Button("好") {}
+        } message: {
+            Text(verbatim: DiagShare.shared.failNote ?? "")
+        }
+        .presentationDetents(detents)
+        #endif
     }
+
+    #if !os(Android)
+    private var actions: some View {
+        HStack(spacing: 8) {
+            Button("复制") {
+                PhoneLink.copy(json)
+                Relay.shared.showToast("已复制整份记录")   // view.js:3074
+            }
+            .frame(maxWidth: .infinity)
+            if canShare {
+                // view.js share.onclick: every outcome is said (DiagShare)
+                Button("分享") { DiagShare.shared.share(json, title: title == "自检结果" ? "自检结果" : "诊断记录") }
+                    .frame(maxWidth: .infinity)
+            }
+            Button("关闭") { close() }
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    /// .medium until both parts are measured; then the content's height, or .medium / .large when that is over half
+    /// the screen (the window scene's screen; UIScreen.main is deprecated).
+    private var detents: Set<PresentationDetent> {
+        let fit = textHeight + rowHeight
+        guard textHeight > 0, rowHeight > 0 else { return [.medium] }
+        let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.height ?? 0
+        if screen > 0, fit > screen / 2 { return [.medium, .large] }
+        return [.height(fit)]
+    }
+    #endif
 }
 
 /// seg-frames-logger.js 件 B and #diagline over every tab while 诊断记录 is on: the red 「就是这里」 button bottom-right with
