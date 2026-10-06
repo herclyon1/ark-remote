@@ -6,8 +6,6 @@ import SkipFuse
 /// share sheet, which carries Copy (HIG Activity views: "Activity views present sharing activities like messaging and
 /// actions like Copy and Print", https://developer.apple.com/design/human-interface-guidelines/activity-views).
 struct PhoneDiagRows: View {
-    var appVersion: String
-
     @State var diagOn = DiagLog.shared.enabled
     /// 「清空诊断记录」 asks first: one stray tap wiped the record that was to be sent (edge audit 40).
     @State var clearAsk = false
@@ -22,6 +20,9 @@ struct PhoneDiagRows: View {
                     DiagLog.shared.setEnabled(on)
                     if on { DiagWatch.start() }
                 }
+                // on the row, not the Section: skip-ui's List finds its sections by type, so a modifier around the
+                // Section is not safe (MonthCardRows.swift)
+                .onAppear { if diagOn { DiagWatch.start(); DiagUI.shared.start() } }
             if diagOn {
                 // the web opens this from a tap on the bottom line (DiagAccessory); here it is pushed from the page, by
                 // value (PhoneRoute, PhonePage's navigationDestination) so ContentView's path pops it on a reselect (D39)
@@ -53,7 +54,6 @@ struct PhoneDiagRows: View {
         } footer: {
             Text("开着时记下这台手机收发消息、网络通断和机器状态的变化；出问题时按「就是这里」送出整份记录，或在这里分享给我们。")
         }
-        .onAppear { if diagOn { DiagWatch.start(); DiagUI.shared.start() } }
     }
 
     /// The last 运行自检 (LastSelfCheck): 通过 N / M as the value, the failed checks under the label, and the whole

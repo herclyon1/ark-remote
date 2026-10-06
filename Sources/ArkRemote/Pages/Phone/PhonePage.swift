@@ -60,7 +60,7 @@ struct PhonePage: View {
                      : "用这条链接打开，就不用再填信箱和 PIN。链接里带着这两样和游戏密钥，别转发给别人。")
             }
 
-            PhoneDiagRows(appVersion: data.pageVersion)
+            PhoneDiagRows()
 
             Section {
                 // 「密钥」, not the web's 「已配置」 (view.js:608): with none stored the row read 「已配置 … 没有」 (test pass 1, 问题 7)
