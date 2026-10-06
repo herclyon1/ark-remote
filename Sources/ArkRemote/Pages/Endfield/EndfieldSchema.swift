@@ -31,7 +31,8 @@ enum EndfieldSchema {
         EWFieldSpec(path: "ProtocolSpace/ProtocolSpaceMode", type: .select,
                     hint: "按次数刷取＝按下面选的那一类刷；目标库存＝刷到下面「培养道具目标」每一格的数为止"),
         EWFieldSpec(path: "ProtocolSpace/ProtocolSpaceTab", type: .select,
-                    hint: "刷哪一类。干员养成＝干员经验（作战记录 / 认知载体）、干员进阶（协议圆盘）、钱币收集（折金票）、技能提升（协议棱柱）；武器养成＝武器经验（武器检查套组 / 装置）、武器进阶（强固模具）；危境预演＝高阶培养Ⅰ–Ⅴ（D96钢样品四、超距辉映管、快子遴捡晶格、象限拟合液、三相纳米片）。选了哪类，下面就只出现那一类的选项"),
+                    // the products are in each choice's name (ewYields), so the hint under the row says only what the choice opens
+                    hint: "刷哪一类。选了哪类，「更多设置」里就只出现那一类的选项"),
         EWFieldSpec(path: "ProtocolSpace/OperatorProgression", type: .select,
                     hint: "刷折金票选「钱币收集（折金票）」"),
         EWFieldSpec(path: "ProtocolSpace/WeaponProgression", type: .select,

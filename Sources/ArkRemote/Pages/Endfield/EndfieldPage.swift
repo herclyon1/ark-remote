@@ -1,6 +1,6 @@
-// The 终末地 (MaaEnd) tab. Same cards and rows as the web page's 终末地 tab (view.js:753 TABS /^终末地/):
-// the 库存 entry row (view.js:407), then 基质刷取, 协议空间, 另一个任务 (schema.js:143-218; the web's 「另外两个任务」 has one, 自动采集).
-// Data, saving and the tab bar are wired by 验收 once the logic layer lands; this page only draws and reports edits.
+// The 终末地 (MaaEnd) tab: the 库存 row, then 基质刷取, 协议空间, 另一个任务 (schema.js:143-218; the web's 「另外两个任务」 has
+// one, 自动采集). A Settings-style grouped list: each card keeps its task switch and mode, the rest is one level down under
+// 「更多设置」. This page only draws and reports changes; EndfieldTab sends them as they are made.
 
 import SwiftUI
 
@@ -83,14 +83,13 @@ struct EndfieldPage: View {
         if let c = ewCard(g, data, values: values) {
             let main = c.rows.filter { EndfieldSchema.firstLevel.contains($0.path) }
             let more = c.rows.contains { !EndfieldSchema.firstLevel.contains($0.path) }
-            let foot = ewFoot(main, card: c.rows)   // view.js:976-995: the hints sit under the card, 「行名：」 in front
             // view.js:801-803, 826: a card with no rows this time is not drawn (listSection: a bare `if` leaves an empty
             // grey section on Android, Pages/Shell/SkipFixes.swift).
             listSection("endfield-\(g.title)", if: !c.rows.isEmpty) {
                 Section {
                     ForEach(ewNoteRows(c.notes, "warn-\(g.title)") + main) { row in
                         EWRowView(row: row, values: $values, readonly: c.master.readonly, onChange: onChange,
-                                  tag: data.tags[row.path], onResend: onResend, showHint: false)
+                                  tag: data.tags[row.path], onResend: onResend)
                     }
                     // The rest of the card one level down, as Settings does (HIG-CHECKLIST.maa.md:55). By value, so a reselect
                     // can pop it (D39); not navigationDestination(isPresented:) - see the 库存 row above (7f89811).
@@ -102,8 +101,6 @@ struct EndfieldPage: View {
                     }
                 } header: {
                     Text(g.title)
-                } footer: {
-                    if !foot.isEmpty { Text(verbatim: foot) }
                 }
             }
         } else {
@@ -145,12 +142,12 @@ func ewNoteRows(_ notes: [String], _ prefix: String) -> [EWRow] {
 }
 
 /// A card's rows past its first level (EndfieldSchema.firstLevel), titled by the task. The rows are worked out here from
-/// the page's own `values`, kept to the shown master (machine + 已寄出 + 待保存, ewShown) as the 终末地 page keeps its own,
-/// so a mode changed on either page shows the rows it opens; edits go through the same `onChange` into EWEdits.
+/// the page's own `values`, kept to the shown master (machine + sent + going out, ewShown) as the 终末地 page keeps its own,
+/// so a mode changed on either page shows the rows it opens; changes go through the same `onChange` (EndfieldTab sends them).
 ///
 /// Its own state, not the 终末地 page's `$values`: on Android the 终末地 page's resync (its onChange of data.master.values)
 /// did not reach this page while it was pushed - a binding captured by the navigationDestination closure skip-ui keeps
-/// from its first registration (Navigation.swift:869-872) - so after ✕ here the rows kept the discarded values
+/// from its first registration (Navigation.swift:869-872) - so the rows kept values the machine had since replaced
 /// (执行周期 「已选 6/7」 for 7/7, 使用刻写券 off for on) until a trip back to the root (0.4.4 second test pass).
 struct EndfieldMorePage: View {
     var group: EWGroupSpec
@@ -177,24 +174,20 @@ struct EndfieldMorePage: View {
         let data = self.data()
         let c = ewCard(group, data, values: values)
         let rest = c?.rows.filter { !EndfieldSchema.firstLevel.contains($0.path) } ?? []
-        let foot = ewFoot(rest, card: c?.rows ?? [])   // view.js:976-995, as on the 终末地 page
         List {
             // listSection: rows a mode opened can all go while this page is open (SkipFixes.swift)
             listSection("endfield-more-\(group.title)", if: !rest.isEmpty) {
                 Section {
                     ForEach(ewNoteRows(c?.notes ?? [], "more-warn-\(group.title)") + rest) { row in
                         EWRowView(row: row, values: $values, readonly: c?.master.readonly ?? [:], onChange: onChange,
-                                  tag: data.tags[row.path], onResend: onResend, showHint: false)
+                                  tag: data.tags[row.path], onResend: onResend)
                     }
-                } footer: {
-                    if !foot.isEmpty { Text(verbatim: foot) }
                 }
             }
         }
         .keyboardDone()
-        // the ✕ / ✓ of 「待保存」 here too, so a change made on this page is saved from it
-        .modifier(EWSaveBar(title: name))
-        // ✕ (edits dropped), a send, a newer machine state: back to what the master now shows (EndfieldPage's own onChange)
+        .navigationTitle(name)
+        // a send, a dropped change, a newer machine state: back to what the master now shows (EndfieldPage's own onChange)
         .onChange(of: data.master.values) { _, _ in
             let d = self.data()
             values = ewEffectiveMaster(d.master, lastGood: d.lastGoodMaster).0?.values ?? [:]
