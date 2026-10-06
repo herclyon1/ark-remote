@@ -16,7 +16,7 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
         AppShell()
             .task {
                 logger.info("Skip app logs are viewable in the Xcode console for iOS; Android logs can be viewed in Studio or using adb logcat")
-                await startRecorders()
+                await startRecorders()   // await: skip-fuse-ui's task closure is not @MainActor (View/AdditionalViewModifiers.swift:587)
             }
     }
 }
