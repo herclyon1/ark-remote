@@ -92,8 +92,14 @@ the runner checks before it starts) nothing can be posted to or sent through the
 * `drv_ios.py` + `xcuitest/` — iOS: `simctl` plus an XCUITest runner (real HID touches through XCTest's synthesized
   events, element-tree snapshots). It is built once into `out/xcdd` and talks to the runner over a local HTTP port
   derived from the UDID (`--port` to override).
-* `drv_android.py` — Android: `adb shell input`, `uiautomator dump`, `logcat` (crash buffer and fatal lines of the app's
-  pid after every step).
+* `drv_android.py` — Android: `adb shell input`, the element tree, `logcat` (crash buffer and fatal lines of the app's
+  pid after every step). The tree comes from a resident dumper (`dumper/ReplayDumper.java`, built into
+  `dumper/replay-dumper.dex` by `dumper/build.sh` with the SDK's android.jar + d8): the same XML as
+  `uiautomator dump` without its ~0.9 s process start per call, read no sooner than 1.9 s after the last input and
+  after 1 s without UI events, as `uiautomator dump` does. While it runs, a `uiautomator dump` from anything else on
+  that emulator is killed. `REPLAY_DUMPER=0` goes back to `uiautomator dump`.
+  `REPLAY_PROFILE=1` writes `<out>/profile.jsonl`: per step, each adb call kind (count, seconds), the sleeps and
+  where they came from.
 * `mailbox.py` — throwaway mailbox: base state variants (`base`, `dup` = two identical receipts in one minute, `noef` =
   the morning shift without 终末地, `farm`, `times`), receipts (also D207 `queued`), heartbeats, the commands the app
   sent; `OfflineMailbox` writes the states into the app's cache instead (`--offline`).

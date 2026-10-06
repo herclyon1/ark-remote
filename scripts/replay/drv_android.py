@@ -24,7 +24,8 @@ class GateUnavailable(RuntimeError):
 class Profile:
     """REPLAY_PROFILE=1: time every adb call by kind and every time.sleep (the runner's too), per step. A step starts at
     run.py run_step's drv.log_marker() call; each finished step is one line of <out>/profile.jsonl:
-    {"step", "wall", "kinds": {kind: [calls, seconds]}, "sleep": [calls, seconds], "rest": wall - adb - sleep}."""
+    {"step", "wall", "kinds": {kind: [calls, seconds]}, "sleep": [calls, seconds], "sleep_sites": {"file:line func":
+    [calls, seconds]}, "rest": wall - adb - sleep}."""
     KINDS = (("uiautomator dump", "dump"), ("input tap", "tap"), ("input motionevent", "tap"), ("input text", "text"),
              ("input keyevent", "key"), ("input swipe", "swipe"), ("screencap", "screencap"), ("pidof", "pidof"),
              ("logcat", "logcat"), ("dumpsys input_method", "kb"), ("dumpsys", "dumpsys"), ("defaults.xml", "prefs"),
@@ -32,7 +33,7 @@ class Profile:
 
     def __init__(self, path):
         self.path = path
-        self.step, self.t0, self.kinds, self.sleep = None, None, {}, [0, 0.0]
+        self.step, self.t0, self.kinds, self.sleep, self.sites = None, None, {}, [0, 0.0], {}
         self._sleep = time.sleep
         prof = self
 
@@ -40,8 +41,14 @@ class Profile:
             t = time.time()
             prof._sleep(s)
             if threading.current_thread() is threading.main_thread():   # not the mailbox listener's retries
+                dt = time.time() - t
                 prof.sleep[0] += 1
-                prof.sleep[1] += time.time() - t
+                prof.sleep[1] += dt
+                import sys
+                f = sys._getframe(1)
+                site = prof.sites.setdefault(f"{os.path.basename(f.f_code.co_filename)}:{f.f_lineno} {f.f_code.co_name}", [0, 0.0])
+                site[0] += 1
+                site[1] += dt
         time.sleep = sleep      # the runner calls time.sleep through the module too
 
     def kind(self, argv):
@@ -60,10 +67,11 @@ class Profile:
             row = {"step": self.step, "wall": round(now - self.t0, 3),
                    "kinds": {k: [v[0], round(v[1], 3)] for k, v in sorted(self.kinds.items())},
                    "sleep": [self.sleep[0], round(self.sleep[1], 3)],
+                   "sleep_sites": {k: [v[0], round(v[1], 3)] for k, v in self.sites.items()},
                    "rest": round(now - self.t0 - adb - self.sleep[1], 3)}
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        self.step, self.t0, self.kinds, self.sleep = step, now, {}, [0, 0.0]
+        self.step, self.t0, self.kinds, self.sleep, self.sites = step, now, {}, [0, 0.0], {}
 
 
 def find_adb():
@@ -211,9 +219,9 @@ class AndroidDriver:
     # ---- element tree
     # The resident dumper (dumper/ReplayDumper.java): the same XML as `uiautomator dump`, the same 1 s idle wait, without
     # the ~0.86 s process start + accessibility connect each `uiautomator dump` pays. One UiAutomation connection at a
-    # time per device: while it is up, a `uiautomator dump` from elsewhere is killed. On with REPLAY_DUMPER=1 (until it
-    # is measured to keep every verdict); if it cannot start or stops answering, dump() falls back to `uiautomator dump`
-    # for the rest of the run.
+    # time per device: while it is up, a `uiautomator dump` from elsewhere is killed. On by default (paired runs 10-06
+    # 23:36 / 23:40, status + arknights: 253 s -> 184 s, 34 verdicts identical); REPLAY_DUMPER=0 keeps the old path.
+    # If it cannot start or stops answering, dump() falls back to `uiautomator dump` for the rest of the run.
     DUMPER_DEX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dumper", "replay-dumper.dex")
     DUMPER_IDLE_MS = (1000, 10000)   # DumpCommand's waitForIdle(1000, 10000)
     DUMPER_SETTLE = 1.9              # s after the last input before the tree is read (a `uiautomator dump`'s floor)
@@ -222,7 +230,7 @@ class AndroidDriver:
     def _dumper(self):
         if getattr(self, "_dp", None) is not None:
             return self._dp if self._dp.poll() is None else None
-        if os.environ.get("REPLAY_DUMPER") != "1" or getattr(self, "_dp_off", False) or not os.path.exists(self.DUMPER_DEX):
+        if os.environ.get("REPLAY_DUMPER") == "0" or getattr(self, "_dp_off", False) or not os.path.exists(self.DUMPER_DEX):
             return None
         self.adb("push", self.DUMPER_DEX, "/data/local/tmp/replay-dumper.dex", timeout=30)
         self._dp = subprocess.Popen(
