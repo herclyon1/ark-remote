@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 import xml.sax.saxutils as su
 
@@ -18,6 +19,51 @@ PREFS = f"/data/data/{PKG}/shared_prefs/defaults.xml"
 
 class GateUnavailable(RuntimeError):
     """Raw touches cannot be written on this device: the 400 ms gate is not judged here."""
+
+
+class Profile:
+    """REPLAY_PROFILE=1: time every adb call by kind and every time.sleep (the runner's too), per step. A step starts at
+    run.py run_step's drv.log_marker() call; each finished step is one line of <out>/profile.jsonl:
+    {"step", "wall", "kinds": {kind: [calls, seconds]}, "sleep": [calls, seconds], "rest": wall - adb - sleep}."""
+    KINDS = (("uiautomator dump", "dump"), ("input tap", "tap"), ("input motionevent", "tap"), ("input text", "text"),
+             ("input keyevent", "key"), ("input swipe", "swipe"), ("screencap", "screencap"), ("pidof", "pidof"),
+             ("logcat", "logcat"), ("dumpsys input_method", "kb"), ("dumpsys", "dumpsys"), ("defaults.xml", "prefs"),
+             ("date ", "date"), ("am start", "launch"), ("am force-stop", "stop"), ("push", "push"), ("install", "install"))
+
+    def __init__(self, path):
+        self.path = path
+        self.step, self.t0, self.kinds, self.sleep = None, None, {}, [0, 0.0]
+        self._sleep = time.sleep
+        prof = self
+
+        def sleep(s):
+            t = time.time()
+            prof._sleep(s)
+            if threading.current_thread() is threading.main_thread():   # not the mailbox listener's retries
+                prof.sleep[0] += 1
+                prof.sleep[1] += time.time() - t
+        time.sleep = sleep      # the runner calls time.sleep through the module too
+
+    def kind(self, argv):
+        s = " ".join(argv)
+        return next((k for pat, k in self.KINDS if pat in s), "other")
+
+    def add(self, argv, dt):
+        k = self.kinds.setdefault(self.kind(argv), [0, 0.0])
+        k[0] += 1
+        k[1] += dt
+
+    def mark(self, step):
+        now = time.time()
+        if self.step is not None:
+            adb = sum(v[1] for v in self.kinds.values())
+            row = {"step": self.step, "wall": round(now - self.t0, 3),
+                   "kinds": {k: [v[0], round(v[1], 3)] for k, v in sorted(self.kinds.items())},
+                   "sleep": [self.sleep[0], round(self.sleep[1], 3)],
+                   "rest": round(now - self.t0 - adb - self.sleep[1], 3)}
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        self.step, self.t0, self.kinds, self.sleep = step, now, {}, [0, 0.0]
 
 
 def find_adb():
@@ -37,9 +83,13 @@ class AndroidDriver:
         self.adb_bin = find_adb()
         self.size = (1080, 2400)
         self.pid = None
+        self.prof = Profile(os.path.join(out_dir, "profile.jsonl")) if os.environ.get("REPLAY_PROFILE") == "1" else None
 
     def adb(self, *a, timeout=60, binary=False):
+        t = time.time()
         r = subprocess.run([self.adb_bin, "-s", self.serial, *a], capture_output=True, timeout=timeout)
+        if self.prof:
+            self.prof.add(a, time.time() - t)
         return r.stdout if binary else r.stdout.decode("utf-8", "replace")
 
     def sh(self, cmd, timeout=60):
@@ -69,7 +119,9 @@ class AndroidDriver:
             self.size = (int(m.group(1)), int(m.group(2)))
 
     def stop(self):
-        pass
+        self._dumper_stop()
+        if self.prof:
+            self.prof.mark(None)
 
     def install(self, path):
         out = self.adb("install", "-r", path, timeout=300)
@@ -155,10 +207,92 @@ class AndroidDriver:
             self._push_prefs(xml)
 
     # ---- element tree
+    # The resident dumper (dumper/ReplayDumper.java): the same XML as `uiautomator dump`, the same 1 s idle wait, without
+    # the ~0.86 s process start + accessibility connect each `uiautomator dump` pays. One UiAutomation connection at a
+    # time per device: while it is up, a `uiautomator dump` from elsewhere is killed. On with REPLAY_DUMPER=1 (until it
+    # is measured to keep every verdict); if it cannot start or stops answering, dump() falls back to `uiautomator dump`
+    # for the rest of the run.
+    DUMPER_DEX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dumper", "replay-dumper.dex")
+    DUMPER_IDLE_MS = (1000, 10000)   # DumpCommand's waitForIdle(1000, 10000)
+
+    def _dumper(self):
+        if getattr(self, "_dp", None) is not None:
+            return self._dp if self._dp.poll() is None else None
+        if os.environ.get("REPLAY_DUMPER") != "1" or getattr(self, "_dp_off", False) or not os.path.exists(self.DUMPER_DEX):
+            return None
+        self.adb("push", self.DUMPER_DEX, "/data/local/tmp/replay-dumper.dex", timeout=30)
+        self._dp = subprocess.Popen(
+            [self.adb_bin, "-s", self.serial, "shell", "CLASSPATH=/system/framework/uiautomator.jar:"
+             "/data/local/tmp/replay-dumper.dex exec app_process /system/bin ReplayDumper"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self._dp_buf = b""
+        self._dp_pid = None
+        if self._dp_read(b"<<REPLAY-READY ", 20) is None or (pid := self._dp_read(b">>\n", 5)) is None:
+            self._dumper_off("did not start")
+            return None
+        self._dp_pid = pid.decode().strip()
+        return self._dp
+
+    def _dp_read(self, marker, timeout):
+        """Bytes from the dumper up to marker (marker excluded); None on timeout / exit."""
+        import select
+        end, fd = time.time() + timeout, self._dp.stdout.fileno()
+        while marker not in self._dp_buf:
+            left = end - time.time()
+            if left <= 0 or not select.select([fd], [], [], left)[0]:
+                return None
+            chunk = os.read(fd, 1 << 16)
+            if not chunk:
+                return None
+            self._dp_buf += chunk
+        out, self._dp_buf = self._dp_buf.split(marker, 1)
+        return out
+
+    def _dumper_off(self, why):
+        self.log(f"resident dumper off ({why}); using `uiautomator dump`")
+        self._dp_off = True
+        self._dumper_stop()
+
+    def _dumper_stop(self):
+        """Close the dumper; its device process holds the device's one UiAutomation slot, so when it does not leave on
+        its own (stuck in waitForIdle / getRootInActiveWindow) kill it there too: otherwise every fallback
+        `uiautomator dump` is killed."""
+        dp, self._dp = getattr(self, "_dp", None), None
+        if dp is None:
+            return
+        try:
+            dp.stdin.close()
+            dp.wait(timeout=3)
+        except Exception:
+            dp.kill()
+        pid = getattr(self, "_dp_pid", None)
+        if pid and pid.isdigit():
+            self.sh(f"kill -9 {pid} 2>/dev/null; true", timeout=10)
+
+    def _dump_xml(self):
+        dp = self._dumper()
+        if dp is None:
+            return self.adb("exec-out", "uiautomator", "dump", "/dev/tty", timeout=30)
+        t = time.time()
+        try:
+            dp.stdin.write(("%d %d\n" % self.DUMPER_IDLE_MS).encode())
+            dp.stdin.flush()
+        except OSError:
+            self._dumper_off("pipe closed")
+            return self._dump_xml()
+        raw = self._dp_read(b"\n<<REPLAY-END ", 30)
+        tail = self._dp_read(b">>\n", 5) if raw is not None else None
+        if self.prof:
+            self.prof.add(("uiautomator dump",), time.time() - t)
+        if raw is None or tail is None:
+            self._dumper_off("no answer in 30 s")
+            return self._dump_xml()
+        return raw.decode("utf-8", "replace") if tail.startswith(b"ok") else ""
+
     def dump(self):
         out = ""
         for _ in range(4):
-            out = self.adb("exec-out", "uiautomator", "dump", "/dev/tty", timeout=30)
+            out = self._dump_xml()
             if "<hierarchy" in out:
                 break
             time.sleep(0.3)
@@ -553,6 +687,11 @@ class AndroidDriver:
 
     # ---- crash check
     def log_marker(self):
+        if self.prof:
+            import sys
+            f = sys._getframe(1)
+            if f.f_code.co_name == "run_step":
+                self.prof.mark(f.f_locals["step"]["id"])
         return self.sh("date '+%m-%d %H:%M:%S.000'").strip()
 
     def crashed_since(self, marker):
