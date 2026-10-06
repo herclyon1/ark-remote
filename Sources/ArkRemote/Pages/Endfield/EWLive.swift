@@ -1,7 +1,9 @@
-// Live data and saving for the 终末地 and 鸣潮 tabs: snap → page data, and the web page's save flow
-// (maa-automation/web/view.js): edits wait in 「待保存」, one review, then each goes out as its own command
-// (#go handler, view.js:2402-2440) and is recorded in Pending (`pending[e._id] = {...}`).
+// Live data and saving for the 终末地 and 鸣潮 tabs: snap → page data, and sending the changes. Each change goes out as
+// its own command (the web's #go handler, view.js:2402-2440) and is recorded in Pending (`pending[e._id] = {...}`).
+// The 终末地 tab applies a change as soon as it is made (EWSave.apply), as Settings does: no 「待保存」 batch, no review.
 
+import Observation
+import SkipFuse   // @Observable types only drive the Android UI with SkipFuse imported
 import SwiftUI
 
 extension EWMaster {
@@ -104,7 +106,7 @@ func ewBase(game: String, path: String, machine: EWValue?) -> EWValue? {
     return p.to.ewValue
 }
 
-/// Puts a change into 「待保存」 (nil drops it) where a JS object would: a key already there keeps its place in the
+/// Puts a change into the pool of changes not yet sent (nil drops it) where a JS object would: a key already there keeps its place in the
 /// change order (`edits[id] = …` on an existing key), a new or re-added one goes last (view.js note / delete edits[id]).
 @MainActor
 func ewPutEdit(_ key: String, _ edit: EWEdit?) {
@@ -113,7 +115,7 @@ func ewPutEdit(_ key: String, _ edit: EWEdit?) {
     EWEdits.shared.items[key] = e
 }
 
-/// The small lines under a row (pending.js:47-70, view.js:1268-1275): 「待保存」 while unsaved, then the receipt tag.
+/// The status under a row (pending.js:47-70, view.js:1268-1275): going out / did not go out, then the receipt.
 struct EWRowTag: Equatable {
     var unsaved = false
     var text: String? = nil
@@ -123,20 +125,30 @@ struct EWRowTag: Equatable {
     var bad = false
     /// sent and waiting (`.posted`, view.js:60).
     var posted = false
+    /// The change is going out now (EWSave.apply / EWSave.resend): a spinner in the row.
+    var sending = false
+    /// Why the last send of this change did not go out (EWEdit.failure); the row offers 再发一次 / 不改了.
+    var failure: String? = nil
+    /// The pool key behind `failure`, for EWSave.retry / EWSave.drop.
+    var retryKey: String? = nil
 }
 
 /// The tag for one Pending key; nil when the row has nothing under it.
 @MainActor
 func ewTag(_ key: String, edits: [String: EWEdit]) -> EWRowTag? {
-    let unsaved = edits[key] != nil
+    let edit = edits[key]
+    let unsaved = edit != nil
     var t = EWRowTag(unsaved: unsaved)
+    let q = EWSendQueue.shared
+    t.sending = (edit != nil && edit?.failure == nil && q.queued.contains(key)) || q.resending.contains(key)
+    if let f = edit?.failure { t.failure = f; t.retryKey = key }
     switch Pending.shared.tag(for: key, editing: unsaved) {
     case .sent(let text)?: t.text = text; t.resendKey = Pending.shared.staleResendKey(for: key); t.posted = true
     case .mismatch(let text, let k)?: t.text = text; t.resendKey = k; t.posted = true; t.bad = true
     case .applied(let text)?: t.text = text
     case nil: break
     }
-    return t.unsaved || t.text != nil ? t : nil
+    return t.unsaved || t.text != nil || t.sending ? t : nil
 }
 
 /// Tags for every config path of a game, keyed by path (the rows' own key).
@@ -206,7 +218,7 @@ enum EWLastGood {
     }
 }
 
-/// One change waiting in 「待保存」 (view.js `edits[id]`). src: "master", "relay" or "wb".
+/// One change not yet sent (view.js `edits[id]`). src: "master", "relay" or "wb".
 struct EWEdit: Equatable {
     var label: String
     var src: String
@@ -219,9 +231,12 @@ struct EWEdit: Equatable {
     /// When the change was made (ms): the review lists and sends in this order, as the web page's `edits` object keeps
     /// its keys in insertion order (view.js doSave :1609, #go :2962).
     var at: Double = nowMs()
+    /// Set by EWSave.apply's drain when this change did not go out: the row says why and offers 再发一次. A newer change
+    /// of the same row replaces the edit, and with it this note.
+    var failure: String? = nil
 }
 
-/// One entry of the review sheet (view.js doSave :1612-1615): a shift skip in plain words (red, bold), or a change
+/// One entry of a review of several changes (view.js doSave :1612-1615; no page shows one now, EWSave.review): a shift skip in plain words (red, bold), or a change
 /// 「卡名 · 行名」 (bold) with old → new by option names.
 struct EWReviewLine: Identifiable {
     var id: String
@@ -339,18 +354,18 @@ enum EWSave {
         return skips + rest
     }
 
-    /// view.js #go: send each change; the sent ones leave 「待保存」, the failed ones stay. Returns the keys still unsent and,
-    /// when something did not go out, the message of the 「有改动没发出去」 alert (view.js:3005-3009).
+    /// view.js #go: send each change. Returns the changes still unsent and, when something did not go out, a sentence
+    /// saying so (the caller shows it where the change is; EWSave.apply puts it under the row).
     static func send(_ edits: [String: EWEdit]) async -> (left: [String: EWEdit], failure: String?) {
         // 审查 A5 / B11 / B15: a value the relay refuses (周本 outside 1–20, weeklyboss.py:219; a MaaEnd number its verify
         // rule rejects, mastercfg.py:465-482) or hands to AUTO-MAS unchecked (set_config checks nothing, commands.py:417-449)
-        // is not sent; nothing goes until it is fixed, so one review is one send
+        // is not sent; nothing in this call goes until it is fixed
         let bad = ordered(edits).compactMap { k -> String? in
             guard let e = edits[k], let why = problem(e) else { return nil }
             return "「\(e.label)」\(why)"
         }
         if !bad.isEmpty {
-            return (edits, "有几项填得不对，这次一项都没寄出：\(bad.joined(separator: "；"))。改好再保存。")
+            return (edits, bad.count == 1 ? "没寄出：\(bad[0])。" : "有几项填得不对，一项都没寄出：\(bad.joined(separator: "；"))。")
         }
         let relay = Relay.shared
         #if !os(Android) && canImport(UIKit)
@@ -410,15 +425,13 @@ enum EWSave {
                 }
             } catch { if failed == nil { failed = error } }
         }
-        // view.js:3005-3012: a failure is an alert 「有改动没发出去」 with one 「好」 (EWSaveBar shows it); a full success is the
-        // one-line toast 「已寄出 N 项」 at toast()'s default 2.6 s (view.js:72) — each row's own 「已寄出」 mark says the rest
+        // A failure is a sentence the caller shows where the change is (the 终末地 rows: under the row, with 再发一次); a
+        // success needs no message: each row's own 「已寄出」 line says it (no toast, HIG Feedback).
         var failure: String? = nil
         if let failed {
             failure = sent > 0
-                ? "发出去 \(sent) 项，剩下 \(left.count) 项没发出去（\(Live.why(failed))）。没发出去的还在页面上，可以再按一次保存。"
-                : "一项都没发出去（\(Live.why(failed))）。改动还在页面上，可以再按一次保存。"
-        } else if sent > 0 {
-            relay.showToast("已寄出 \(sent) 项")
+                ? "发出去 \(sent) 项，剩下 \(left.count) 项没发出去（\(Live.why(failed))）。"
+                : "没发出去（\(Live.why(failed))）。"
         }
         // view.js:2455-2457: ask the machine once, 2 s later, for a state reported after the send. One request, no loop.
         if sent > 0 {
@@ -432,179 +445,113 @@ enum EWSave {
     }
 }
 
-/// The edit bar and its review alert, on every tab (view.js updateBar / #confirm), over the one pool of unsaved
-/// changes (Logic/Edits.swift): the count, ✕ and ✓ cover the changes of all tabs, as the web page's one top bar does.
-/// `title`: the page title when nothing waits; while editing the title is 「待保存 N 项」 (view.js:1554 swaps the same span).
-struct EWSaveBar: ViewModifier {
-    var title: String? = nil
-    @State var reviewing = false
-    /// The 「有改动没发出去」 alert's message after a send that left changes unsent (view.js:3007 ask(..., { single: true })).
-    @State var failNote: String? = nil
-    /// view.js:1619 goArmedAt: while the review lists a 今天不跑 / 今天照常跑, a tap on 寄出 in its first 400 ms is not a
-    /// confirm (the 08:46 skips, 检查 09-30); the sheet stays. The web judges by when the press began (view.js:2953-2955
-    /// goPressAt), so a slow press started early and let go late is no confirm either: here 寄出 stays disabled for those
-    /// 400 ms, counted from when the sheet is up (showModal), and a press that began on a disabled button never fires
-    /// on iOS; on Android go() also checks the press's start (ReviewPress).
-    @State var armed = true
-    /// Bumped on each ✓, so a 400 ms wait left over from a sheet closed early cannot arm a newer one.
-    @State var armGen = 0
-    /// RecKit.mono() when the 400 ms gate opened; 0 = no gate this review (nothing to skip listed).
-    @State var armedAt = 0.0
+/// Where EWSave.apply's changes stand: which keys it queued, and which Pending entries are being sent again. Observed,
+/// so a row's spinner comes and goes with them.
+@MainActor @Observable final class EWSendQueue {
+    static let shared = EWSendQueue()
 
-    private var edits: [String: EWEdit] { EWEdits.shared.items }
+    /// Pool keys handed to EWSave.apply. Only these are sent by its drain: the other tabs' changes in the same pool
+    /// (EWEdits) keep their own way out.
+    var queued: Set<String> = []
+    /// Pending keys whose 再发一次 is out (EWSave.resend).
+    var resending: Set<String> = []
+    /// A drain is running; one at a time, so the orders go out one after another, in the order the changes were made.
+    @ObservationIgnored var draining = false
+    /// The key whose order is out now.
+    @ObservationIgnored var current: String? = nil
+}
 
-    func body(content: Content) -> some View {
-        titled(content)
-            .toolbar {
-                if !edits.isEmpty {
-                    // index.html:921 #discard (aria-label 放弃, xmark) / #save (aria-label 完成, checkmark)
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button { endEditing(); EWEdits.shared.items = [:] } label: { Image(systemName: "xmark") }   // view.js:2950
-                            .accessibilityLabel("放弃")
-                            .endsEditingOnTap()
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button {
-                            armed = !edits.values.contains(where: EWSave.isSkip)   // view.js:1619
-                            armedAt = 0
-                            armGen += 1
-                            ReviewPress.reset()
-                            reviewing = true
-                        } label: { Image(systemName: "checkmark") }
-                            .accessibilityLabel("完成")
-                            .disabled(EWEdits.shared.saving)
-                    }
-                }
-            }
-            // index.html:933-939 #confirm; doSave (view.js:1609-1617). A sheet, not an alert: an alert's message is plain
-            // text, and the web's list sets each name in bold, a shift skip in red (index.html:875-876 .diff.skip / .diff b),
-            // the old value grey and struck through, the new one green (index.html:877-878 .old / .new).
-            .sheet(isPresented: $reviewing) {
-                NavigationStack {
-                    List {
-                        ForEach(EWSave.review(edits)) { line in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(verbatim: line.title)
-                                    .bold()
-                                    .foregroundStyle(line.skip ? Color.red : Color.primary)
-                                if let old = line.old, let new = line.new {
-                                    HStack(spacing: 4) {
-                                        Text(verbatim: old).strikethrough().foregroundStyle(.secondary)
-                                        Text(verbatim: "→")
-                                        Text(verbatim: new).foregroundStyle(Color.green)
-                                    }
-                                    .font(.subheadline)
-                                }
-                            }
-                        }
-                    }
-                    .navigationTitle("确认这次修改")
-                    #if !os(macOS)
-                    .navigationBarTitleDisplayMode(.inline)
-                    #endif
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("再想想") { reviewing = false }
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            // doSave (view.js:1617) names the button by how many orders go out: 「寄出 N 项」
-                            Button("寄出 \(edits.count) 项") { go() }
-                                .disabled(EWEdits.shared.saving || !armed)
-                        }
-                    }
-                }
-                #if os(Android)
-                // where each press on the sheet began (ReviewPress); the sheet is its own dialog window, which the
-                // activity's touch feed (Main.kt dispatchTouchEvent) never sees
-                .simultaneousGesture(DragGesture(minimumDistance: 0)
-                    .onChanged { _ in ReviewPress.down() }
-                    .onEnded { _ in ReviewPress.up() })
-                #endif
-                .onAppear {
-                    guard !armed else { return }
-                    let gen = armGen
-                    Task {
-                        try? await Task.sleep(nanoseconds: 400_000_000)
-                        if gen == armGen {
-                            armedAt = RecKit.mono()
-                            armed = true
-                        }
-                    }
-                }
-                #if os(Android)
-                // one detent: skip-ui keeps only detents.first ("TODO: Add support for multiple detents",
-                // Layout/Presentation.swift:1186-1194), and SkipSwiftUI fills that list by iterating the Swift Set
-                // (skip-fuse-ui Layout/Presentation.swift:418-427), so .medium or .large wins by hash order. The detent is
-                // a top spacer (screenHeight / 2 for .medium, the top bar + 44 otherwise, Presentation.swift:148-160)
-                // read from a preference whose value before collection is .large (:815-820); a recomposition under a
-                // press then dropped the sheet to half height and 寄出 out from under the finger (test pass 3, gate-t5)
-                .presentationDetents([.large])
-                #else
-                .presentationDetents([.medium, .large])
-                #endif
-            }
-            // view.js:3007: ask("有改动没发出去", …, "好", false, { single: true })
-            .alert("有改动没发出去", isPresented: Binding(get: { failNote != nil }, set: { if !$0 { failNote = nil } })) {
-                Button("好") {}
-            } message: {
-                Text(verbatim: failNote ?? "")
-            }
-            // the toast is one layer over all tabs now (Pages/Shell/ToastLayer.swift)
+extension EWSave {
+    /// Applies one change now, as a Toggle / Picker in Settings does (decision 验收 10-07: native settings apply when
+    /// changed). The change goes into the pool (so the row shows it at once, ewShown) and out through `send` as a one-item
+    /// send; nil drops a queued or failed change of that row. A row changed again while its order is out waits and goes
+    /// next with the newest value (the pool keeps one change per key); orders never overlap, so the machine ends on the
+    /// last value.
+    static func apply(_ key: String, _ edit: EWEdit?) {
+        ewPutEdit(key, edit)
+        if edit != nil { EWSendQueue.shared.queued.insert(key) }
+        drain()
     }
 
-    /// #go (view.js:2954-3016): a tap in the first 400 ms while a skip is listed does nothing and the sheet stays.
-    private func go() {
-        guard armed else { return }
-        #if os(Android)
-        // view.js:2953-2955 judges by when the press began. On Android `.disabled` alone did not hold: of six presses begun
-        // 0.35-0.40 s after ✓ and let go after the gate opened, three sent (test pass 1, 问题 11), so the start is checked here.
-        // No recorded start (the gesture saw nothing, e.g. TalkBack's activate) falls back to `armed` alone, as before.
-        if armedAt > 0, let began = ReviewPress.began, began < armedAt { return }
-        #endif
-        let pool = EWEdits.shared
-        guard !pool.saving else { return }   // 2026-09-01: three taps sent three times; one flag across the tabs
-        pool.saving = true
-        reviewing = false
+    /// The change behind a row's 「没发出去」, sent again.
+    static func retry(_ key: String) {
+        guard EWEdits.shared.items[key]?.failure != nil else { return }
+        EWEdits.shared.items[key]?.failure = nil
+        EWSendQueue.shared.queued.insert(key)
+        drain()
+    }
+
+    /// The change behind a row's 「没发出去」, dropped: the row goes back to the machine's value.
+    static func drop(_ key: String) {
+        guard EWEdits.shared.items[key]?.failure != nil else { return }
+        EWEdits.shared.items[key] = nil
+        EWSendQueue.shared.queued.remove(key)
+    }
+
+    /// Whether this key's order is out right now (EndfieldTab: a change back to the value being sent is no change).
+    static func isSending(_ key: String) -> Bool { EWSendQueue.shared.current == key }
+
+    /// 「再发一次」 of a sent change (Pending), with the row's spinner while it is out.
+    static func resend(_ key: String) {
+        let q = EWSendQueue.shared
+        guard !q.resending.contains(key) else { return }
+        q.resending.insert(key)
         Task {
-            let sent = pool.items
-            let r = await EWSave.send(sent)
-            // view.js:3003: the sent ones go, the unsent stay on the page. Only a key that went out and still holds the
-            // value sent is dropped: a send takes up to a minute per order, and writing back the copy taken at the start
-            // lost a change made meanwhile on any tab, and the new value of a row changed again (edge audit 1a).
-            pool.items = pool.items.filter { k, v in r.left[k] != nil || sent[k] != v }
-            pool.saving = false
-            failNote = r.failure
+            await Pending.shared.resend(key)
+            q.resending.remove(key)
         }
     }
 
-    /// Branches on `title` only (fixed per tab), so a first edit never swaps the page's view identity.
-    /// StatusTab passes none and keeps the title StatusPage sets.
+    /// Sends the queued changes one at a time, oldest first, until none is left that has not failed.
+    private static func drain() {
+        let q = EWSendQueue.shared
+        guard !q.draining else { return }
+        q.draining = true
+        Task {
+            while let k = nextQueued() {
+                guard let e = EWEdits.shared.items[k] else { continue }
+                q.current = k
+                let r = await send([k: e])
+                q.current = nil
+                let pool = EWEdits.shared
+                // Only a key that still holds the value sent is settled: a newer change made while this one was out stays
+                // and goes next (the same rule as the batch send had, edge audit 1a).
+                if pool.items[k]?.to == e.to && pool.items[k]?.body == e.body {
+                    if r.left[k] == nil {
+                        pool.items[k] = nil
+                    } else {
+                        pool.items[k]?.failure = r.failure ?? "没发出去。"
+                    }
+                }
+                if pool.items[k] == nil { q.queued.remove(k) }
+            }
+            q.draining = false
+        }
+    }
+
+    private static func nextQueued() -> String? {
+        let q = EWSendQueue.shared
+        let pool = EWEdits.shared.items
+        let live = q.queued.filter { pool[$0] != nil }
+        if live != q.queued { q.queued = live }   // an observed write redraws the tab: only when something left
+        return ordered(pool).first { q.queued.contains($0) && pool[$0]?.failure == nil }
+    }
+}
+
+/// Formerly the 「待保存」 bar (✕ / 「待保存 N 项」 / ✓ and its review sheet). Changes now apply as they are made
+/// (EWSave.apply), so all that is left is the page title, which a pending count no longer replaces.
+/// `title`: the page's title; nil leaves the title the page sets itself.
+struct EWSaveBar: ViewModifier {
+    var title: String? = nil
+
     @ViewBuilder
-    private func titled(_ content: Content) -> some View {
+    func body(content: Content) -> some View {
         if let title {
-            content.navigationTitle(edits.isEmpty ? title : "待保存 \(edits.count) 项")
+            content.navigationTitle(title)
         } else {
             content
         }
     }
-}
-
-/// When the current press on the review sheet began (Android). skip-ui's simultaneous DragGesture with minimumDistance 0
-/// reports the down itself on the Initial pass and consumes nothing (Gesture.swift:972-984 detectSimultaneousDragGestures),
-/// then every move: only the first report of a press is its start. The press's up reaches this parent (Initial pass)
-/// before the 寄出 button's click, so `began` still holds that press's start when go() runs. One review sheet is up at a
-/// time; main thread only.
-enum ReviewPress {
-    nonisolated(unsafe) static var began: Double? = nil
-    nonisolated(unsafe) static var pressing = false
-
-    static func reset() { began = nil; pressing = false }
-    static func down() {
-        guard !pressing else { return }
-        pressing = true
-        began = RecKit.mono()
-    }
-    static func up() { pressing = false }
 }
 
 /// The 库存 page (stockpile.js): sections of materials, or a loading / empty state.
@@ -612,6 +559,8 @@ struct EndfieldStockpilePage: View {
     /// ContentView's tab selection (same AppStorage key), for 「去手机页」.
     @AppStorage("tab") var tab = ContentTab.status
     @Environment(\.dismiss) var dismiss
+    /// The material's picture, 28 pt at the default text size, growing with Dynamic Type.
+    @ScaledMetric(relativeTo: .body) var iconSize: CGFloat = 28
 
     var body: some View {
         let s = Stockpile.shared
@@ -625,39 +574,29 @@ struct EndfieldStockpilePage: View {
             case .zero(let text):
                 Text(text).foregroundStyle(.secondary)
             case .empty(let title, let text, let button, let action):
-                VStack(alignment: .leading, spacing: 6) {
-                    EWStockBox()   // stockpile.js:146 the empty-state box
-                    Text(title).font(.headline)
-                    Text(text).foregroundStyle(.secondary)
-                    if action == .retry {
-                        Button(button) { Task { await s.load(force: true) } }
-                    } else {
-                        // 「去手机页」: pop 库存 and select 手机 (accept-stockpile.js ⑨).
-                        Button(button) {
-                            dismiss()
-                            tab = .phone
-                        }
-                    }
-                }
+                empty(title: title, text: text, button: button, action: action)
             case .list(let sections, let footnote):
                 ForEach(sections) { sec in
                     Section {
                         ForEach(sec.rows) { r in
-                            HStack {
-                                // stockpile.js:74, 98: the material's picture, 28 pt, fit; a picture that fails leaves the space empty
-                                AsyncImage(url: r.icon.flatMap { URL(string: $0) }) { img in
-                                    img.resizable().scaledToFit()
-                                } placeholder: {
-                                    Color.clear
+                            LabeledContent {
+                                if let v = r.value { Text(v) }
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(r.name)
+                                        Text(r.subtitle + (r.origin ?? "")).font(.footnote).foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    // stockpile.js:74, 98: the material's picture, fit; a picture that fails leaves the space empty
+                                    AsyncImage(url: r.icon.flatMap { URL(string: $0) }) { img in
+                                        img.resizable().scaledToFit()
+                                    } placeholder: {
+                                        Color.clear
+                                    }
+                                    .frame(width: iconSize, height: iconSize)
+                                    .accessibilityHidden(true)   // r.name beside names it (HIG VoiceOver: decorative)
                                 }
-                                .frame(width: 28, height: 28)
-                                .accessibilityHidden(true)   // r.name beside names it (HIG VoiceOver: decorative)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(r.name)
-                                    Text(r.subtitle + (r.origin ?? "")).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if let v = r.value { Text(v).foregroundStyle(.secondary) }
                             }
                         }
                     } header: {
@@ -671,35 +610,43 @@ struct EndfieldStockpilePage: View {
             }
         }
         .navigationTitle(Stockpile.title)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(Stockpile.refreshLabel) { Task { await s.load(force: true) } }
-                    .disabled(s.busy)
-            }
-        }
+        // pull to refresh is the page's one refresh (HIG Refresh content controls); no 刷新 button beside it
         .refreshable { await s.load(force: true) }
         .task { await s.open() }
     }
-}
 
-/// The empty-state box, traced from stockpile.js:146's SVG (viewBox 24, drawn 60 pt, stroke 1.2, secondary label colour).
-struct EWStockBox: View {
-    var body: some View {
-        let k: CGFloat = 60.0 / 24.0
-        var p = Path()
-        p.move(to: CGPoint(x: 3 * k, y: 7.5 * k))
-        p.addLine(to: CGPoint(x: 12 * k, y: 3 * k))
-        p.addLine(to: CGPoint(x: 21 * k, y: 7.5 * k))
-        p.addLine(to: CGPoint(x: 21 * k, y: 16.5 * k))
-        p.addLine(to: CGPoint(x: 12 * k, y: 21 * k))
-        p.addLine(to: CGPoint(x: 3 * k, y: 16.5 * k))
-        p.closeSubpath()
-        p.move(to: CGPoint(x: 3 * k, y: 7.5 * k))
-        p.addLine(to: CGPoint(x: 12 * k, y: 12 * k))
-        p.addLine(to: CGPoint(x: 21 * k, y: 7.5 * k))
-        p.move(to: CGPoint(x: 12 * k, y: 12 * k))
-        p.addLine(to: CGPoint(x: 12 * k, y: 21 * k))
-        return p.stroke(Color.secondary, style: StrokeStyle(lineWidth: 1.2 * k, lineJoin: .round))
-            .frame(width: 60, height: 60)
+    /// No stock to show: the system empty state (ContentUnavailableView) with its one action.
+    @ViewBuilder
+    private func empty(title: String, text: String, button: String, action: StockpileEmptyAction) -> some View {
+        #if os(Android)
+        // skip-fuse-ui has no ContentUnavailableView, and skip-ui's init is fatalError() (System/ContentUnavailableView.swift:59)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.headline)
+            Text(text).foregroundStyle(.secondary)
+            emptyAction(button: button, action: action)
+        }
+        #else
+        ContentUnavailableView {
+            Label(title, systemImage: "shippingbox")
+        } description: {
+            Text(text)
+        } actions: {
+            emptyAction(button: button, action: action)
+        }
+        .listRowBackground(Color.clear)
+        #endif
+    }
+
+    @ViewBuilder
+    private func emptyAction(button: String, action: StockpileEmptyAction) -> some View {
+        if action == .retry {
+            Button(button) { Task { await Stockpile.shared.load(force: true) } }
+        } else {
+            // 「去手机页」: pop 库存 and select 手机 (accept-stockpile.js ⑨).
+            Button(button) {
+                dismiss()
+                tab = .phone
+            }
+        }
     }
 }
