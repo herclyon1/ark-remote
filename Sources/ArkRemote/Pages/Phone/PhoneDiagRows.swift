@@ -187,6 +187,11 @@ struct DiagOverlay: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
         }
+        // Placed from the bottom edge, so with the keyboard's safe area that edge was the keyboard's top: the red button
+        // and the line rode up over the keyboard and covered two rows (test pass 6, iOS 27, 鸣潮 「周本打第几个」). They
+        // stay above the tab bar, under the keyboard. Android: skip-ui's ignoresSafeArea does nothing without .container
+        // (AdditionalViewModifiers.swift:728-733; skip-fuse-ui bridges .keyboard, Layout/SafeArea.swift:13), as before.
+        .ignoresSafeArea(.keyboard)
         .onAppear { if ui.on { DiagWatch.start(); ui.start() } }
         .onChange(of: ui.on) { _, on in if !on { wordsOpen = false } }
         .sheet(isPresented: Binding(get: { DiagUI.shared.sheetOpen }, set: { DiagUI.shared.sheetOpen = $0 })) {

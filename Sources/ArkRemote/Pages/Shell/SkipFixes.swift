@@ -152,19 +152,46 @@ extension View {
     /// the focus change). Android's keypad has its own ✓ (IME action) and clearsFocusOnOutsideTap.
     func keyboardDone() -> some View {
         #if !os(Android) && canImport(UIKit)
-        toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("完成") {
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                }
-            }
-        }
+        modifier(KeyboardDoneBar())
         #else
         self
         #endif
     }
 }
+
+#if !os(Android) && canImport(UIKit)
+/// keyboardDone() on iOS. Since iOS 26 the .keyboard toolbar is a floating glass capsule that is not part of the
+/// keyboard's safe area (developer.apple.com/forums/thread/797250 and /thread/799692), so the List scrolled a focused
+/// field near the page end only to the keyboard's top edge, under the capsule: 鸣潮 「周本打第几个」 at y 599–621 behind
+/// 完成 at 593–629, the typed number unseen (test pass 6, iOS 27). While a keyboard is up the List gets that much more
+/// bottom safe area, so the focus scroll stops above the capsule; the toolbar itself stays the system one.
+private struct KeyboardDoneBar: ViewModifier {
+    @State private var keyboardUp = false
+    /// The 完成 capsule over the keyboard plus a gap: the capsule is 47 pt tall and sits on the keyboard's top edge
+    /// (test pass 6 screenshot W1-3-kbd.png, iPhone 18 Pro Max, iOS 27). Measured, not from a system value (近似).
+    private static let room: CGFloat = 56
+
+    func body(content: Content) -> some View {
+        content
+            // set on keyboardWillShow, inside the keyboard's own animation, so it is in place when the List scrolls
+            .safeAreaPadding(.bottom, keyboardUp ? Self.room : 0)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+                keyboardUp = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                keyboardUp = false
+            }
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成") {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                }
+            }
+    }
+}
+#endif
 
 extension View {
     /// The page's 放弃 (✕) also ends the editing: the field kept its focus and keyboard on Android, and the next tap on
