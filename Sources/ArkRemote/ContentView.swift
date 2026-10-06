@@ -141,8 +141,7 @@ struct ContentView: View {
             Tab(value: ContentTab.phone) {
                 NavigationStack(path: $phonePath) {
                     PhoneTab()
-                        // the shared edit bar (✕ / 「待保存 N 项」 / ✓) for the changes left on the other tabs
-                        .modifier(EWSaveBar(title: "手机"))
+                        .navigationTitle("手机")
                         .noticed()
                 }
                 .expandsTopBarOnReselect(.phone)
@@ -158,7 +157,9 @@ struct ContentView: View {
         .tabViewTransitions { _ in .init(.none) }   // SkipUI.NavDisplayTransitionOptions; importing SkipUI here clashes with SwiftUI.View
         #endif
         .onChange(of: shiftTabs, initial: true) { dropGonePages() }
-        .overlay { DiagOverlay() }   // seg-frames-logger.js #diagmark / #diagline over every tab (Pages/Phone/PhoneDiagRows.swift)
+        // seg-frames-logger.js #diagmark / #diagline on every tab: iOS the tab view's bottom accessory, Android an overlay
+        // (Pages/Phone/PhoneDiagRows.swift)
+        .modifier(DiagBottomAccessory())
         // a note raised outside a page's own flow: Pending.resend's 「发不出去」 (pending.js:118). One alert at a time
         // (Relay.showAlert).
         .alert(Relay.shared.alert?.title ?? "", isPresented: Binding(get: { Relay.shared.alert != nil },

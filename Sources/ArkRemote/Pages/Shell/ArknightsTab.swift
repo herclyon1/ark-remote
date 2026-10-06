@@ -51,7 +51,7 @@ struct ArknightsTab: View {
             .onChange(of: Relay.shared.snapAt) {
                 refresh()
             }
-            // the sent changes changed — one went out, a receipt came, or 「不等了，清掉」 (pending.js:85): redraw now
+            // the sent changes changed — one went out, a receipt came, or 「不再等待」 (PendingBarView): redraw now
             .onChange(of: Pending.shared.items) {
                 redraw()
             }

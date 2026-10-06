@@ -115,7 +115,7 @@ struct StatusPage: View {
             Text("没寄出：\(why)").font(.footnote).foregroundStyle(.red)
         } else {
             switch data.switchTags[id] {
-            case .unsaved(let t)?, .applied(let t)?, .sent(let t, _)?:
+            case .applied(let t)?, .sent(let t, _)?:
                 Text(t).font(.footnote).foregroundStyle(.secondary)
             case .bad(let t)?:
                 Text(t).font(.footnote).foregroundStyle(.red)

@@ -194,7 +194,7 @@ struct SelfCheckItem: Sendable, Equatable {
         }
 
         // 4. the push stream: open one, wait for ntfy's `open` event, close it
-        let pushMs = await pushProbe(topic: cfg.topic)
+        let pushMs = await NtfyStream.probeOpen(topic: cfg.topic)
         out.append(SelfCheckItem(name: "推送通道", ok: pushMs != nil,
                                  detail: pushMs.map { "\($0) ms 连上" } ?? "8 秒内没连上"))
 
@@ -216,29 +216,6 @@ struct SelfCheckItem: Sendable, Equatable {
         for i in out { DiagLog.shared.record("selfcheck", ["name": i.name, "ok": i.ok ? "yes" : "no", "detail": i.detail]) }
         LastSelfCheck.save(out)
         return out
-    }
-
-    /// ms until the stream's `open` event, or nil after 8 s.
-    private static func pushProbe(topic: String) async -> Int? {
-        let t0 = nowMs()
-        return await withCheckedContinuation { (cont: CheckedContinuation<Int?, Never>) in
-            let done = OnceFlag()
-            var stream: NtfyStream?
-            stream = NtfyStream(topics: topic, since: "\(Int(t0 / 1000))") { e in
-                if e["event"]?.string == "open", done.take() {
-                    stream?.close()
-                    cont.resume(returning: Int(nowMs() - t0))
-                }
-            }
-            stream?.open()
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-                if done.take() {
-                    stream?.close()
-                    cont.resume(returning: nil)
-                }
-            }
-        }
     }
 }
 

@@ -78,7 +78,6 @@ enum StatusCommands {
                 // order: 「下次开机跑」 promised a run that a machine off longer never got (edge audit 23)
                 what: "现在跑一趟")
         }
-        a.refresh = { Task { await Live.shared.ping() } }
         // the relay drops an estop read from the boot backlog (boot_stages.py:534-546 LIVE_ONLY_ACTIONS): sent while the
         // machine is off it never runs (审查 B8), so the row is disabled while the machine is off
         a.stopAll = {

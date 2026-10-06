@@ -59,11 +59,10 @@ enum PendingTag: Sendable, Equatable {
     case applied(text: String)
 }
 
-/// The #pendbar line: text, whether any item was refused (the red xmark), and the 「不等了，清掉」 button.
+/// The #pendbar line: text, and whether any item was refused (PendingBarView offers 「不再等待」 beside it).
 struct PendingBar: Sendable, Equatable {
     let text: String
     let hasMismatch: Bool
-    static let clearLabel = "不等了，清掉"
 }
 
 @MainActor @Observable final class Pending {
@@ -216,7 +215,7 @@ struct PendingBar: Sendable, Equatable {
         return PendingBar(text: text, hasMismatch: bad > 0)
     }
 
-    /// 「不等了，清掉」.
+    /// 「不再等待」 (PendingBarView), and a new mailbox (Live).
     func clearAll() {
         items = [:]
         savePending()

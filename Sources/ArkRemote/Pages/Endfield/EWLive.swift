@@ -433,14 +433,8 @@ enum EWSave {
                 ? "发出去 \(sent) 项，剩下 \(left.count) 项没发出去（\(Live.why(failed))）。"
                 : "没发出去（\(Live.why(failed))）。"
         }
-        // view.js:2455-2457: ask the machine once, 2 s later, for a state reported after the send. One request, no loop.
-        if sent > 0 {
-            let after = nowSec()
-            Task {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                await Live.shared.ping(minAt: after)
-            }
-        }
+        // view.js:2455-2457: ask the machine once, 2 s later, for a state reported after the send
+        if sent > 0 { Live.shared.ping(afterSeconds: 2, minAt: nowSec()) }
         return (left, failure)
     }
 }
@@ -535,22 +529,6 @@ extension EWSave {
         let live = q.queued.filter { pool[$0] != nil }
         if live != q.queued { q.queued = live }   // an observed write redraws the tab: only when something left
         return ordered(pool).first { q.queued.contains($0) && pool[$0]?.failure == nil }
-    }
-}
-
-/// Formerly the 「待保存」 bar (✕ / 「待保存 N 项」 / ✓ and its review sheet). Changes now apply as they are made
-/// (EWSave.apply), so all that is left is the page title, which a pending count no longer replaces.
-/// `title`: the page's title; nil leaves the title the page sets itself.
-struct EWSaveBar: ViewModifier {
-    var title: String? = nil
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let title {
-            content.navigationTitle(title)
-        } else {
-            content
-        }
     }
 }
 

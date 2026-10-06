@@ -100,7 +100,6 @@ struct StatusBoss: Hashable, Identifiable {
 
 /// The small line under a row (pending.js applyPending; index.html:769-773): grey, or red with 「再发一次」.
 enum StatusTag: Hashable {
-    case unsaved(String)                 // 待保存
     case sent(String, again: Bool)       // 已寄出 … / 没回执 · 已寄出 HH:MM (+ 再发一次 past 10 h)
     case bad(String)                     // 没生效 · … + 再发一次, red
     case applied(String)                 // 已应用 HH:MM
@@ -131,8 +130,6 @@ struct StatusData {
     var configIsStale = false                 // falling back to lastGoodConfig
     // Action tiles.
     var nextAt = ""                           // next 🕘 time in plan
-    var lastUpdate = "还没有数据"               // ago(snap.at)
-    var snapAt: Int? = nil                    // snap.at, so the page can redraw 「X 分钟前」 by the local clock
     var refreshing = false                    // Live.busy: the 刷新 tile spins while a ping runs
     // Stamina tiles; nil = phone not configured, [] = configured but still reading.
     var stamina: [StatusStamina]? = nil
@@ -166,7 +163,6 @@ struct StatusData {
 /// What the page asks the logic layer to do. Every closure is optional so the page builds on its own.
 struct StatusActions {
     var runNow: () -> Void = {}
-    var refresh: () -> Void = {}
     var stopAll: () -> Void = {}
     var selectQueue: (String) -> Void = { _ in }
     var setRunsToday: (String, Bool) -> Void = { _, _ in }        // queue name, on
@@ -186,7 +182,6 @@ extension StatusData {
         d.deviceStatus = "实时 · 配置 1 分钟前"
         d.online = true
         d.nextAt = "04:00"
-        d.lastUpdate = "1 分钟前"
         d.stamina = [
             StatusStamina(label: "明日方舟 理智", value: 120, cap: 135, sub: "今天 19:24 回满"),
             StatusStamina(label: "终末地 理智", value: 240, cap: 240, sub: "已满"),

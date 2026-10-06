@@ -141,7 +141,7 @@ import SwiftUI
 
     /// Reading another app's clip makes Android 12+ show 「已粘贴」 and iOS ask to paste, so the content is read
     /// only when it can be a link copied just now: on Android a text clip from the last 10 minutes not read before
-    /// (its description, which shows no notice); on iOS a probable web URL (detectPatterns, which shows no prompt)
+    /// (its description, which shows no notice); on iOS a probable web URL (detectedPatterns, which shows no prompt)
     /// that changed since the last look (changeCount).
     private static func takeClipboardIfDue() {
         guard clipboardDue, windowFocused else { return }
@@ -160,12 +160,13 @@ import SwiftUI
         let pb = UIPasteboard.general
         guard pb.hasStrings, pb.changeCount != clipChange else { return }
         clipChange = pb.changeCount
-        // @Sendable: UIKit calls this back on a background queue; written inside a @MainActor func the closure would
-        // otherwise be inferred main-actor isolated, and Swift 6's runtime isolation check traps (SIGTRAP on open
-        // whenever the clipboard holds text - 0.4.4 second test pass, iOS 27 simulator).
-        pb.detectPatterns(for: [.probableWebURL]) { @Sendable r in
-            guard case .success(let found) = r, found.contains(.probableWebURL) else { return }
-            Task { @MainActor in PhoneLink.takeClipboardLink() }
+        // detectedPatterns(for:) with key paths, the async form (the DetectionPattern / completion-handler one is deprecated
+        // since iOS 15): no callback closure, so nothing runs on UIKit's background queue with main-actor isolation
+        // (that trapped: SIGTRAP on open whenever the clipboard held text - 0.4.4 second test pass, iOS 27 simulator).
+        Task { @MainActor in
+            let url: PartialKeyPath<UIPasteboard.DetectedValues> = \.probableWebURL
+            guard let found = try? await UIPasteboard.general.detectedPatterns(for: [url]), found.contains(url) else { return }
+            PhoneLink.takeClipboardLink()
         }
         #else
         PhoneLink.takeClipboardLink()

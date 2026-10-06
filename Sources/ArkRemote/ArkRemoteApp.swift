@@ -138,19 +138,6 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
                                "prev_v": .string(prevV)]])
     }
 
-    // MARK: Share (Android; ShareSheet.kt drives the system share panel, Pages/Phone/PhoneDiagRows.swift DiagShare asks)
-
-    /// AndroidAppMain hands over the share entry point once at startup: `share(text, title)` opens the system chooser.
-    /* SKIP @bridge */public func registerSharer(share: @escaping (String, String) -> Void) {
-        DiagShare.androidShare = share
-    }
-
-    /// What the chooser told ShareSheet.kt: `state` 0 = an app was picked, 1 = back without a pick (inferred: no pick
-    /// came before the activity resumed), 2 = the chooser could not be opened (`message` says why).
-    /* SKIP @bridge */public func onShareResult(state: Int, message: String) {
-        Task { @MainActor in DiagShare.finish(state: state, message: message) }
-    }
-
     // MARK: In-app update (Android only; AppUpdater.kt drives these, Logic/AppUpdate.swift shows them)
 
     /// AndroidAppMain hands over the two Kotlin entry points once at startup: `check` (one GitHub request)
