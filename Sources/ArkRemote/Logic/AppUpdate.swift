@@ -203,8 +203,7 @@ struct UpdateBanner: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding()   // the system's standard spacing, not fixed values
         .frame(maxWidth: .infinity, alignment: .leading)
         Divider()
     }

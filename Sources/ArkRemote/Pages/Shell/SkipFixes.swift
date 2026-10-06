@@ -84,18 +84,12 @@ func listSection<Value, Content: View>(_ id: String, ifLet value: Value?, @ViewB
     }
 }
 
-/// A list row that opens its page as a sheet from the bottom instead of pushing it: the web page's 勾选页 (#picker,
-/// index.html:957-963; view.js:1458 openPicker, sheet.js) is a page sheet over the tab, not a pushed page. Used as
-/// `NavigationLink` is: `SheetLink { EWChoiceList(…) } label: { … }`.
-///
-/// The sheet has its own navigation bar as #picker's .pnav: 「返回」 (chevron, view.js:1484 `.pback` = close, nothing
-/// applied) on the left, the page's title small in the middle, and the page's own ✓ (完成, `.pdone`) on the right. A
-/// swipe down closes it the same way (sheet.js drag-to-dismiss). The row keeps the disclosure chevron the pushed row
-/// had (the web value row reads 「已选 N/M ›」).
+/// A list row that pushes its page, as a settings row with a value does (HIG Lists and tables / Settings: a row that
+/// leads to a choice list pushes it; the system draws the row's disclosure indicator and the page's back button). Kept
+/// under its old name with the call site of `NavigationLink`: `SheetLink { EWChoiceList(…) } label: { … }`.
 struct SheetLink<Destination: View, Label: View>: View {
     let destination: () -> Destination
     let label: () -> Label
-    @State var shown = false
 
     init(@ViewBuilder destination: @escaping () -> Destination, @ViewBuilder label: @escaping () -> Label) {
         self.destination = destination
@@ -103,64 +97,39 @@ struct SheetLink<Destination: View, Label: View>: View {
     }
 
     var body: some View {
-        Button {
-            shown = true
-        } label: {
-            HStack {
-                label()
-                #if os(Android)
-                Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
-                #else
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-                #endif
-            }
-            // a row, not a tinted button: the label keeps the list's text colour (its own secondary parts stay secondary)
-            .foregroundStyle(.primary)
-            #if !os(Android)
-            .contentShape(Rectangle())   // the whole row takes the tap (skip-fuse-ui has no contentShape; a Compose row is whole already)
-            #endif
-        }
-        .sheet(isPresented: $shown) {
-            NavigationStack {
-                destination()
-                    #if !os(macOS)
-                    .navigationBarTitleDisplayMode(.inline)   // .ptitle: the small centred title of a sheet's bar
-                    #endif
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button { shown = false } label: { Image(systemName: "chevron.left") }
-                                .accessibilityLabel("返回")   // index.html:960 .pback aria-label 返回
-                        }
-                    }
-            }
-            // the tab's toast layer is under the sheet (a sheet is its own presentation on both platforms); the web's
-            // .toast sits over #picker, so 「至少要留一个…」 (EWChoiceList.done) shows here too. Both layers clear the same
-            // Relay.toast by its `at`, so two of them never fight.
-            .overlay { ToastLayer() }
-        }
+        NavigationLink(destination: destination, label: label)
     }
 }
 
 extension View {
-    /// iOS: a 完成 key over the keyboard. The number pads (.numberPad) have no return key, and tapping blank space or
-    /// dragging the list did not hide them either: the keyboard covered the tab bar until the App was restarted (test
-    /// pass 1, 问题 3). One per page, on its List: keyboard toolbar items from several views add up. resignFirstResponder
-    /// sent to the first responder, so no page has to bind its fields' @FocusState here (their blur checks still run on
-    /// the focus change). Android's keypad has its own ✓ (IME action) and clearsFocusOnOutsideTap.
+    /// The keyboard's 完成 key and drag-to-dismiss, once per page on its List. The number pads (.numberPad) have no return
+    /// key, and a drag of the list did not hide them either: the keyboard covered the tab bar until the App was restarted
+    /// (test pass 1, 问题 3). `.scrollDismissesKeyboard(.interactively)` lets a drag of the list take the keyboard down
+    /// (SwiftUI scrollDismissesKeyboard; skip-ui List.swift:181 reads it too). Keyboard toolbar items from several views
+    /// add up, hence one per page. 完成 ends the editing of whichever field has focus; a page that owns its fields'
+    /// `@FocusState` should use `keyboardDone(_:)` instead, which clears that state. Android's keypad has its own ✓ (IME
+    /// action) and clearsFocusOnOutsideTap.
     func keyboardDone() -> some View {
         #if !os(Android) && canImport(UIKit)
-        modifier(KeyboardDoneBar())
+        scrollDismissesKeyboard(.interactively).modifier(KeyboardDoneBar(done: nil))
         #else
-        self
+        scrollDismissesKeyboard(.interactively)
+        #endif
+    }
+
+    /// `keyboardDone()` for a page whose fields are bound to `focus`: 完成 sets it to nil (SwiftUI FocusState: "set the
+    /// focused value to nil to remove focus from all bound fields").
+    func keyboardDone<Value: Hashable>(_ focus: FocusState<Value?>.Binding) -> some View {
+        #if !os(Android) && canImport(UIKit)
+        scrollDismissesKeyboard(.interactively).modifier(KeyboardDoneBar(done: { focus.wrappedValue = nil }))
+        #else
+        scrollDismissesKeyboard(.interactively)
         #endif
     }
 }
 
 #if !os(Android) && canImport(UIKit)
-/// keyboardDone() on iOS. Since iOS 26 the .keyboard toolbar is a floating glass capsule that is not part of the
+/// keyboardDone() on iOS: the system .keyboard toolbar with 完成, plus room for its capsule. Since iOS 26 the .keyboard toolbar is a floating glass capsule that is not part of the
 /// keyboard's safe area (developer.apple.com/forums/thread/797250 and /thread/799692), so the List scrolled a focused
 /// field near the page end only to the keyboard's top edge, under the capsule: 鸣潮 「周本打第几个」 at y 599–621 behind
 /// 完成 at 593–629, the typed number unseen (test pass 6, iOS 27). While a keyboard is up the List gets that much more
@@ -170,6 +139,9 @@ extension View {
 /// no API puts it into the keyboard safe area or gives its height (DTS on thread/797250 suggests safeAreaBar instead,
 /// whose @FocusState does not work on iOS 26.1, release notes 158720838).
 private struct KeyboardDoneBar: ViewModifier {
+    /// What 完成 does: clear the page's @FocusState, or (nil) end the editing of the focused field, for the pages that
+    /// do not bind one here.
+    let done: (() -> Void)?
     @State private var keyboardUp = false
     /// The 完成 capsule over the keyboard plus a gap: the capsule is 47 pt tall and sits on the keyboard's top edge
     /// (test pass 6 screenshot W1-3-kbd.png, iPhone 18 Pro Max, iOS 27). Measured, not from a system value (近似).
@@ -197,7 +169,7 @@ private struct KeyboardDoneBar: ViewModifier {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("完成") {
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        if let done { done() } else { endEditing() }
                     }
                 }
             }
