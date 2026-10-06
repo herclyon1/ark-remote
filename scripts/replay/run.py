@@ -255,6 +255,8 @@ class Runner:
                 self.drv.tap(target["x"] + (target["w"] // 2 - 20 if target["w"] > 80 else 0), target["y"])
                 if not self.drv.wait_keyboard():
                     raise StepFail("点了框没出键盘")
+            if self.drv.platform == "ios":
+                self.caret_to_end(target)
             self.drv.clear_field(opts.get("clear", 12))
             if rest[1]:
                 self.drv.type(rest[1])
@@ -400,7 +402,10 @@ class Runner:
         elif kind == "fluency":
             self.fluency(*rest)
         elif kind == "shot":
+            # the picture plus the element tree beside it (centres and sizes in points), for measuring overlaps
             self.drv.screenshot(os.path.join(self.out, rest[0] + ".png"))
+            with open(os.path.join(self.out, rest[0] + ".json"), "w") as f:
+                json.dump(self.dump(True)["nodes"], f, ensure_ascii=False)
         else:
             raise StepFail(f"未知动作 {kind}")
         self.invalidate()
@@ -728,6 +733,33 @@ class Runner:
             if time.time() >= t_end:
                 raise StepFail(f"等了 {secs} 秒键盘没收起；屏上：{self.seen()}")
             time.sleep(0.3)
+
+    def caret_to_end(self, target):
+        """iOS: the tap that focuses a field leaves the cursor before its old value (循环执行 「99」: the deletes removed
+        nothing and 「20」 typed read 「2099」, final pass 10-06 step 79), so tap the focused field once more at its right
+        end, after its right-aligned digits, where a tap on a focused field puts the cursor. That spot under the
+        keyboard's 完成 capsule is the overlap the capsule room (SkipFixes.swift KeyboardDoneBar) is there to prevent:
+        不对, the number typed there would not be seen."""
+        time.sleep(0.4)   # the list's scroll to the field runs with the keyboard's rise
+        self.invalidate()
+        nodes = self.dump(True)["nodes"]
+        fields = [f for f in nodes if self.is_field(f) and self.on_screen(f) and abs(f["x"] - target["x"]) <= 6]
+        if not fields:
+            return
+        f = min(fields, key=lambda f: abs(f["y"] - target["y"]))
+        kb = [n for n in nodes if n["kind"] == "Keyboard" and n["h"] > 0]
+        kb_top = min((n["y"] - n["h"] / 2 for n in kb), default=None)
+        for b in nodes:
+            if b["label"] != "完成" or b["kind"] != "Button" or kb_top is None or b["y"] < kb_top - 80:
+                continue   # the keyboard's 完成, not the save bar's ✓ (also labelled 完成) at the top
+            if b["y"] - b["h"] / 2 < f["y"] + f["h"] / 2 and f["x"] + f["w"] / 2 > b["x"] - b["w"] / 2:
+                raise StepFail(f"框（y {f['y'] - f['h'] / 2:.0f}–{f['y'] + f['h'] / 2:.0f}）在键盘的「完成」"
+                               f"（y {b['y'] - b['h'] / 2:.0f}–{b['y'] + b['h'] / 2:.0f}）下面")
+        if not (f["value"] or "").strip():
+            return
+        self.drv.tap(f["x"] + f["w"] // 2 - 3, f["y"])
+        time.sleep(0.3)
+        self.invalidate()
 
     def check_field_text(self, target, text, clear):
         """iOS: read the field back after typing; when characters were lost or old ones stayed (seen under load:
