@@ -15,38 +15,13 @@ struct ArknightsPage: View {
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.arknights }
 
-    /// The first row the page draws, worked out in the page's own order from the same conditions the sections use; nil =
-    /// nothing drawn. Every section here has a header, so on Android this row lands flush under the top bar with its
-    /// header scrolled off (skip-ui's ScrollViewProxy finds ids of rows only, LazySupport.swift:250-288; a section header
-    /// is a count, :283). Field rows carry 「ark-row-<path>」 (tagged); a 母本 note is its ForEach id, the note itself (the
-    /// same note also heads 领取奖励, after 基建: skip-ui takes the first match, LazySupport.swift:250-288).
-    private var topID: String? {
-        if data.notInShift { return "ark-notinshift" }
-        if data.configUnreadable { return "ark-stage-warn" }
-        if let r = stageRows.first { return "ark-row-" + r.path }
-        if let id = masterTopID("infrast", infrastRows) { return id }
-        if let id = masterTopID("award", awardRows) { return id }
-        if data.annihilationDoneThisWeek != nil { return "ark-weekly" }
-        return nil
-    }
-
-    /// The first row of a master section (基建 / 领取奖励): its order is masterWarnings, then the field rows.
-    private func masterTopID(_ section: String, _ rows: [ArknightsHintRow]) -> String? {
-        if data.masterUnreadable { return "ark-\(section)-unreadable" }
-        if data.masterStale { return "ark-\(section)-stale" }
-        if let note = data.masterNotes.first { return note }
-        return rows.first.map { "ark-row-" + $0.path }
-    }
-
     var body: some View {
-        ScrollViewReader { proxy in
         Form {
             // listSection, not a bare `if`: a false `if` at the top of a List draws an empty grey section on Android (SkipFixes.swift)
             listSection("ark-notinshift", if: data.notInShift) {
                 Section {
                     Text(verbatim: "\(data.shiftName.isEmpty ? "这个班次" : data.shiftName)不跑明日方舟。换班次在「状态」页。")
                         .foregroundStyle(.secondary)
-                        .id("ark-notinshift")   // a reselect's scroll target (topID)
                 }
             }
             stageSection
@@ -54,13 +29,12 @@ struct ArknightsPage: View {
             awardSection
             weeklySection
         }
-        // skip-ui animates scrollTo only inside withAnimation (List.swift:242) and ignores the anchor (ScrollView.swift:163);
-        // Form is skip-ui's List (Form.swift:9-14), the same ScrollViewReader support
+        // D39 on Android (the count only moves there, ContentView.reselect): a new Form, whose new scroll state starts at
+        // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
+        // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)). Form is
+        // skip-ui's List (Form.swift:9-14).
+        .id(reselect)
         .keyboardDone()
-        .onChange(of: reselect) {
-            if let id = topID { withAnimation { proxy.scrollTo(id, anchor: .top) } }
-        }
-        }
         // the title (「游戏机遥控」, or 「待保存 N 项」 while changes wait, view.js:1554) is set by ArknightsTab's EWSaveBar
     }
 
@@ -115,7 +89,6 @@ struct ArknightsPage: View {
                 ArknightsWarningRow(text: data.configStale
                     ? "读不到 AUTO-MAS 的配置（它没在运行？）——下面显示的是上次读到的；它没在运行时改的会失败，看回执"
                     : "读不到 AUTO-MAS 的配置（它没在运行？）")
-                    .id("ark-stage-warn")   // a reselect's scroll target (topID)
             }
             if data.stage != nil {
                 tagged("Info.Stage") {
@@ -168,9 +141,9 @@ struct ArknightsPage: View {
         listSection("ark-infrast", if: masterHasNotes || !infrastRows.isEmpty) {
         Section {
             if data.masterUnreadable {
-                ArknightsWarningRow().id("ark-infrast-unreadable")   // a reselect's scroll target (topID)
+                ArknightsWarningRow()
             } else {
-                masterWarnings("infrast")
+                masterWarnings
                 if data.usesOfDrones != nil {
                     tagged("Infrast/UsesOfDrones") {
                         ArknightsPickerRow(label: label("Infrast/UsesOfDrones", "无人机用在哪"),
@@ -202,9 +175,9 @@ struct ArknightsPage: View {
         listSection("ark-award", if: masterHasNotes || !awardRows.isEmpty) {
         Section {
             if data.masterUnreadable {
-                ArknightsWarningRow().id("ark-award-unreadable")   // a reselect's scroll target (topID)
+                ArknightsWarningRow()
             } else {
-                masterWarnings("award")
+                masterWarnings
                 if data.awardMail != nil {
                     tagged("Award/Mail") {
                         ArknightsToggleRow(label: label("Award/Mail", "领取所有邮件奖励"),
@@ -249,7 +222,6 @@ struct ArknightsPage: View {
                     Text(done ? "本周已打满" : "本周还没打满")
                         .foregroundStyle(.secondary)
                 }
-                .id("ark-weekly")   // a reselect's scroll target (topID)
             } header: {
                 Text("明日方舟 · 周常")
             } footer: {
@@ -262,11 +234,9 @@ struct ArknightsPage: View {
 
     /// The yellow lines at the top of a master section (view.js:482-493): the master copy is the last one read
     /// (said once inside each master section), then 「名字没翻译出来」 and 「定义文件里没有这些任务」.
-    /// `section` keeps the stale row's id apart between the two sections (a reselect's scroll target, topID).
-    @ViewBuilder private func masterWarnings(_ section: String) -> some View {
+    @ViewBuilder private var masterWarnings: some View {
         if data.masterStale {
             ArknightsWarningRow(text: "配置文件这次读不到——下面是上次读到的，改了要等它能读到才生效")
-                .id("ark-\(section)-stale")
         }
         ForEach(data.masterNotes, id: \.self) { note in
             ArknightsWarningRow(text: note)
@@ -311,7 +281,7 @@ struct ArknightsPage: View {
         }
         .listRowBackground(rowBackground(posted ? Color.green.opacity(0.08)
             : unsaved ? Color.accentColor.opacity(0.08) : nil))   // never nil on Android (SkipFixes.swift)
-        .id("ark-row-" + path)   // constant per row, so the shape stays one; a reselect's scroll target (topID)
+        .id("ark-row-" + path)   // constant per row, so the shape stays one
     }
 
     /// A binding to an optional field that the row only draws when the field is non-nil.

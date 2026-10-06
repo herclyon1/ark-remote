@@ -26,11 +26,6 @@ struct EndfieldPage: View {
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.endfield }
 
-    /// The 库存 row: first on the page, always drawn, in a section without a header. skip-ui's ScrollViewProxy finds ids of
-    /// rows only (LazySupport.swift:250-288; a section header is a count, :283): the row lands flush under the top bar, the
-    /// list's top inset and empty header item above it scrolled off.
-    static let topID = "endfield-top"
-
     /// The cards whose 「更多设置」 row pushes EndfieldRoute.more(title); the titles differ (EndfieldSchema.swift:5, 26, 60).
     private static let cards = [EndfieldSchema.essence, EndfieldSchema.protocolSpace, EndfieldSchema.otherTasks]
 
@@ -46,7 +41,6 @@ struct EndfieldPage: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
         List {
             // 库存: a single-row card with no header, first on the page (D72, inventory-plan.md §2).
             Section {
@@ -57,12 +51,15 @@ struct EndfieldPage: View {
                 NavigationLink(value: EndfieldRoute.stockpile) {
                     Text("库存")
                 }
-                .id(Self.topID)   // the reselect's scroll target (topID)
             }
             card(EndfieldSchema.essence)
             card(EndfieldSchema.protocolSpace)
             card(EndfieldSchema.otherTasks)
         }
+        // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
+        // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
+        // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).
+        .id(reselect)
         // On the List, not a Section or row (skip-ui's List finds its sections by type, MonthCardRows.swift; SwiftUI wants
         // navigationDestination outside lazy containers); in body so onChange, onResend and live stay in scope.
         .keyboardDone()
@@ -76,11 +73,8 @@ struct EndfieldPage: View {
                 }
             }
         }
-        // skip-ui animates scrollTo only inside withAnimation (List.swift:242) and ignores the anchor (ScrollView.swift:163)
-        .onChange(of: reselect) { withAnimation { proxy.scrollTo(Self.topID, anchor: .top) } }
         .onChange(of: data.master.values) { _, _ in
             values = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:]
-        }
         }
     }
 

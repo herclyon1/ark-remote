@@ -41,19 +41,12 @@ struct PhonePage: View {
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.phone }
 
-    /// The 页面版本 row: first on the page and always drawn. skip-ui's ScrollViewProxy finds ids of rows only
-    /// (LazySupport.swift:250-288; a section header is a count, :283), so on Android this row lands flush under the top
-    /// bar with the 「这台手机」 header above it scrolled off.
-    static let topID = "phone-top"
-
     private var hasTokens: Bool { !data.staminaStatus.isEmpty }
 
     var body: some View {
-        ScrollViewReader { proxy in
         List {
             Section {
                 PhoneValueRow(title: "页面版本", hint: "这个安装包的版本号；App 里更新过就会变", value: data.pageVersion)
-                    .id(Self.topID)   // the reselect's scroll target (topID)
                 PhoneDiagRows(appVersion: data.pageVersion)
                 Button("复制免输入链接") {
                     // view.js #mklink: toast on success, prompt("长按复制这条链接：", url) when the clipboard refuses
@@ -88,8 +81,10 @@ struct PhonePage: View {
                 Text("免输入链接会把这里存着的密钥一起带上，换手机开一次那条链接就全有。森空岛的会话由机器交过来；库街区的：点「粘贴密钥串」，粘贴网页「手机」页复制的免输入链接、电脑上 scripts/mac/phone-link.py 打出来的链接，或 ~/.config/ark/.env 里 KUROBBS_TOKEN 和 KUROBBS_DID 那两行")
             }
         }
-        // skip-ui animates scrollTo only inside withAnimation (List.swift:242) and ignores the anchor (ScrollView.swift:163)
-        .onChange(of: reselect) { withAnimation { proxy.scrollTo(Self.topID, anchor: .top) } }
+        // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
+        // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
+        // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).
+        .id(reselect)
         // view.js:1150-1153 pullRefresh: a pull on any tab but the pushed 库存 page is ping(), the 手机 tab too
         .refreshable { await Live.shared.ping() }
         // the title (「游戏机遥控」, or 「待保存 N 项」 while changes wait, view.js:1283 / 1554) is set by ContentView's EWSaveBar
@@ -144,7 +139,6 @@ struct PhonePage: View {
         .alert("长按复制这条链接：", isPresented: $manualShown) {
             TextField("", text: $manualLink)
             Button("好", role: .cancel) {}
-        }
         }
     }
 }
