@@ -532,7 +532,8 @@ extension EWSave {
     private static func nextQueued() -> String? {
         let q = EWSendQueue.shared
         let pool = EWEdits.shared.items
-        q.queued = q.queued.filter { pool[$0] != nil }
+        let live = q.queued.filter { pool[$0] != nil }
+        if live != q.queued { q.queued = live }   // an observed write redraws the tab: only when something left
         return ordered(pool).first { q.queued.contains($0) && pool[$0]?.failure == nil }
     }
 }
