@@ -164,7 +164,11 @@ extension View {
 /// keyboard's safe area (developer.apple.com/forums/thread/797250 and /thread/799692), so the List scrolled a focused
 /// field near the page end only to the keyboard's top edge, under the capsule: 鸣潮 「周本打第几个」 at y 599–621 behind
 /// 完成 at 593–629, the typed number unseen (test pass 6, iOS 27). While a keyboard is up the List gets that much more
-/// bottom safe area, so the focus scroll stops above the capsule; the toolbar itself stays the system one.
+/// bottom safe area, so a last row can scroll above the capsule. That room alone did not keep fields clear: the system
+/// scroll stops at a List edge that moves from test to test (the 0.4.4 final pass had 终末地 循环执行 behind 完成 with
+/// it), so KeyboardRowReveal moves the focused row above the keyboard's end frame. The toolbar stays the system one:
+/// no API puts it into the keyboard safe area or gives its height (DTS on thread/797250 suggests safeAreaBar instead,
+/// whose @FocusState does not work on iOS 26.1, release notes 158720838).
 private struct KeyboardDoneBar: ViewModifier {
     @State private var keyboardUp = false
     /// The 完成 capsule over the keyboard plus a gap: the capsule is 47 pt tall and sits on the keyboard's top edge
@@ -180,6 +184,14 @@ private struct KeyboardDoneBar: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 keyboardUp = false
+                KeyboardRowReveal.keyboardTop = nil
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { note in
+                KeyboardRowReveal.shown(note)
+            }
+            // the first keystroke adds the row's 「待保存」 line and the row grows downwards
+            .onReceive(NotificationCenter.default.publisher(for: UITextField.textDidChangeNotification)) { _ in
+                DispatchQueue.main.async { KeyboardRowReveal.reveal() }
             }
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
@@ -190,6 +202,66 @@ private struct KeyboardDoneBar: ViewModifier {
                 }
             }
     }
+}
+
+/// Scrolls the focused field's whole row above the keyboard's top edge, 完成 capsule included. The system only scrolls
+/// a field it finds outside the List's visible area, and only to that area's bottom edge, which on iOS 27 sits anywhere
+/// from above to under the capsule: 循环执行 field at 543–565 above 完成 at 593–629, 周本打第几个 at 591–613 behind it,
+/// the same build (List bottom insets 391 / 343 pt at keyboardDidShow). The keyboard's end frame
+/// (keyboardFrameEndUserInfoKey) starts at the capsule's toolbar (y 587, iPhone 18 Pro Max, iOS 27), so a row ending
+/// above it is clear of the capsule. Idempotent: nothing moves when the row is already clear, so each page's
+/// keyboardDone() may call it for the same keyboard.
+@MainActor enum KeyboardRowReveal {
+    /// The keyboard's top edge in window coordinates while it is up (its end frame), nil while it is down.
+    static var keyboardTop: CGFloat?
+    private static let gap: CGFloat = 8
+
+    static func shown(_ note: Notification) {
+        guard let kb = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        keyboardTop = kb.minY
+        reveal()
+        // the List's own scroll to the field can still follow keyboardDidShow (seen: the row still at its old place
+        // then) and stop with the row under the capsule; look again once it is done
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { reveal() }
+    }
+
+    static func reveal() {
+        guard let top = keyboardTop, let field = FirstResponder.find() as? UIView else { return }
+        var row: UIView = field
+        var scroll: UIScrollView?
+        var v = field.superview
+        while let s = v {
+            if s is UICollectionViewCell || s is UITableViewCell { row = s }
+            if let sv = s as? UIScrollView { scroll = sv; break }
+            v = s.superview
+        }
+        guard let scroll, let window = scroll.window else { return }
+        let rowBottom = row.convert(row.bounds, to: window).maxY
+        let over = rowBottom - (top - gap)
+        guard over > 0.5 else { return }
+        // no further than the List's end: the keyboardDone() bottom room is what lets a last row go that high
+        let maxY = max(scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height,
+                       -scroll.adjustedContentInset.top)
+        let y = min(scroll.contentOffset.y + over, maxY)
+        guard y > scroll.contentOffset.y + 0.5 else { return }
+        scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: y), animated: true)
+    }
+}
+
+/// The view that holds the keyboard focus (a UITextField inside a SwiftUI TextField): the first object to answer an
+/// action sent to nil is the first responder.
+@MainActor private enum FirstResponder {
+    private static weak var found: UIResponder?
+    static func find() -> UIResponder? {
+        found = nil
+        UIApplication.shared.sendAction(#selector(UIResponder.arkCaptureFirstResponder), to: nil, from: nil, for: nil)
+        return found
+    }
+    fileprivate static func set(_ r: UIResponder) { found = r }
+}
+
+extension UIResponder {
+    @objc fileprivate func arkCaptureFirstResponder() { FirstResponder.set(self) }
 }
 #endif
 
