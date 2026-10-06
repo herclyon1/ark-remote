@@ -10,8 +10,9 @@ struct GameRowStatus: Equatable {
     var bad = false
     /// 「再发一次」 for this Pending key (under 「没生效」 and the 10 h 「没回执」 line, pending.js:59).
     var resendKey: String? = nil
-    /// The change is on its way: an activity indicator in place (HIG Progress indicators: "Use an activity indicator
-    /// … when it's not possible to calculate how long a task will take").
+    /// The change is on its way: an indeterminate indicator in place, gone when the send is done (HIG Progress
+    /// indicators: indeterminate ones are "for unquantifiable tasks"; "All progress indicators are transient, appearing
+    /// only while an operation is ongoing and disappearing after it completes.").
     var sending = false
 
     static let sendingNow = GameRowStatus(text: "正在寄出", sending: true)
