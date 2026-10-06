@@ -1,4 +1,7 @@
 import SwiftUI
+#if !os(Android) && canImport(UIKit)
+import UIKit
+#endif
 
 /// The five tabs, in the web page's order (maa-automation web/view.js TABS: 状态 / 方舟 / 终末地 / 鸣潮 / 手机).
 enum ContentTab: String, Hashable {
@@ -123,13 +126,13 @@ struct ContentView: View {
 
     private var tabs: some View {
         // Tab images are view.js TAB_ICONS / TAB_IMAGES exported as-is (Resources/Module.xcassets): the game icons keep
-        // their colors; tab-status / tab-phone are template images. tabIconFrame() sizes them for the tab icon slot.
+        // their colors; tab-status / tab-phone are template images. tabIcon() sizes them for the tab icon slot.
         TabView(selection: selection) {
             NavigationStack(path: $statusPath) {
                 StatusTab().noticed()
             }
             .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
-            .tabItem { Label { Text("状态") } icon: { Image("tab-status", bundle: assetBundle).tabIconFrame() } }
+            .tabItem { Label { Text("状态") } icon: { tabIcon("tab-status") } }
             .tag(ContentTab.status)
 
             if inShift("MAA") {
@@ -137,7 +140,7 @@ struct ContentView: View {
                 ArknightsTab().noticed()
             }
             .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
-            .tabItem { Label { Text("方舟") } icon: { Image("tab-arknights", bundle: assetBundle).tabIconFrame() } }
+            .tabItem { Label { Text("方舟") } icon: { tabIcon("tab-arknights") } }
             .tag(ContentTab.arknights)
             }
 
@@ -146,7 +149,7 @@ struct ContentView: View {
                 EndfieldTab().noticed()
             }
             .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
-            .tabItem { Label { Text("终末地") } icon: { Image("tab-endfield", bundle: assetBundle).tabIconFrame() } }
+            .tabItem { Label { Text("终末地") } icon: { tabIcon("tab-endfield") } }
             .tag(ContentTab.endfield)
             }
 
@@ -155,7 +158,7 @@ struct ContentView: View {
                 WuwaTab().noticed()
             }
             .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
-            .tabItem { Label { Text("鸣潮") } icon: { Image("tab-wuwa", bundle: assetBundle).tabIconFrame() } }
+            .tabItem { Label { Text("鸣潮") } icon: { tabIcon("tab-wuwa") } }
             .tag(ContentTab.wuwa)
             }
 
@@ -169,7 +172,7 @@ struct ContentView: View {
                     .noticed()
             }
             .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
-            .tabItem { Label { Text("手机") } icon: { Image("tab-phone", bundle: assetBundle).tabIconFrame() } }
+            .tabItem { Label { Text("手机") } icon: { tabIcon("tab-phone") } }
             .tag(ContentTab.phone)
         }
         #if os(Android)
@@ -200,15 +203,41 @@ private extension View {
     }
 }
 
-private extension Image {
-    /// resizable + scaledToFit, and on Android a fixed 24 pt box (the Material navigation bar icon size): skip-ui's
-    /// TabView icon slot (Containers/TabView.swift RenderImage) does not bound a resizable image's height, and an
-    /// unbounded one stretched the bar over the whole screen.
-    func tabIconFrame() -> some View {
-        #if os(Android)
-        resizable().scaledToFit().frame(width: 24, height: 24)
-        #else
-        resizable().scaledToFit()
-        #endif
+/// A tab image (Resources/Module.xcassets) sized for the tab icon slot.
+///
+/// Android: resizable + scaledToFit in a fixed 24 pt box (the Material navigation bar icon size): skip-ui's TabView
+/// icon slot (Containers/TabView.swift RenderImage) does not bound a resizable image's height, and an unbounded one
+/// stretched the bar over the whole screen.
+///
+/// iOS: UIKit's tab bar takes the image at its point size and ignores SwiftUI's resizable / frame, and the assets are
+/// single 1x images (tab-arknights is 132 px, so 132 pt): every icon covered the bar and pushed its label down. So the
+/// image is redrawn first, fitted into a 28 pt box (the long edge 28: iOS 27 UI Kit Tab Bar Button 5735:65307,
+/// "28 symbol line", hig-kit/NUMBERS.md "Tab bar (maa)"). A redrawn image is .automatic, which the tab bar would tint
+/// like a template, so the mode is set again: tab-status / tab-phone (template-rendering-intent template) stay
+/// templates and the game icons keep their colors.
+@ViewBuilder
+private func tabIcon(_ name: String) -> some View {
+    #if os(Android)
+    Image(name, bundle: assetBundle).resizable().scaledToFit().frame(width: 24, height: 24)
+    #elseif canImport(UIKit)
+    if let source = UIImage(named: name, in: assetBundle, with: nil) {
+        Image(uiImage: tabBarImage(source, side: 28))
+    } else {
+        Image(name, bundle: assetBundle)
     }
+    #else
+    Image(name, bundle: assetBundle).resizable().scaledToFit()
+    #endif
 }
+
+#if !os(Android) && canImport(UIKit)
+/// `source` drawn at its aspect ratio with the long edge `side` pt, keeping template vs original rendering.
+private func tabBarImage(_ source: UIImage, side: CGFloat) -> UIImage {
+    let long = max(source.size.width, source.size.height)
+    guard long > 0 else { return source }
+    let k = side / long
+    let size = CGSize(width: (source.size.width * k).rounded(), height: (source.size.height * k).rounded())
+    let drawn = UIGraphicsImageRenderer(size: size).image { _ in source.draw(in: CGRect(origin: .zero, size: size)) }
+    return drawn.withRenderingMode(source.renderingMode == .alwaysTemplate ? .alwaysTemplate : .alwaysOriginal)
+}
+#endif
