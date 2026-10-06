@@ -159,7 +159,9 @@ extension View {
 /// scroll stops at a List edge that moves from test to test (the 0.4.4 final pass had 终末地 循环执行 behind 完成 with
 /// it), so KeyboardRowReveal moves the focused row above the keyboard's end frame. The toolbar stays the system one:
 /// no API puts it into the keyboard safe area or gives its height (DTS on thread/797250 suggests safeAreaBar instead,
-/// whose @FocusState does not work on iOS 26.1, release notes 158720838).
+/// whose @FocusState does not work on iOS 26.1, release notes 158720838). Checked again 10-07 (iPhone 18 Pro Max, iOS 27)
+/// with only the system .keyboard toolbar and the List's own keyboard avoidance (no room, no reveal): 终末地 基质刷取 ·
+/// 循环执行 and 方舟 优先刷取的活动关卡序号 both ended with the value behind 完成.
 private struct KeyboardDoneBar: ViewModifier {
     /// What 完成 does: clear the page's @FocusState, or (nil) end the editing of the focused field, for the pages that
     /// do not bind one here.
@@ -182,6 +184,12 @@ private struct KeyboardDoneBar: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { note in
                 KeyboardRowReveal.shown(note)
+            }
+            // the List's own scroll to the focused field can still run after keyboardDidShow and stop with the row under
+            // the capsule; when that scroll ends (the scroll phase goes back to idle) the row is checked again. A drag by
+            // the user ends this: a row scrolled away on purpose is not pulled back.
+            .onScrollPhaseChange { _, phase in
+                KeyboardRowReveal.phaseChanged(phase)
             }
             // the first keystroke adds the row's 「待保存」 line and the row grows downwards
             .onReceive(NotificationCenter.default.publisher(for: UITextField.textDidChangeNotification)) { _ in
@@ -207,16 +215,26 @@ private struct KeyboardDoneBar: ViewModifier {
 /// keyboardDone() may call it for the same keyboard.
 @MainActor enum KeyboardRowReveal {
     /// The keyboard's top edge in window coordinates while it is up (its end frame), nil while it is down.
-    static var keyboardTop: CGFloat?
+    static var keyboardTop: CGFloat? {
+        didSet { if keyboardTop == nil { settling = false } }
+    }
+    /// From keyboardDidShow until the user drags the List: the List's own scroll to the field may still be on its way.
+    private static var settling = false
     private static let gap: CGFloat = 8
 
     static func shown(_ note: Notification) {
         guard let kb = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         keyboardTop = kb.minY
+        settling = true
         reveal()
-        // the List's own scroll to the field can still follow keyboardDidShow (seen: the row still at its old place
-        // then) and stop with the row under the capsule; look again once it is done
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { reveal() }
+    }
+
+    /// The List's own scroll to the field can still follow keyboardDidShow (seen: the row still at its old place then)
+    /// and stop with the row under the capsule; look again when a scroll ends (SwiftUI onScrollPhaseChange, phase idle),
+    /// not after a fixed delay. A user's drag (phase interacting) stops the looking.
+    static func phaseChanged(_ phase: ScrollPhase) {
+        if phase == .interacting { settling = false }
+        if phase == .idle, settling { reveal() }
     }
 
     static func reveal() {
