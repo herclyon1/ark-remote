@@ -31,7 +31,7 @@ struct PhoneDiagRows: View {
                 DiagUI.shared.prepareSheet()
                 recordShown = true
             }
-            .sheet(isPresented: $recordShown) { DiagRecordSheet { recordShown = false } }
+            .diagRecordAlert(isPresented: $recordShown)
             Button("清空诊断记录", role: .destructive) { clearAsk = true }
                 .alert("清空诊断记录？", isPresented: $clearAsk) {   // as PhonePage's 「清除密钥？」
                     Button("清空", role: .destructive) { DiagLog.shared.clear() }
@@ -57,173 +57,56 @@ struct PhoneDiagRows: View {
     }
 }
 
-/// view.js showDiagSheet(rec, "accept"): 「自检结果」 with the pass count, 复制 / 分享 / 关闭.
-/// The web's last clause 「关闭后页面重新打开，换回你自己的数据」 is left out: the app's self check runs on its own data
-/// and closing reopens nothing.
-struct SelfCheckSheet: View {
-    var close: () -> Void
-
-    var body: some View {
-        let rec = LastSelfCheck.stored() ?? .null
-        let json = rec.encodedString()
-        let total = Int(rec["total"]?.number ?? 0), fails = Int(rec["fails"]?.number ?? 0)
-        DiagSheetBox(title: "自检结果",
-                     message: "通过 \(total - fails) / \(total)，不通过 \(fails) 项。一份 JSON，\(diagKB(json)) KB。复制后粘到聊天里，或用分享发出。",
-                     json: json, canShare: true, close: close)
-    }
-}
-
-/// view.js showDiagSheet(rec): 「诊断记录已生成」 for DiagUI.sheetRecord, redrawn while its upload moves on.
-struct DiagRecordSheet: View {
-    var close: () -> Void
-
-    var body: some View {
-        let rec = DiagUI.shared.sheetRecord ?? .null
-        let m = DiagUI.sheetMessage(rec)
-        // once the record is in the bucket there is nothing left to hand over: 分享 goes (view.js sent())
-        DiagSheetBox(title: "诊断记录已生成", message: m.text, json: m.json, canShare: !m.sent, close: close)
-    }
-}
-
-/// index.html #diagsheet: title, message, then 复制 / 分享 / 关闭 in one row.
-struct DiagSheetBox: View {
+/// view.js showDiagSheet: 「自检结果」 / 「诊断记录已生成」 with 复制 / 分享 / 关闭, as a system alert on both platforms.
+/// Title, a few lines and three buttons is an alert in Apple's own apps (Maps' 「Allow "Maps" to use your location?」,
+/// iOS 27 simulator shots-1006, 10-07): centered, buttons stacked. It was a fitted bottom sheet (DiagSheetBox, 0e5b965 to
+/// 70ac451) whose glass showed the red 「就是这里」 button and the toast through it.
+/// Any button closes the alert; 复制's toast and 分享's outcome (DiagShare) then show on the page under it.
+struct DiagAlert: ViewModifier {
     var title: String
-    var message: String
-    var json: String
-    var canShare: Bool
-    var close: () -> Void
+    @Binding var isPresented: Bool
+    /// Read when the alert is drawn, so 诊断记录已生成 shows the upload's state as it is then.
+    var content: () -> (text: String, json: String, canShare: Bool)
 
-    #if !os(Android)
-    /// The title + message's own height and the button row's (padding in both), measured to fit the sheet to them.
-    @State private var textHeight: CGFloat = 0
-    @State private var rowHeight: CGFloat = 0
-    #endif
-
-    var body: some View {
-        #if os(Android)
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Button("复制") {
-                    PhoneLink.copy(json)
-                    Relay.shared.showToast("已复制整份记录")   // view.js:3074
-                }
-                .frame(maxWidth: .infinity)
-                if canShare {
-                    // view.js share.onclick: every outcome is said (DiagShare)
-                    Button("分享") { DiagShare.shared.share(json, title: title == "自检结果" ? "自检结果" : "诊断记录") }
-                        .frame(maxWidth: .infinity)
-                }
-                Button("关闭") { close() }
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            Spacer(minLength: 0)
-        }
-        .padding(16)
-        // the page's toast layer and alert are under the sheet (a sheet is its own presentation on both platforms):
-        // 「已复制整份记录」 / 「已交给分享」 / 「分享已取消」 show here too (both layers clear the same Relay.toast), and
-        // 「分享没成」 is the sheet's own alert (view.js ask("分享没成", …, "好", false, { single: true }))
-        .overlay { ToastLayer() }
-        .alert("分享没成", isPresented: Binding(get: { DiagShare.shared.failNote != nil },
-                                                set: { if !$0 { DiagShare.shared.failNote = nil } })) {
-            Button("好") {}
-        } message: {
-            Text(verbatim: DiagShare.shared.failNote ?? "")
-        }
-        #else
-        // A sheet with no detents is .large: three lines and a button row came up full screen over a blank page
-        // (sheet06 cell 5). It is fitted to the content instead, .height(_:) from the measured text and row
-        // (developer.apple.com/documentation/swiftui/view/presentationdetents(_:), PresentationDetent.height(_:)).
-        // Short text sits in a plain VStack fitted to it; a long 自检结果 (isLong) scrolls over the pinned row at .medium,
-        // draggable to .large, never cut.
-        Group {
-            if Self.isLong(message) {
-                // a long 自检结果: the text scrolls over the pinned row, the sheet at .medium, draggable to .large
-                ScrollView { textBlock }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .safeAreaInset(edge: .bottom, spacing: 0) { actionRow }
-            } else {
-                // a few lines: no ScrollView (one inside the 自检结果 sheet kept its text scrolled down by about 30 pt,
-                // the title cut at the sheet's top edge over a gap above the buttons, diagsheet frames4 / frames5)
-                VStack(spacing: 0) {
-                    textBlock
-                    actionRow
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
-            }
-        }
-        // as the Android branch: the toast layer and the 「分享没成」 alert ride on the sheet
-        .overlay { ToastLayer() }
-        .alert("分享没成", isPresented: Binding(get: { DiagShare.shared.failNote != nil },
-                                                set: { if !$0 { DiagShare.shared.failNote = nil } })) {
-            Button("好") {}
-        } message: {
-            Text(verbatim: DiagShare.shared.failNote ?? "")
-        }
-        .presentationDetents(detents)
-        #endif
-    }
-
-    #if !os(Android)
-    /// Past about four lines on a phone the text would not fit a fitted sheet under half the screen: it scrolls instead.
-    /// Decided from the text, not from a measured height, so the layout never flips while it is measured.
-    private static func isLong(_ message: String) -> Bool { message.count > 160 }
-
-    private var textBlock: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)   // its whole height, not what a detent leaves it
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding([.horizontal, .top], 16)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { textHeight = $0 }
-    }
-
-    private var actionRow: some View {
-        actions
-            .padding(.top, 10).padding([.horizontal, .bottom], 16)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowHeight = $0 }
-    }
-
-    private var actions: some View {
-        HStack(spacing: 8) {
+    func body(content view: Content) -> some View {
+        let c = isPresented ? content() : (text: "", json: "", canShare: false)
+        view.alert(title, isPresented: $isPresented) {
             Button("复制") {
-                PhoneLink.copy(json)
+                PhoneLink.copy(c.json)
                 Relay.shared.showToast("已复制整份记录")   // view.js:3074
             }
-            .frame(maxWidth: .infinity)
-            if canShare {
+            if c.canShare {
                 // view.js share.onclick: every outcome is said (DiagShare)
-                Button("分享") { DiagShare.shared.share(json, title: title == "自检结果" ? "自检结果" : "诊断记录") }
-                    .frame(maxWidth: .infinity)
+                Button("分享") { DiagShare.shared.share(c.json, title: title == "自检结果" ? "自检结果" : "诊断记录") }
             }
-            Button("关闭") { close() }
-                .frame(maxWidth: .infinity)
+            Button("关闭", role: .cancel) {}
+        } message: {
+            Text(verbatim: c.text)
         }
-        .buttonStyle(.bordered)
+    }
+}
+
+extension View {
+    /// 「自检结果」 for the stored last self check (LastSelfCheck). The web's last clause 「关闭后页面重新打开，换回你自己的
+    /// 数据」 is left out: the app's self check runs on its own data and closing reopens nothing.
+    func selfCheckAlert(isPresented: Binding<Bool>) -> some View {
+        modifier(DiagAlert(title: "自检结果", isPresented: isPresented) {
+            let rec = LastSelfCheck.stored() ?? .null
+            let json = rec.encodedString()
+            let total = Int(rec["total"]?.number ?? 0), fails = Int(rec["fails"]?.number ?? 0)
+            return ("通过 \(total - fails) / \(total)，不通过 \(fails) 项。一份 JSON，\(diagKB(json)) KB。复制后粘到聊天里，或用分享发出。",
+                    json, true)
+        })
     }
 
-    /// Until both parts are measured, about the two-line sheet's own height (168 pt measured on the 诊断记录已生成 sheet,
-    /// simulator shots-1006): from .medium it would open at half the screen and then shrink to fit. Then the
-    /// content's height, or .medium / .large when that is over half the screen (the window scene's screen;
-    /// UIScreen.main is deprecated).
-    private static let firstHeight: CGFloat = 168
-
-    private var detents: Set<PresentationDetent> {
-        let fit = textHeight + rowHeight
-        guard textHeight > 0, rowHeight > 0 else { return [.height(Self.firstHeight)] }
-        let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.height ?? 0
-        if Self.isLong(message) || (screen > 0 && fit > screen / 2) { return [.medium, .large] }
-        return [.height(fit)]
+    /// 「诊断记录已生成」 for DiagUI.sheetRecord; once the record is in the bucket there is nothing left to hand over,
+    /// so 分享 goes (view.js sent()).
+    func diagRecordAlert(isPresented: Binding<Bool>) -> some View {
+        modifier(DiagAlert(title: "诊断记录已生成", isPresented: isPresented) {
+            let m = DiagUI.sheetMessage(DiagUI.shared.sheetRecord ?? .null)
+            return (m.text, m.json, !m.sent)
+        })
     }
-    #endif
 }
 
 /// seg-frames-logger.js 件 B and #diagline over every tab while 诊断记录 is on: the red 「就是这里」 button bottom-right with
@@ -293,9 +176,7 @@ struct DiagOverlay: View {
         .ignoresSafeArea(.keyboard)
         .onAppear { if ui.on { DiagWatch.start(); ui.start() } }
         .onChange(of: ui.on) { _, on in if !on { wordsOpen = false } }
-        .sheet(isPresented: Binding(get: { DiagUI.shared.sheetOpen }, set: { DiagUI.shared.sheetOpen = $0 })) {
-            DiagRecordSheet { DiagUI.shared.sheetOpen = false }
-        }
+        .diagRecordAlert(isPresented: Binding(get: { DiagUI.shared.sheetOpen }, set: { DiagUI.shared.sheetOpen = $0 }))
     }
 
     private func markWord(_ title: String, word: String?) -> some View {

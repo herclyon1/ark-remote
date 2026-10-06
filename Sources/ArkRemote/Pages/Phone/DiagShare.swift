@@ -1,7 +1,7 @@
-// 分享 on the 诊断记录 / 自检结果 sheet with its outcome said, as the web's (view.js showDiagSheet share.onclick):
+// 分享 on the 诊断记录 / 自检结果 alert with its outcome said, as the web's (view.js showDiagSheet share.onclick):
 // handed over → toast 「已交给分享」, cancelled → toast 「分享已取消」, failed → 「分享没成」 with 「请用「复制」后粘到聊天里」.
 // SwiftUI's ShareLink reports nothing back, so:
-//   · iOS: UIActivityViewController, presented from the topmost presented controller (the sheet), whose
+//   · iOS: UIActivityViewController, presented from the topmost presented controller not being dismissed (the alert 分享 was on is), whose
 //     completionWithItemsHandler says completed / not completed / an error;
 //   · Android: the system chooser (Android/app/src/main/kotlin/ShareSheet.kt). It reports only the app picked; a
 //     dismissed chooser is inferred there (resumed with no pick), and whether the picked app sent anything is not
@@ -20,9 +20,6 @@ import UIKit
 
     /// ShareSheet.kt's share(text, title), set once from AndroidAppMain.onCreate (registerSharer).
     nonisolated(unsafe) static var androidShare: ((String, String) -> Void)?
-
-    /// 「分享没成」's message for the sheet's own alert (the page's alert sits under the sheet).
-    var failNote: String?
 
     private var waiting = false
 
@@ -64,12 +61,13 @@ import UIKit
         case 1: Relay.shared.showToast("分享已取消")
         default:
             let why = message.isEmpty ? "" : "（\(message)）"
-            me.failNote = "手机没给出分享面板\(why)；请用「复制」后粘到聊天里。"
+            // view.js ask("分享没成", …, "好", false, { single: true }): the root alert (ContentView)
+            Relay.shared.showAlert("分享没成", "手机没给出分享面板\(why)；请用「复制」后粘到聊天里。")
         }
     }
 
     #if !os(Android) && canImport(UIKit)
-    /// The key window's root, then down its presented controllers (the sheet the 分享 button is on).
+    /// The key window's root, then down its presented controllers (the alert the 分享 button was on is being dismissed: skipped).
     private static func topController() -> UIViewController? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let windows = scenes.flatMap(\.windows)
