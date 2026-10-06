@@ -337,7 +337,7 @@ struct EWTagLine: View {
             if tag.sending {
                 HStack(spacing: 6) {
                     ProgressView()
-                        .controlSize(.small)
+                        .smallControl()
                     Text("正在寄出")
                 }
                 .foregroundStyle(.secondary)

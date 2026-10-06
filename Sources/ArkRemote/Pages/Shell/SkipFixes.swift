@@ -29,6 +29,28 @@ func symbol(_ ios: String, android: String) -> Image {
     #endif
 }
 
+extension View {
+    /// `.controlSize(.small)` (a row's in-place ProgressView). Android: skip-fuse-ui marks controlSize unavailable
+    /// (View/AdditionalViewModifiers.swift:224-226), so the Material indicator keeps its own size there.
+    @ViewBuilder func smallControl() -> some View {
+        #if os(Android)
+        self
+        #else
+        self.controlSize(.small)
+        #endif
+    }
+
+    /// `.monospacedDigit()` (numbers that change in place). Android: skip-fuse-ui marks it unavailable
+    /// (Text/Text.swift:347-350 and :433-436), so the digits keep the font's own widths there.
+    @ViewBuilder func digitsMonospaced() -> some View {
+        #if os(Android)
+        self
+        #else
+        self.monospacedDigit()
+        #endif
+    }
+}
+
 /// The row background for `.listRowBackground`, never nil on Android: skip-ui composes a row with a background inside an
 /// extra layout and one without it directly (List.swift:692-722), so a row whose tint comes and goes (「待保存」 on the first
 /// keystroke) is rebuilt and its text field loses the keyboard. With no tint the row gets the colour skip-ui would have

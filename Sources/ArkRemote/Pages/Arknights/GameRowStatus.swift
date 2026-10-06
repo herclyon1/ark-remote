@@ -53,7 +53,7 @@ extension View {
                 HStack(spacing: 6) {
                     if status.sending {
                         ProgressView()
-                            .controlSize(.small)
+                            .smallControl()
                     }
                     Text(verbatim: status.text)
                         .font(.footnote)
@@ -71,12 +71,14 @@ extension View {
                     .tint(.accentColor)
             }
         }
+        // text-only items, as the 终末地 rows' (ewRowActions) and the 状态 switches' menus: skip-ui's symbol table
+        // (Components/Image.swift) has no arrow.clockwise, so Android drew a warning triangle beside 再发一次
         .contextMenu {
             if let retry {
-                Button("再发一次", systemImage: "arrow.clockwise") { EWSave.retry(retry) }
-                Button("不改了", systemImage: "arrow.uturn.backward") { EWSave.drop(retry) }
+                Button("再发一次") { EWSave.retry(retry) }
+                Button("不改了") { EWSave.drop(retry) }
             } else if let resend {
-                Button("再发一次", systemImage: "arrow.clockwise") { onResend(resend) }
+                Button("再发一次") { onResend(resend) }
             }
         }
     }

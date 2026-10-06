@@ -269,7 +269,7 @@ struct StatusPage: View {
         LabeledContent {
             if t.error == nil {
                 Text(t.value.map { v in t.cap.map { "\(v)/\($0)" } ?? "\(v)" } ?? "–")
-                    .monospacedDigit()
+                    .digitsMonospaced()
                     .foregroundStyle(Self.staminaColour[t.label] ?? Color.blue)
                     .redacted(reason: loading ? .placeholder : [])
             }
