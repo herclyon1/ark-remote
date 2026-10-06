@@ -21,14 +21,8 @@ struct StatusPage: View {
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.status }
 
-    /// The first row of the page, always drawn and in a section without a header. skip-ui's ScrollViewProxy finds ids of
-    /// rows only (LazySupport.swift:250-288; a section header is a count, :283), so this is the top it can reach: the
-    /// device card flush under the top bar, with the list's top inset and empty header item above it scrolled off.
-    static let topID = "status-top"
-
     var body: some View {
         let _ = tick
-        ScrollViewReader { proxy in
         List {
             deviceCard
             notices
@@ -64,6 +58,14 @@ struct StatusPage: View {
             tomorrow
             receiptsSection
         }
+        // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
+        // the real top. skip-ui's ScrollViewProxy reaches rows only (LazySupport.swift:250-288; a section header is a
+        // count, :283), and the List's top inset and the first section's top (its rounded corners) are lazy items of
+        // their own before the first row (List.swift:537-541, :438-470), so scrollTo(the device card) left them above
+        // the screen: the card's top edge cut under 「游戏机遥控」 (0.4.4 final pass, replay step 40). skip-ui's own
+        // scroll to item 0 (List.swift:233-237) runs only from a tap on the top bar (Navigation.swift:411-413).
+        // .id resets the remembered list state through key() (AdditionalViewModifiers.swift:1730-1750). No animation.
+        .id(reselect)
         // 「查看全部」 and the 月卡 rows push by value (StatusRoute), so ContentView's path can pop them on a reselect (D39).
         // On the List, not a Section or row: skip-ui's List finds its sections by type (MonthCardRows.swift), and SwiftUI
         // wants navigationDestination outside lazy containers.
@@ -75,8 +77,6 @@ struct StatusPage: View {
                 MonthCardPage(game: g)
             }
         }
-        // skip-ui animates scrollTo only inside withAnimation (List.swift:242) and ignores the anchor (ScrollView.swift:163)
-        .onChange(of: reselect) { withAnimation { proxy.scrollTo(Self.topID, anchor: .top) } }
         // Android: a tap outside the time fields or back with the keyboard up checks them, as the web input's blur
         // (view.js:1235); without this the check waited for a tab switch
         .clearsFocusOnOutsideTap()
@@ -86,7 +86,6 @@ struct StatusPage: View {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
                 tick &+= 1
             }
-        }
         }
     }
 
@@ -126,7 +125,6 @@ struct StatusPage: View {
                     Text(data.deviceStatus).font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            .id(Self.topID)   // the reselect's scroll target (topID)
         }
     }
 
