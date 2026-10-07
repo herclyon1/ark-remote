@@ -125,6 +125,8 @@ struct InventoryGame: Codable, Sendable, Equatable {
     var originSource: String?
     var lagMinutes: Int?
     var lagNote: String?
+    /// Set when this read's need.json fetch failed and an earlier table was used: why, and when that table was read.
+    var needNote: String?
     var standard: InventoryStandard?
     var standards: [StandardOption] = []
     var box: InventoryBox?
@@ -133,7 +135,7 @@ struct InventoryGame: Codable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case game, gameId, error = "错误", caliber, footnote, source, built, gameLevel, sections, groups, useSource,
-             originSource, lagMinutes, lagNote, standard, standards, box, boxUse, rows
+             originSource, lagMinutes, lagNote, needNote, standard, standards, box, boxUse, rows
     }
 }
 
@@ -337,6 +339,8 @@ enum InventoryCalc {
     var need: JSONValue?
     /// The last need.json error (the reading still goes ahead without it).
     var err = ""
+    /// When `need` was read (ms since the epoch); 0 = never.
+    var needAt: Double = 0
     /// How need.json is fetched; tests swap it for one that fails without the network.
     @ObservationIgnored var fetchNeed: (String) async throws -> (Data, Int) = { try await httpFetch($0, noStore: true) }
 
@@ -354,6 +358,7 @@ enum InventoryCalc {
         do { j = try JSONValue.parse(body) } catch { throw AppError("需求表格式不对") }
         guard j["games"]?.array != nil else { throw AppError("需求表格式不对") }
         need = j
+        needAt = nowMs()
         return j
     }
 
@@ -488,8 +493,13 @@ enum InventoryCalc {
         err = ""
         do { try await loadNeed(force: force) } catch { err = errorMessage(error) }
         if let sk = t?["sk"], sk.truthy {
-            // no need table at all: the rows would carry no group and the page would blame 森空岛
-            out.games.append(need == nil ? Self.needMissing(err) : await endfield(sk))
+            // no usable need table: the rows would carry no group and the page would blame 森空岛
+            var g: InventoryGame
+            if need == nil { g = Self.needMissing(err) }
+            else if let gap = needGap() { g = Self.needLacks(gap) }
+            else { g = await endfield(sk) }
+            if need != nil, !err.isEmpty { g.needNote = staleNote() }
+            out.games.append(g)
         } else {
             out.games.append(InventoryGame(game: Self.gameName, gameId: Self.gameIdEndfield, error: "没配森空岛"))
         }
@@ -503,6 +513,31 @@ enum InventoryCalc {
     static func needMissing(_ err: String) -> InventoryGame {
         InventoryGame(game: gameName, gameId: gameIdEndfield,
                       error: "这次是需求表没拿到（不是森空岛回报的），算不出人份：" + (err.isEmpty ? "原因不明" : err))
+    }
+
+    /// What the held need table lacks for 终末地, nil when it has the game and its rows.
+    func needGap() -> String? {
+        guard let ng = needFor(Self.gameIdEndfield) else { return "需求表拿到了，但里面没有终末地这一项" }
+        let rows = (standardFor(ng) ?? ng)["rows"]?.array ?? []
+        return rows.isEmpty ? "需求表里终末地这一项没有材料" : nil
+    }
+
+    /// The game shown when the need table is held but lacks 终末地 or its rows (森空岛 is not asked).
+    static func needLacks(_ gap: String) -> InventoryGame {
+        InventoryGame(game: gameName, gameId: gameIdEndfield, error: gap + "（不是森空岛回报的），算不出人份")
+    }
+
+    /// The line for a read that fell back on an earlier need table: this fetch's error and when the held table was read.
+    func staleNote() -> String {
+        "需求表这次没拿到（\(err.isEmpty ? "原因不明" : err)），人份按 \(Self.readAt(needAt)) 拿到的旧表算"
+    }
+
+    /// HH:MM today, else M月d日 HH:MM.
+    static func readAt(_ ms: Double) -> String {
+        let d = Date(timeIntervalSince1970: ms / 1000)
+        if Calendar.current.isDateInToday(d) { return clockHHMM(ms: ms) }
+        let c = Calendar.current.dateComponents([.month, .day], from: d)
+        return "\(c.month ?? 0)月\(c.day ?? 0)日 " + clockHHMM(ms: ms)
     }
 
     /// inventory.js status(): "森空岛" when a 森空岛 session is stored, else "".

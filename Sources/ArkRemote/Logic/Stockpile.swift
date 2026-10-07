@@ -239,6 +239,7 @@ enum StockpileEmptyAction: Sendable, Equatable {
         let taken = d["取自"]?.jsString ?? ""
         var foot: [String] = []
         foot.append(err.isEmpty ? "\(taken) 从森空岛读取" : "\(taken) 读取的数据；这次没读到：\(err)")
+        if let n = g["needNote"], n.truthy { foot.append(n.jsString) }
         // M4i: 人份 speaks of materials only; the box line (games[].box.note) does not
         foot.append("人份 = 材料库存 ÷ 一人所需" + (boxed ? "（缺的先用资源箱补）" : ""))
         if let c = g["caliber"], c.truthy { foot.append("一人所需 = \(c.jsString)") }
