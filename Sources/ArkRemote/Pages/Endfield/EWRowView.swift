@@ -186,7 +186,9 @@ struct EWRowView: View {
         } label: {
             title
         }
+        #if !os(macOS)
         .pickerStyle(.navigationLink)
+        #endif
         #endif
     }
 
