@@ -320,6 +320,18 @@ object AppUpdater {
         return true
     }
 
+    /// What UpdateStatusReceiver does with a session result before the status switch: an abort of a session we
+    /// abandoned is ours, not news; an abort of the silent session is the system refusing it (the Xiaomi case above),
+    /// answered by retryWithConfirm(); everything else goes through the switch. Pure, so a local unit test runs it.
+    internal enum class SessionResult { IGNORE, RETRY_WITH_CONFIRM, DISPATCH }
+
+    internal fun sessionResult(status: Int, session: Int, silentSession: Int, abandoned: Boolean): SessionResult = when {
+        session >= 0 && abandoned -> SessionResult.IGNORE
+        status == PackageInstaller.STATUS_FAILURE_ABORTED && session >= 0 && session == silentSession ->
+            SessionResult.RETRY_WITH_CONFIRM
+        else -> SessionResult.DISPATCH
+    }
+
     /// "0.10.0" > "0.9.1"; a suffix after "-" or "+" is ignored.
     internal fun isNewer(latest: String, current: String): Boolean {
         fun parts(v: String) = v.trim().removePrefix("v").removePrefix("V")
@@ -345,10 +357,14 @@ class UpdateStatusReceiver : BroadcastReceiver() {
         val session = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
         logger.info("update session ${session} status ${status}: ${detail}")
         val delegate = ArkRemoteAppDelegate.shared
-        if (session >= 0 && AppUpdater.abandoned.remove(session)) return   // we dropped it for a newer one
-        if (status == PackageInstaller.STATUS_FAILURE_ABORTED && session >= 0 && session == AppUpdater.silentSession) {
-            logger.info("silent update refused by the system; committing again with the confirm sheet")
-            if (AppUpdater.retryWithConfirm()) return
+        val abandoned = session >= 0 && AppUpdater.abandoned.remove(session)   // we dropped it for a newer one
+        when (AppUpdater.sessionResult(status, session, AppUpdater.silentSession, abandoned)) {
+            AppUpdater.SessionResult.IGNORE -> return
+            AppUpdater.SessionResult.RETRY_WITH_CONFIRM -> {
+                logger.info("silent update refused by the system; committing again with the confirm sheet")
+                if (AppUpdater.retryWithConfirm()) return
+            }
+            AppUpdater.SessionResult.DISPATCH -> {}
         }
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
