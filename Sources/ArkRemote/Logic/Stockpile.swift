@@ -59,7 +59,7 @@ enum StockpileContent: Sendable, Equatable {
     case loading
     /// The sections and the footnote lines (joined with line breaks under the last card).
     case list(sections: [StockSection], footnote: [String])
-    /// 「森空岛没有返回仓库数据。」
+    /// 「森空岛没有返回仓库数据。」, or the need table's rows carrying no group (Stockpile.ungrouped).
     case zero(String)
     /// Empty state: title, caption, button label, and what the button does.
     case empty(title: String, text: String, button: String, action: StockpileEmptyAction)
@@ -119,7 +119,9 @@ enum StockpileEmptyAction: Sendable, Equatable {
             lastErr = err
         }
         if let good = lastGood, let gg = good["games"]?[0] {
-            content = Self.list(gg, good, err: lastErr)
+            // this read failed and the page keeps the last good one: this read's table note still goes under it
+            let nowNote = err.isEmpty ? nil : g?["needNote"].flatMap { $0.truthy ? $0.jsString : nil }
+            content = Self.list(gg, good, err: lastErr, nowNote: nowNote)
         } else if err == "没配森空岛" {
             content = .empty(title: "没配森空岛", text: "库存从森空岛读；在「手机」页填好密钥串再来。", button: "去手机页", action: .phone)
         } else {
@@ -197,8 +199,12 @@ enum StockpileEmptyAction: Sendable, Equatable {
                         origin: nil, value: "剩 \(nf.num(r["boxLeft"]?.number)) 个")
     }
 
-    /// stockpile.js listHtml(g, d, err): sections and footnote for one game.
-    static func list(_ g: JSONValue, _ d: JSONValue, err: String) -> StockpileContent {
+    /// Rows came back but none has a group: the need table's grouping does not match, not 森空岛 (Inventory.needLacks wording).
+    static let ungrouped = "需求表里终末地的材料都没有分组，和这次读到的库存对不上（不是森空岛回报的），列不出来"
+
+    /// stockpile.js listHtml(g, d, err): sections and footnote for one game. `nowNote`: the failed read's own
+    /// needNote when the page falls back on an earlier good read.
+    static func list(_ g: JSONValue, _ d: JSONValue, err: String, nowNote: String? = nil) -> StockpileContent {
         var nf = NumFormat()
         let rows = g["rows"]?.array ?? []
         var groups: [(name: String, rows: [JSONValue])] = []
@@ -207,7 +213,7 @@ enum StockpileEmptyAction: Sendable, Equatable {
             let name = gr.jsString
             if let i = groups.firstIndex(where: { $0.name == name }) { groups[i].rows.append(r) } else { groups.append((name, [r])) }
         }
-        if groups.isEmpty { return .zero("森空岛没有返回仓库数据。") }
+        if groups.isEmpty { return .zero(rows.isEmpty ? "森空岛没有返回仓库数据。" : ungrouped) }
         let order = (g["groups"]?.array ?? []).map { $0.jsString }
         let rank = { (n: String) -> Int in order.firstIndex(of: n) ?? Int.max }
         // stable: unnamed ones keep file order
@@ -239,7 +245,8 @@ enum StockpileEmptyAction: Sendable, Equatable {
         let taken = d["取自"]?.jsString ?? ""
         var foot: [String] = []
         foot.append(err.isEmpty ? "\(taken) 从森空岛读取" : "\(taken) 读取的数据；这次没读到：\(err)")
-        if let n = g["needNote"], n.truthy { foot.append(n.jsString) }
+        if let n = g["needNote"], n.truthy, n.jsString != nowNote { foot.append(n.jsString) }
+        if let nowNote { foot.append(nowNote) }
         // M4i: 人份 speaks of materials only; the box line (games[].box.note) does not
         foot.append("人份 = 材料库存 ÷ 一人所需" + (boxed ? "（缺的先用资源箱补）" : ""))
         if let c = g["caliber"], c.truthy { foot.append("一人所需 = \(c.jsString)") }
