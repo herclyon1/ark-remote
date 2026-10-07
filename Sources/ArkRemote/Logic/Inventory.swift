@@ -337,6 +337,8 @@ enum InventoryCalc {
     var need: JSONValue?
     /// The last need.json error (the reading still goes ahead without it).
     var err = ""
+    /// How need.json is fetched; tests swap it for one that fails without the network.
+    @ObservationIgnored var fetchNeed: (String) async throws -> (Data, Int) = { try await httpFetch($0, noStore: true) }
 
     /// Where the 森空岛 session and signing live.
     var stamina: StaminaStore { StaminaStore.shared }
@@ -346,7 +348,7 @@ enum InventoryCalc {
     /// inventory.js loadNeed(force): the static need table, read fresh on every refresh.
     @discardableResult
     func loadNeed(force: Bool = false) async throws -> JSONValue {
-        let (body, status) = try await httpFetch(Self.needURL, noStore: true)
+        let (body, status) = try await fetchNeed(Self.needURL)
         guard (200..<300).contains(status) else { throw AppError("需求表拿不到（\(status)）") }
         let j: JSONValue
         do { j = try JSONValue.parse(body) } catch { throw AppError("需求表格式不对") }
@@ -483,15 +485,24 @@ enum InventoryCalc {
         busy = true
         defer { busy = false }
         var out = InventoryReading(takenAt: clockHHMM(ms: nowMs()), games: [])
+        err = ""
         do { try await loadNeed(force: force) } catch { err = errorMessage(error) }
         if let sk = t?["sk"], sk.truthy {
-            out.games.append(await endfield(sk))
+            // no need table at all: the rows would carry no group and the page would blame 森空岛
+            out.games.append(need == nil ? Self.needMissing(err) : await endfield(sk))
         } else {
             out.games.append(InventoryGame(game: Self.gameName, gameId: Self.gameIdEndfield, error: "没配森空岛"))
         }
         data = out
         at = nowMs()
         return out
+    }
+
+    /// The game shown when need.json could not be read and none is held from an earlier read: says the
+    /// table is what is missing, not 森空岛 (森空岛 is not asked, since nothing could be worked out from it).
+    static func needMissing(_ err: String) -> InventoryGame {
+        InventoryGame(game: gameName, gameId: gameIdEndfield,
+                      error: "这次是需求表没拿到（不是森空岛回报的），算不出人份：" + (err.isEmpty ? "原因不明" : err))
     }
 
     /// inventory.js status(): "森空岛" when a 森空岛 session is stored, else "".
