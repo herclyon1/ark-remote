@@ -437,11 +437,14 @@ struct PinScan: Sendable, Equatable {
         String(stateURL(topic: topic).dropLast(".json".count)) + ".hb.json"
     }
 
+    /// The GET cosHb() makes; tests replace it so no request leaves the Mac.
+    @ObservationIgnored var fetchHb: (String) async throws -> (Data, Int) = { try await httpFetch($0) }
+
     /// One GET of the relay's heartbeat on COS: {"at": s, "every": s, "cos_every": s} (+ "bye": true on a service
     /// stop). nil when there is none (an older relay, a machine without COS) or the network fails.
     func cosHb() async -> JSONValue? {
         guard let cfg = config, !cfg.topic.isEmpty else { return nil }
-        guard let (data, status) = try? await httpFetch(Self.hbURL(topic: cfg.topic)),
+        guard let (data, status) = try? await fetchHb(Self.hbURL(topic: cfg.topic)),
               status == 200, let m = try? JSONValue.parse(data), m["at"]?.number != nil else { return nil }
         return m
     }

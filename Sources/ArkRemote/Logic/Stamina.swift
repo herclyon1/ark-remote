@@ -160,6 +160,11 @@ func stampFrom(_ epoch: Double?) -> String {
     /// because the machine hands the 森空岛 part over as is.
     var tokens: JSONValue?
     var err = ""
+    /// The HTTP call behind the 森空岛 and 库街区 reads (url, method, headers, body, noStore); tests replace it so no
+    /// request leaves the Mac.
+    @ObservationIgnored var fetch: (String, String, [String: String], Data?, Bool) async throws -> (Data, Int) = {
+        try await httpFetch($0, method: $1, headers: $2, body: $3, noStore: $4)
+    }
     /// The reading on screen is the stored one from an earlier open.
     var cached = false
 
@@ -277,8 +282,8 @@ func stampFrom(_ epoch: Double?) -> String {
     // MARK: 森空岛
 
     func skRefresh(_ sk: JSONValue) async throws -> SkTokenSkew {
-        let (body, _) = try await httpFetch("\(Self.zonai)/web/v1/auth/refresh", headers: ["cred": jsStr(sk["cred"]), "dId": jsStr(sk["dId"])],
-                                            noStore: false)
+        let (body, _) = try await fetch("\(Self.zonai)/web/v1/auth/refresh", "GET",
+                                        ["cred": jsStr(sk["cred"]), "dId": jsStr(sk["dId"])], nil, false)
         let j = try JSONValue.parse(body)
         if let code = j["code"], code != .int(0) {
             throw AppError("森空岛刷新失败：" + (j["message"].map { $0.truthy ? $0.jsString : code.jsString } ?? code.jsString))
@@ -305,7 +310,7 @@ func stampFrom(_ epoch: Double?) -> String {
         let secret = pathname + query + stamp + caJSON
         let sign = Hash.md5Hex(Array(Hash.hmacSHA256Hex(key: Array(ts.token.utf8), message: Array(secret.utf8)).utf8))
         let headers = ["cred": jsStr(sk["cred"]), "sign": sign, "platform": "3", "timestamp": stamp, "dId": dId, "vName": "1.0.0"]
-        let (body, _) = try await httpFetch(Self.zonai + path, headers: headers, noStore: false)
+        let (body, _) = try await fetch(Self.zonai + path, "GET", headers, nil, false)
         let j = try JSONValue.parse(body)
         if let code = j["code"], code != .int(0) {
             throw AppError((j["message"]?.truthy == true ? j["message"]!.jsString : nil) ?? ("code " + code.jsString))
@@ -391,7 +396,7 @@ func stampFrom(_ epoch: Double?) -> String {
     func kuroPost(_ path: String, _ headers: [String: String], _ data: [(String, String)]) async throws -> JSONValue {
         var h = ["source": "android", "version": "3.1.3", "Content-Type": "application/x-www-form-urlencoded; charset=utf-8"]
         for (k, v) in headers { h[k] = v }
-        let (body, _) = try await httpFetch(Self.kuroBase + path, method: "POST", headers: h, body: Data(formEncode(data).utf8), noStore: false)
+        let (body, _) = try await fetch(Self.kuroBase + path, "POST", h, Data(formEncode(data).utf8), false)
         let j = try JSONValue.parse(body)
         if !(j["success"]?.truthy ?? false) || j["code"] != .int(200) {
             let msg = [j["msg"], j["message"]].compactMap { $0 }.first(where: { $0.truthy })?.jsString
