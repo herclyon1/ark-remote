@@ -219,7 +219,12 @@ struct DiagSheetBox: View {
     private var detents: Set<PresentationDetent> {
         let fit = textHeight + rowHeight
         guard textHeight > 0, rowHeight > 0 else { return [.height(Self.firstHeight)] }
+        // UIKit only: the Mac build (swift test) has no UIApplication; the app itself only runs on iOS and Android
+        #if canImport(UIKit)
         let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.height ?? 0
+        #else
+        let screen: CGFloat = 0
+        #endif
         if Self.isLong(message) || (screen > 0 && fit > screen / 2) { return [.medium, .large] }
         return [.height(fit)]
     }
