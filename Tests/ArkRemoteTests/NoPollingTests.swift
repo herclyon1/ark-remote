@@ -26,7 +26,7 @@ final class NoPollingTests: XCTestCase {
     /// Every Swift file under Sources/ has no mailbox read inside a loop.
     func testNoMailboxReadInsideALoop() throws {
         let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Sources")
+            .deletingLastPathComponent().appendingPathComponent("Sources").resolvingSymlinksInPath()   // the iOS run builds from a folder of symlinks
         let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?
             .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
         XCTAssertGreaterThan(files.count, 10, "Sources/ not found at \(sources.path)")
