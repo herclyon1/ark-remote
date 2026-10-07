@@ -16,7 +16,7 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
         AppShell()
             .task {
                 logger.info("Skip app logs are viewable in the Xcode console for iOS; Android logs can be viewed in Studio or using adb logcat")
-                await startRecorders()
+                await startRecorders()   // await: skip-fuse-ui's task closure is not @MainActor (View/AdditionalViewModifiers.swift:587)
             }
     }
 }
@@ -136,19 +136,6 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
         CrashRec.shared.past([["type": .string("stall"), "how": .string("anr"), "at": .string(RecKit.iso(at)),
                                "message": .string(RecKit.cut(description, 500)), "stack": .string(RecKit.cut(stack, 3000)),
                                "prev_v": .string(prevV)]])
-    }
-
-    // MARK: Share (Android; ShareSheet.kt drives the system share panel, Pages/Phone/PhoneDiagRows.swift DiagShare asks)
-
-    /// AndroidAppMain hands over the share entry point once at startup: `share(text, title)` opens the system chooser.
-    /* SKIP @bridge */public func registerSharer(share: @escaping (String, String) -> Void) {
-        DiagShare.androidShare = share
-    }
-
-    /// What the chooser told ShareSheet.kt: `state` 0 = an app was picked, 1 = back without a pick (inferred: no pick
-    /// came before the activity resumed), 2 = the chooser could not be opened (`message` says why).
-    /* SKIP @bridge */public func onShareResult(state: Int, message: String) {
-        Task { @MainActor in DiagShare.finish(state: state, message: message) }
     }
 
     // MARK: In-app update (Android only; AppUpdater.kt drives these, Logic/AppUpdate.swift shows them)

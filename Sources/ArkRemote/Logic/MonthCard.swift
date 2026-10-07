@@ -308,7 +308,8 @@ struct MonthCardEntry: Sendable, Equatable {
         // replaced the other: one purchase was lost (edge audit 13).
         let bare = add != nil && (mine(g).map { caughtUp($0, Self.fromRelay(g)) } ?? true)
         remember(g, last: last, at: at, sentAt: at)
-        Relay.shared.showToast("\(g)月卡已登记")   // one line; the date and days left are on the rows
+        // no 「已登记」 toast: the rows show the new date and days left at once (HIG Feedback: "Consider integrating status
+        // feedback into your interface.")
         do {
             try await post(g, add: add, left: left, last: bare ? nil : last, at: bare ? nil : at)
         } catch {

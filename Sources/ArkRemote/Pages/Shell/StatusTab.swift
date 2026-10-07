@@ -1,37 +1,44 @@
 import SwiftUI
 
-/// The 状态 tab: StatusPage fed from Relay / Live / StaminaStore / Pending; buttons send what the web page's
-/// buttons send (maa-automation/web/view.js wire(): #runnow, #refresh, #estop, #echofarm, #echofarmuntil,
-/// #echofarmstop); [data-relay] switch flips wait in 「待保存」 like the web page's edits. The mapping and the confirm /
-/// send code live in Pages/Status/.
+/// The 状态 tab: StatusPage fed from Relay / Live / StaminaStore / Pending; commands send what the web page's buttons send
+/// (view.js wire(): #runnow, #estop, #echofarm, #echofarmuntil, #echofarmstop). Switches and pickers apply when changed
+/// (StatusCommands.apply); the commands that spend or stop a run ask first in a confirmation dialog, attached by
+/// StatusPage to the button that asked (StatusPage.asking). The mapping and the send code live in Pages/Status/.
 struct StatusTab: View {
     @AppStorage("ark-remote-cfg-queue") var storedQueue = ""
     @AppStorage("ark-remote-estop") var estopAt = 0
     @State var ask: StatusAsk? = nil
-    /// Switch flips not yet sent: the one pool of every tab (view.js `edits`, Logic/Edits.swift); ✓ in the toolbar sends them
-    /// with the other tabs' changes after one review.
-    private var edits: Binding<[String: EWEdit]> {
-        Binding(get: { EWEdits.shared.items }, set: { EWEdits.shared.items = $0 })
-    }
+    /// Orders on their way and the last one-shot command (StatusOutbox).
+    @State var outbox = StatusOutbox()
 
     /// The 状态 data from the singletons and the stored settings as they are now (StatusPage.live): read by a pushed page
     /// as it draws, never captured.
     static func liveData() -> StatusData {
         let d = UserDefaults.standard
-        var data = StatusData.from(relay: Relay.shared, live: Live.shared, stamina: StaminaStore.shared, pending: Pending.shared,
-                                   currentQueue: d.string(forKey: "ark-remote-cfg-queue") ?? "",
-                                   estopAt: d.integer(forKey: "ark-remote-estop"))
-        StatusCommands.applyEdits(EWEdits.shared.items, to: &data)
-        return data
+        return StatusData.from(relay: Relay.shared, live: Live.shared, stamina: StaminaStore.shared, pending: Pending.shared,
+                               currentQueue: d.string(forKey: "ark-remote-cfg-queue") ?? "",
+                               estopAt: d.integer(forKey: "ark-remote-estop"))
     }
 
     var body: some View {
         let relay = Relay.shared
         var data = StatusData.from(relay: relay, live: Live.shared, stamina: StaminaStore.shared, pending: Pending.shared,
                                    currentQueue: storedQueue, estopAt: estopAt)
-        let _ = StatusCommands.applyEdits(edits.wrappedValue, to: &data)
-        StatusPage(data: data, actions: StatusCommands.actions(data, ask: $ask, storedQueue: $storedQueue, edits: edits),
-                   live: Self.liveData)
+        // the switches' orders on their way or not gone out are in the shared pool (EWSave.apply), the one-shot in `outbox`
+        let box = StatusCommands.withSwitches(outbox)
+        let _ = StatusCommands.applyOutbox(box, to: &data)
+        StatusPage(data: data, actions: StatusCommands.actions(data, ask: $ask, storedQueue: $storedQueue, outbox: $outbox),
+                   outbox: box, live: Self.liveData, ask: $ask, confirm: { a in
+                       let pressed = nowSec()
+                       let head = data.receipts.first?.id
+                       Task {
+                           // only an order that went out waits for its receipt: written before the send, a failed one
+                           // still read 「已下令停止 · 等机器回执」 for 6 hours (edge audit 4, 审查 B8)
+                           if await StatusCommands.shoot(a, head: head, outbox: $outbox), a.isEstop { estopAt = pressed }
+                       }
+                   })
+            .navigationTitle("状态")
+            // HIG Refresh content controls: "A refresh control lets people immediately reload content"
             .refreshable { await Live.shared.ping() }
             .task {
                 // first open (view.js boot :2928-2946): say what the cached state is, then ask the mailbox; a failure is said
@@ -56,34 +63,5 @@ struct StatusTab: View {
                 }
                 _ = await StaminaStore.shared.refresh()
             }
-            .alert(ask?.title ?? "", isPresented: Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })) {
-                if let a = ask {
-                    if a.single {
-                        // view.js ask(…, { single: true }): 「正在跑别的」 / 「发不出去」, one button, nothing sent
-                        Button(a.ok, role: .cancel) {}
-                    } else {
-                        Button(a.ok, role: a.destructive ? .destructive : nil) {
-                            let pressed = nowSec()
-                            Task {
-                                // view.js oneShot: a send that fails is the 「发不出去」 alert with the reason, not a toast
-                                let why = await StatusCommands.send(a)
-                                if let why {
-                                    // an instant failure (no mailbox set) must not land while this alert is still closing
-                                    try? await Task.sleep(nanoseconds: 400_000_000)
-                                    ask = StatusAsk.notice("发不出去", why)
-                                } else if a.isEstop {
-                                    // only an order that went out waits for its receipt: written before the send, a
-                                    // failed one still read 「已下令停止 · 等机器回执」 for 6 hours (edge audit 4, 审查 B8)
-                                    estopAt = pressed
-                                }
-                            }
-                        }
-                        Button("取消", role: .cancel) {}
-                    }
-                }
-            } message: {
-                Text(ask?.message ?? "")
-            }
-            .modifier(EWSaveBar(title: "游戏机遥控"))   // ✕ / 「待保存 N 项」 / ✓ over every tab's changes (view.js:1551-1555)
     }
 }

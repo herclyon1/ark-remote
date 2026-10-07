@@ -6,7 +6,7 @@
 // user 2026-09-23 08:23 「2.6 人份也行，按原方案走」).
 //
 // Data: Inventory.refresh(force) (inventory.js, ported separately) — the app signs its own 森空岛 request;
-// the game machine being off does not matter. Reads only on open and on 「刷新」; no timers.
+// the game machine being off does not matter. Reads only on open and on pull to refresh; no timers.
 //
 // Sections = the rows' `group`, in games[].groups order, else the order the file first names them (plan
 // §4.1); rows without a group are not shown. Inside a section: servings ascending, ties by stock ascending,
@@ -76,14 +76,11 @@ enum StockpileEmptyAction: Sendable, Equatable {
     static let shared = Stockpile()
 
     static let title = "库存"
-    static let refreshLabel = "刷新"
     static let loadingText = "正在从森空岛读取…"
     /// M4g: the box's own last section.
     static let boxSection = "资源箱"
 
     var content: StockpileContent = .loading
-    /// The 刷新 button is disabled while a read runs.
-    var busy = false
 
     /// Inventory.refresh(force) → inventory.js's result object ({取自, games: [...]}).
     @ObservationIgnored var loader: (@MainActor (Bool) async throws -> JSONValue)?
@@ -98,8 +95,6 @@ enum StockpileEmptyAction: Sendable, Equatable {
 
     func load(force: Bool) async {
         if lastGood == nil { content = .loading }
-        busy = true
-        defer { busy = false }
         do {
             guard let loader else { throw AppError("库存还没接上") }
             paint(try await loader(force))

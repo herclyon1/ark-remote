@@ -1,20 +1,33 @@
-// Row views shared by the 终末地 and 鸣潮 pages. Standard SwiftUI controls only (Skip maps them to Android's own);
-// controls checked against skip.dev/docs/modules/skip-ui (Toggle / Picker .menu / TextField / NavigationLink / List).
+// Row views shared by the 终末地 and 鸣潮 pages. System controls as Settings uses them: Toggle, Picker (.menu for a short
+// list, .navigationLink for one with pictures), a pushed List with checkmarks for several choices, LabeledContent with a
+// TextField for numbers and text. A row's explanation and its status sit under the row's name, in secondary text.
 
 import SwiftUI
 
-/// The row's name with its hint underneath (the web page's label + .hint).
+/// The row's name with its explanation and status underneath (a Settings row's subtitle).
 struct EWRowTitle: View {
     var label: String
     var hint: String?
+    /// The row's status (「正在寄出」, 「已寄出 …」, 「没生效 …」, 「没发出去 …」), under the explanation.
+    var tag: EWRowTag? = nil
+    /// A note about the value being typed (「要填整数」), in red under the rest.
+    var problem: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
             if let hint, !hint.isEmpty {
                 Text(hint)
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
+            }
+            if let tag {
+                EWTagLine(tag: tag)
+            }
+            if let problem {
+                Text(verbatim: problem)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
             }
         }
     }
@@ -26,8 +39,8 @@ struct EWFootItem {
     var hint: String?
 }
 
-/// The card's footer (view.js:976-995, Settings › Accessibility › Motion): each row's hint moves from the row to a
-/// paragraph under the card, prefixed 「行名：」 when the card has more than one row. `rows` = the card's row count.
+/// Each row's hint joined into one paragraph for a section footer, prefixed 「行名：」 when the card has more than one
+/// row. The 终末地 pages no longer use it (each hint sits under its row); kept for the 鸣潮 page until its rewrite.
 func ewFoot(_ items: [EWFootItem], rows: Int) -> String {
     items.compactMap { i -> String? in
         guard let h = i.hint?.trimmingCharacters(in: .whitespacesAndNewlines), !h.isEmpty else { return nil }
@@ -36,25 +49,29 @@ func ewFoot(_ items: [EWFootItem], rows: Int) -> String {
     }.joined(separator: "\n")
 }
 
-/// ewFoot over drawn rows; warnings are not rows (view.js `.warn`), box rows are (view.js `.row` with no hint).
+/// ewFoot over drawn rows; warnings are not rows, box rows are.
 func ewFoot(_ shown: [EWRow], card: [EWRow]) -> String {
     ewFoot(shown.filter { $0.kind != .warning }.map { EWFootItem(label: $0.label, hint: $0.hint) },
            rows: card.filter { $0.kind != .warning }.count)
 }
 
-/// One config row. `values` is the page's working copy; `onChange` reports each edit (path, new value).
+/// One config row. `values` is the page's working copy; `onChange` reports each change (path, new value): a switch or
+/// a choice at once, a number or text when it is submitted (Return / Done) or the field loses focus.
 struct EWRowView: View {
     var row: EWRow
     @Binding var values: [String: EWValue]
     var readonly: [String: EWValue] = [:]
     var onChange: (String, EWValue) -> Void = { _, _ in }
-    /// 「待保存」 / 「已寄出 …」 / 「没生效 …」 / 「已应用 …」 under the row (box sub-rows carry none; their header does).
+    /// The row's status (box sub-rows carry none; their header does).
     var tag: EWRowTag? = nil
+    /// 再发一次 of a sent change, by its Pending key.
     var onResend: (String) -> Void = { _ in }
-    /// false: the hint is not drawn under the name; the page puts it in the card's footer instead (ewFoot).
+    /// false: the explanation is not drawn under the name (the 鸣潮 page still puts it in its card's footer).
     var showHint = true
 
     private var hint: String? { showHint ? row.hint : nil }
+
+    private var shownTag: EWRowTag? { row.kind == .box ? nil : tag }
 
     private var value: EWValue { values[row.path] ?? readonly[row.path] ?? .null }
 
@@ -67,16 +84,12 @@ struct EWRowView: View {
         row.choices.first { $0.value == v.key }?.label ?? v.display
     }
 
+    private var title: EWRowTitle { EWRowTitle(label: row.label, hint: hint, tag: shownTag) }
+
     var body: some View {
-        // One shape with or without a tag: a branch here would rebuild the TextField on the first keystroke (「待保存」 appears) and drop the keyboard.
-        VStack(alignment: .leading, spacing: 4) {
-            control
-            if let tag, row.kind != .box {
-                EWTagLine(tag: tag, onResend: onResend)
-            }
-        }
-        // index.html:689-690: unsaved rows tinted accent 8 %, sent rows ok-green 8 % (近似: replaces the card colour, not mixed into it)
-        .listRowBackground(rowBackground(row.kind == .box ? nil : EWTagLine.tint(tag)))   // never nil on Android: a nil → tint swap drops the keyboard (SkipFixes.swift)
+        control
+            .ewRowActions(shownTag, onResend: onResend)
+            .listRowBackground(rowBackground(nil))   // never nil on Android: the same row shape as its neighbours (SkipFixes.swift)
     }
 
     @ViewBuilder
@@ -86,17 +99,17 @@ struct EWRowView: View {
             warningLabel(row.label)
                 .foregroundStyle(.orange)
         case .readOnly:
-            HStack {
-                EWRowTitle(label: row.label, hint: hint)
-                Spacer()
-                Text(pick(value).isEmpty ? "（空）" : pick(value)).foregroundStyle(.secondary)   // view.js fmt(null)
+            LabeledContent {
+                Text(pick(value).isEmpty ? "无" : pick(value))
+            } label: {
+                title
             }
         case .toggle:
             Toggle(isOn: Binding(get: { value.isOn }, set: { set(.bool($0)) })) {
-                EWRowTitle(label: row.label, hint: hint)
+                title
             }
         case .select:
-            // menuPicker (SkipFixes.swift): inside this row's VStack a bare Picker loses its title on Android
+            // menuPicker (SkipFixes.swift): on Android a Picker that is not the bare list row loses its title
             menuPicker(selection: Binding(get: { value == .null ? "" : value.key }, set: { setChoice($0) })) {
                 if value == .null {
                     Text("未设").tag("")
@@ -105,68 +118,76 @@ struct EWRowView: View {
                     Text(c.label).tag(c.value)
                 }
             } title: {
-                EWRowTitle(label: row.label, hint: hint)
+                title
             }
         case .icons:
-            SheetLink {   // the 37b / 38 pick page as a sheet (SkipFixes.swift)
-                EWChoiceList(title: row.label, choices: row.choices, multi: false, icons: true,
-                             initial: [value.key], commit: { setChoice($0.first ?? "") })
-            } label: {
-                HStack {
-                    EWRowTitle(label: row.label, hint: hint)
-                    Spacer()
-                    Text(value == .null ? "（空）" : pick(value)).foregroundStyle(.secondary)   // view.js:545 fmt(null)
-                }
-            }
+            iconsPicker
         case .pills:
-            SheetLink {   // the 37b / 38 pick page as a sheet (SkipFixes.swift)
-                EWChoiceList(title: row.label, choices: row.choices, multi: true,
-                             initial: value.items, commit: { set(.list($0)) })
+            NavigationLink {
+                EWChoiceList(title: row.label, choices: row.choices, multi: true, initial: value.items,
+                             commit: { set(.list($0)) })
             } label: {
-                HStack {
-                    EWRowTitle(label: row.label, hint: hint)
-                    Spacer()
+                LabeledContent {
                     Text("已选 \(row.choices.filter { value.items.contains($0.value) }.count)/\(row.choices.count)")
-                        .foregroundStyle(.secondary)
+                } label: {
+                    title
                 }
             }
         case .boxesHeader:
-            HStack {
-                EWRowTitle(label: row.label, hint: hint)
-                Spacer()
-                Text("\(boxCount) 格").foregroundStyle(.secondary)
+            LabeledContent {
+                Text("\(boxCount) 格")
+            } label: {
+                title
             }
         case .box:
-            HStack {
-                Text(row.label)
-                Spacer()
-                TextField(row.label, text: Binding(get: { value.boxValues[row.boxKey ?? ""] ?? "" }, set: { setBox($0) }))
-                    .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 160)
-                    #if !os(macOS)
-                    .keyboardType(.numberPad)
-                    #endif
+            EWNumberRow(label: row.label, value: Int(value.boxValues[row.boxKey ?? ""] ?? ""), required: false) { n in
+                setBox(n.map { String($0) } ?? "")
+            } title: { problem in
+                EWRowTitle(label: row.label, hint: nil, problem: problem)
             }
         case .number:
-            HStack {
-                EWRowTitle(label: row.label, hint: hint)
-                Spacer()
-                TextField(row.label, text: Binding(get: { value.display }, set: { setNumber($0) }))
-                    .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 100)
-                    #if !os(macOS)
-                    .keyboardType(.numberPad)
-                    #endif
+            EWNumberRow(label: row.label, value: Int(value.display), required: true) { n in
+                if let n { set(.number(Double(n))) }
+            } title: { problem in
+                EWRowTitle(label: row.label, hint: hint, tag: shownTag, problem: problem)
             }
         case .text:
-            HStack {
-                EWRowTitle(label: row.label, hint: hint)
-                Spacer()
-                TextField(row.label, text: Binding(get: { value.display }, set: { set(.text($0)) }))
-                    .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 160)
+            EWTextRow(label: row.label, value: value.display) { set(.text($0)) } title: {
+                title
             }
         }
+    }
+
+    /// One choice from a list with pictures (鸣潮 声骸 sets): a navigation-link Picker, applied when a choice is tapped.
+    @ViewBuilder
+    private var iconsPicker: some View {
+        #if os(Android)
+        // skip-ui titles the pushed choice page from the Picker's label only when that label is a Text or Label
+        // (skip-ui Controls/Picker.swift:270-279); this label is the row's name with its explanation, so the page would be
+        // titled with the selected value's key. A pushed EWChoiceList (single choice, applied on tap) titles it by the row.
+        NavigationLink {
+            EWChoiceList(title: row.label, choices: row.choices, multi: false, icons: true, initial: [value.key],
+                         commit: { setChoice($0.first ?? "") })
+        } label: {
+            LabeledContent {
+                Text(value == .null ? "未设" : pick(value))
+            } label: {
+                title
+            }
+        }
+        #else
+        Picker(selection: Binding(get: { value == .null ? "" : value.key }, set: { setChoice($0) })) {
+            if value == .null {
+                Text("未设").tag("")
+            }
+            ForEach(row.choices, id: \.value) { c in
+                EWChoiceLabel(choice: c, icons: true).tag(c.value)
+            }
+        } label: {
+            title
+        }
+        .pickerStyle(.navigationLink)
+        #endif
     }
 
     /// Keeps a number a number (凝素领域 / 无音区 store an index), everything else is the option's value text.
@@ -174,11 +195,6 @@ struct EWRowView: View {
     private func setChoice(_ v: String) {
         if v.isEmpty { return }
         if case .number = value, let n = Double(v) { set(.number(n)) } else { set(.text(v)) }
-    }
-
-    /// view.js:1097: an emptied number field is null; text the machine keeps as text stays text (EWSave.masterEdit).
-    private func setNumber(_ t: String) {
-        if t.isEmpty { set(.null) } else { set(Double(t).map { .number($0) } ?? .text(t)) }
     }
 
     /// The header row's count = the machine's inputs for this path; the page passes it through choices.
@@ -193,51 +209,215 @@ struct EWRowView: View {
     }
 }
 
-/// The small lines under a row: 「待保存」 in the accent colour (view.js:1273, index.html:686), then the receipt —
-/// grey, or red with 「再发一次」 (pending.js:51-58, index.html:691-695; ArknightsPage.tagged).
-struct EWTagLine: View {
-    var tag: EWRowTag
-    var onResend: (String) -> Void
+/// A number row: the name on the left, a number field on the right (LabeledContent). The field takes only a number
+/// (TextField(value:format:)); what is typed is checked as it is typed, and the value goes out when it is submitted or
+/// the field loses focus (the number pad has no Return; keyboardDone's 完成 ends the editing).
+struct EWNumberRow<Title: View>: View {
+    var label: String
+    /// The value the page shows (machine / sent / changed).
+    var value: Int?
+    /// true: an empty field is not a value (a schema `number` field, EWSave.problem 「要填整数」).
+    var required: Bool
+    var commit: (Int?) -> Void
+    var title: (String?) -> Title
 
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            if tag.unsaved {
-                Text("待保存").font(.caption2).foregroundStyle(Color.accentColor)
-            }
-            if let text = tag.text {
-                HStack(spacing: 6) {
-                    Text(verbatim: text)
-                        .font(.caption2)
-                        .foregroundStyle(tag.bad ? Color.red : Color.secondary)   // the 10 h line has a button but stays grey (class "sent")
-                    if let key = tag.resendKey {
-                        Button("再发一次") { onResend(key) }
-                            .font(.caption2)
-                            .buttonStyle(.borderless)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .trailing)
+    @State var draft: Int?
+    /// The last value handed to `commit` or taken from `value`: a commit of the same value again is no change.
+    @State var settled: Int?
+    @FocusState var focused: Bool
+
+    init(label: String, value: Int?, required: Bool, commit: @escaping (Int?) -> Void,
+         @ViewBuilder title: @escaping (String?) -> Title) {
+        self.label = label
+        self.value = value
+        self.required = required
+        self.commit = commit
+        self.title = title
+        _draft = State(initialValue: value)
+        _settled = State(initialValue: value)
     }
 
-    static func tint(_ tag: EWRowTag?) -> Color? {
-        guard let tag else { return nil }
-        return tag.unsaved ? Color.accentColor.opacity(0.08) : tag.posted ? Color.green.opacity(0.08) : nil
+    /// The field holds no number while the row had one: the field was emptied, or what was typed is not a number.
+    private var problem: String? { required && draft == nil && value != nil ? "要填整数" : nil }
+
+    var body: some View {
+        LabeledContent {
+            // the optional binding: skip-fuse-ui's non-optional one parses with try! (Text/TextField.swift:42-47)
+            TextField("", value: $draft, format: .number.grouping(.never))
+                .multilineTextAlignment(.trailing)
+                #if !os(macOS)
+                .keyboardType(.numberPad)
+                #endif
+                .focused($focused)
+                .onSubmit(send)
+                .accessibilityLabel(Text(verbatim: label))
+        } label: {
+            title(problem)
+        }
+        // iOS writes the typed number into `draft` on submit or when the field loses focus, in either order with the focus
+        // change; Android writes it on every keystroke. Sending only while not focused covers both.
+        .onChange(of: focused) { _, now in if !now { send() } }
+        .onChange(of: draft) { _, _ in if !focused { send() } }
+        // leaving the page with the keyboard up (Back) keeps what was typed
+        .onDisappear(perform: send)
+        // a newer value from the machine or another page, while nobody is typing here
+        .onChange(of: value) { _, v in
+            if !focused {
+                draft = v
+                settled = v
+            }
+        }
+    }
+
+    private func send() {
+        guard draft != settled else { return }
+        if required && draft == nil { return }   // stays on the row as 「要填整数」; nothing is sent
+        settled = draft
+        commit(draft)
     }
 }
 
-/// The checklist page behind an icons (single) or pills (multi) row: one row per choice, a checkmark on the chosen ones.
-/// Taps change only this page; ✓ 完成 writes it back, Back drops it (view.js:1136-1158, openPicker 1228-1235).
+/// A text row: the name on the left, the field on the right; the text goes out when submitted or when the field loses
+/// focus.
+struct EWTextRow<Title: View>: View {
+    var label: String
+    var value: String
+    var commit: (String) -> Void
+    var title: () -> Title
+
+    @State var draft: String
+    @State var settled: String
+    @FocusState var focused: Bool
+
+    init(label: String, value: String, commit: @escaping (String) -> Void, @ViewBuilder title: @escaping () -> Title) {
+        self.label = label
+        self.value = value
+        self.commit = commit
+        self.title = title
+        _draft = State(initialValue: value)
+        _settled = State(initialValue: value)
+    }
+
+    var body: some View {
+        LabeledContent {
+            TextField("", text: $draft)
+                .multilineTextAlignment(.trailing)
+                .focused($focused)
+                .onSubmit(send)
+                .accessibilityLabel(Text(verbatim: label))
+        } label: {
+            title()
+        }
+        .onChange(of: focused) { _, now in if !now { send() } }
+        .onDisappear(perform: send)
+        .onChange(of: value) { _, v in
+            if !focused {
+                draft = v
+                settled = v
+            }
+        }
+    }
+
+    private func send() {
+        guard draft != settled else { return }
+        settled = draft
+        commit(draft)
+    }
+}
+
+/// The status under a row: a spinner while its change goes out, then the receipt (「已寄出 …」 / 「已应用 …」), or what
+/// went wrong in red (「没生效 …」, 「没发出去 …」) with where 再发一次 is.
+struct EWTagLine: View {
+    var tag: EWRowTag
+    /// Kept for the 鸣潮 page's call; 再发一次 is the row's swipe action / context menu now (ewRowActions).
+    var onResend: (String) -> Void = { _ in }
+
+    var body: some View {
+        Group {
+            if tag.sending {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .smallControl()
+                    Text("正在寄出")
+                }
+                .foregroundStyle(.secondary)
+            } else if let failure = tag.failure {
+                Text(verbatim: failure + "左滑这一行或长按它可以再发一次。").foregroundStyle(.red)
+            } else if let text = tag.text {
+                Text(verbatim: text + (tag.resendKey != nil ? "。左滑或长按这一行可以再发一次" : ""))
+                    .foregroundStyle(tag.bad ? Color.red : Color.secondary)
+            } else if tag.unsaved {
+                Text("还没寄出").foregroundStyle(.secondary)   // another tab's change that waits for that tab's own send
+            }
+        }
+        .font(.footnote)
+    }
+
+    /// Rows are no longer tinted for their status (the status is the text above); kept for the 鸣潮 page's call.
+    static func tint(_ tag: EWRowTag?) -> Color? { nil }
+}
+
+extension View {
+    /// A row's own actions for its status, as Mail's rows have them: swipe from the trailing edge, or long-press for the
+    /// same buttons. 再发一次 for a change that did not go out (EWSave.retry) or that the machine did not take (Pending);
+    /// 不改了 drops a change that did not go out.
+    func ewRowActions(_ tag: EWRowTag?, onResend: @escaping (String) -> Void) -> some View {
+        let retry = tag?.sending == true ? nil : tag?.retryKey
+        let resend = tag?.sending == true ? nil : tag?.resendKey
+        return self
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if let retry {
+                    Button("再发一次") { EWSave.retry(retry) }
+                    Button("不改了") { EWSave.drop(retry) }
+                } else if let resend {
+                    Button("再发一次") { onResend(resend) }
+                }
+            }
+            .contextMenu {
+                if let retry {
+                    Button("再发一次") { EWSave.retry(retry) }
+                    Button("不改了") { EWSave.drop(retry) }
+                } else if let resend {
+                    Button("再发一次") { onResend(resend) }
+                }
+            }
+    }
+}
+
+/// A choice's label: the option's name, after its echo-set pictures for icon rows.
+struct EWChoiceLabel: View {
+    var choice: EWChoice
+    var icons = false
+    /// The set icon, 28 pt at the default text size (view.js:1215 `.pico`), growing with Dynamic Type.
+    @ScaledMetric(relativeTo: .body) var iconSize: CGFloat = 28
+
+    var body: some View {
+        HStack {
+            if icons {
+                ForEach(choice.label.components(separatedBy: " ＋ "), id: \.self) { name in
+                    if let asset = WuwaSchema.setIcons[name] {
+                        decorativeImage(asset)   // the label beside says the names
+                            .resizable()
+                            .frame(width: iconSize, height: iconSize)
+                            .clipShape(RoundedRectangle(cornerRadius: iconSize * 6 / 28))
+                    }
+                }
+            }
+            Text(choice.label)
+        }
+    }
+}
+
+/// The pushed list behind a choice row: one row per choice, a checkmark on the chosen ones. A tap applies at once, as
+/// Settings' choice lists do. With several allowed the last ticked one cannot be unticked (MaaEnd ends a task given
+/// none, view.js:1399); with one, the tap applies and the page goes back.
 struct EWChoiceList: View {
     var title: String
     var choices: [EWChoice]
     var multi: Bool
-    /// icons rows: each echo set's icon before the label, 28 pt (view.js:1215 `.pico`, index.html:379 --ios-row2-icon).
     var icons = false
     var commit: ([String]) -> Void
-    /// What the row showed when the page opened.
-    let initial: [String]
-    @State var draft: [String]
+    @State var chosen: [String]
     @Environment(\.dismiss) var dismiss
 
     init(title: String, choices: [EWChoice], multi: Bool, icons: Bool = false,
@@ -247,46 +427,38 @@ struct EWChoiceList: View {
         self.multi = multi
         self.icons = icons
         self.commit = commit
-        self.initial = initial
-        _draft = State(initialValue: initial)
+        _chosen = State(initialValue: initial)
     }
 
     var body: some View {
         List {
             ForEach(choices, id: \.value) { c in
+                let on = chosen.contains(c.value)
                 Button {
                     toggle(c.value)
                 } label: {
                     HStack {
-                        if icons {
-                            ForEach(c.label.components(separatedBy: " ＋ "), id: \.self) { name in
-                                if let asset = WuwaSchema.setIcons[name] {
-                                    decorativeImage(asset)   // c.label beside says the names
-                                        .resizable()
-                                        .frame(width: 28, height: 28)
-                                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                                }
-                            }
-                        }
-                        Text(c.label)
+                        EWChoiceLabel(choice: c, icons: icons)
                         Spacer()
-                        if draft.contains(c.value) {
-                            Image(systemName: "checkmark").accessibilityHidden(true)
+                        if on {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityHidden(true)
                         }
                     }
+                    .foregroundStyle(.primary)
                 }
+                // the last ticked one stays ticked: a list with none is refused (view.js:1399)
+                .disabled(multi && on && chosen.count == 1)
                 // the checkmark is said as the row's selected state, as a native selection list does
                 // (AccessibilityTraits.isSelected: "The accessibility element is currently selected.")
-                .accessibilityAddTraits(draft.contains(c.value) ? .isSelected : Self.noTraits)
+                .accessibilityAddTraits(on ? .isSelected : Self.noTraits)
             }
         }
         .navigationTitle(title)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button { done() } label: { Image(systemName: "checkmark") }
-                    .accessibilityLabel("完成")   // icon-only: named as EWLive's ✓ (index.html:921 aria-label 完成)
-            }
-        }
+        #if !os(macOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
     }
 
     /// No traits. On Android not `[]`: skip-fuse-ui's AccessibilityTraits (SkipSwiftUI/System/Accessibility.swift:899-901)
@@ -302,32 +474,22 @@ struct EWChoiceList: View {
         #endif
     }
 
+    /// Written back in the option table's order; a value the option table does not list (any more) stays, after the
+    /// listed ones: it has no row here to untick, and dropping it deleted it from the machine (edge audit 33).
     private func toggle(_ v: String) {
         if !multi {
-            draft = [v]
-        } else if let i = draft.firstIndex(of: v) {
-            draft.remove(at: i)
-        } else {
-            draft.append(v)
-        }
-    }
-
-    /// view.js:1146-1149: written back in the option table's order; none at all is refused (MaaEnd ends the task).
-    /// A value the option table does not list (any more) stays, after the listed ones: it has no row here to untick, and
-    /// dropping it on ✓ deleted it from the machine. The same set in another order is no change (edge audit 33): the
-    /// machine's order differing from the table's made a bare ✓ a 「待保存」 edit.
-    private func done() {
-        let listed = choices.map { $0.value }
-        let next = listed.filter { draft.contains($0) } + draft.filter { !listed.contains($0) }
-        if multi && Set(next) == Set(initial) {
+            chosen = [v]
+            commit([v])
             dismiss()
             return
         }
-        if next.isEmpty {
-            if multi { Relay.shared.showToast("至少要留一个") }   // view.js:1399 toast("至少要留一个")
-            return
+        if let i = chosen.firstIndex(of: v) {
+            guard chosen.count > 1 else { return }
+            chosen.remove(at: i)
+        } else {
+            chosen.append(v)
         }
-        commit(next)
-        dismiss()
+        let listed = choices.map { $0.value }
+        commit(listed.filter { chosen.contains($0) } + chosen.filter { !listed.contains($0) })
     }
 }

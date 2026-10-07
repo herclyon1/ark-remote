@@ -191,6 +191,15 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         busy = false
     }
 
+    /// view.js:2455-2457: after an order went out, ask the machine once, `afterSeconds` later, for a state reported after
+    /// `minAt` (the order's send time). One request, no loop; the caller does not wait for it.
+    func ping(afterSeconds: Double, minAt: Int) {
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(afterSeconds * 1_000_000_000))
+            await self.ping(minAt: minAt)
+        }
+    }
+
     private static func atOf(_ v: JSONValue?) -> Double? { v?["at"]?.number }
 
     private func pingInner(minAt: Int?, cfg: RelayConfig) async {
@@ -638,5 +647,31 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         DiagLog.shared.record("stream", ["state": reconnect ? "dropped" : "closed", "error": error.map { errorMessage($0) } ?? ""])
         guard reconnect else { return }
         DispatchQueue.global().asyncAfter(deadline: .now() + 3) { [weak self] in self?.open() }
+    }
+}
+
+extension NtfyStream {
+    /// 自检's push check (Pages/Phone/PhoneDiag.swift SelfCheck): ms until a stream on `topic` gets its `open` event, or
+    /// nil when none came within 8 s.
+    @MainActor static func probeOpen(topic: String) async -> Int? {
+        let t0 = nowMs()
+        return await withCheckedContinuation { (cont: CheckedContinuation<Int?, Never>) in
+            let done = OnceFlag()
+            var stream: NtfyStream?
+            stream = NtfyStream(topics: topic, since: "\(Int(t0 / 1000))") { e in
+                if e["event"]?.string == "open", done.take() {
+                    stream?.close()
+                    cont.resume(returning: Int(nowMs() - t0))
+                }
+            }
+            stream?.open()
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                if done.take() {
+                    stream?.close()
+                    cont.resume(returning: nil)
+                }
+            }
+        }
     }
 }

@@ -199,9 +199,6 @@ extension StatusData {
         d.plan = blocks
         d.planFoot = foot
 
-        // action tiles
-        if let at = relay.snapAt { d.lastUpdate = ago(at); d.snapAt = at }
-
         // stamina (numTiles): nil = phone not configured; [] = configured, no reading yet
         if let r = stamina.data {
             let ak = r.arknights, ef = r.endfield, ww = r.wuwa

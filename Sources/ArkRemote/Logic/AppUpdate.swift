@@ -134,8 +134,8 @@ import SwiftUI
 /// https://m2.material.io/components/banners). Placed above the whole TabView they doubled the status-bar inset:
 /// SkipUI's top app bar adds the status bar's window insets whenever the top system bar is there (Navigation.swift
 /// hasAbsoluteTopSystemBar → TopAppBarDefaults.windowInsets), so a strip of empty space opened under the banner.
-/// iOS: a top safe-area inset with the bar material, so the list stays the scroll view the navigation bar tracks
-/// (its large title still collapses) and scrolls under the line instead of through it.
+/// iOS: the pending line is the root's navigation subtitle with 「不再等待」 in the navigation bar (PendingStatus,
+/// Pages/Shell/PendingBarView.swift): system navigation-bar parts, no bar of our own over the list.
 extension View {
     func topNotices() -> some View { TopNotices(content: self) }
 }
@@ -153,15 +153,10 @@ struct TopNotices<Content: View>: View {
             if let bar = Pending.shared.bar { PendingBarView(bar: bar) }
             content
         }
+        #elseif os(iOS)
+        PendingStatus(content: content)
         #else
-        content.safeAreaInset(edge: .top, spacing: 0) {
-            if let bar = Pending.shared.bar {
-                // ignoresSafeAreaEdges: [] — a ShapeStyle background spreads into the safe area by default
-                // (background(_:ignoresSafeAreaEdges: .all)), so the material ran up over the navigation bar and blurred
-                // out the large title on every tab while the line showed (test pass 1, 问题 2: i18 vs i26)
-                PendingBarView(bar: bar).background(.bar, ignoresSafeAreaEdges: [])
-            }
-        }
+        content
         #endif
     }
 }
@@ -203,8 +198,7 @@ struct UpdateBanner: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding()   // the system's standard spacing, not fixed values
         .frame(maxWidth: .infinity, alignment: .leading)
         Divider()
     }
