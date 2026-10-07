@@ -60,7 +60,11 @@ enum PhoneLink {
         #endif
     }
 
-    static func pasted() -> String? {
+    /// The clipboard's text (SetupScreen's 「第一次使用」 and takeClipboardLink read it).
+    @MainActor static func pasted() -> String? { readClipboard() }
+
+    /// The system clipboard read behind pasted(); tests replace it so they never touch the shared pasteboard.
+    @MainActor static var readClipboard: () -> String? = {
         #if os(Android) || canImport(UIKit)
         return UIPasteboard.general.string
         #elseif canImport(AppKit)

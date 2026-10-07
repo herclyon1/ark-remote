@@ -17,5 +17,7 @@ let package = Package(
         .target(name: "ArkRemote", dependencies: [
             .product(name: "SkipFuseUI", package: "skip-fuse-ui")
         ], resources: [.process("Resources")], plugins: [.plugin(name: "skipstone", package: "skip")]),
+        // Logic unit tests, run on the Mac (`swift test`); no skipstone plugin, so not built for Android
+        .testTarget(name: "ArkRemoteTests", dependencies: ["ArkRemote"]),
     ]
 )
