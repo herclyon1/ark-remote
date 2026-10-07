@@ -142,6 +142,35 @@ import XCTest
         XCTAssertEqual(foot.dropFirst().first, game.needNote)
     }
 
+    /// This read failed on 森空岛 as well as the table, so the page keeps the last good read: the footnote still says
+    /// when that read was taken and carries this read's stale-table note (Stockpile.paint used to drop it).
+    func testFallbackKeepsTheStaleNote() async throws {
+        let good = try JSONValue.parse(Data(#"{"取自":"01:00","games":[{"game":"终末地","gameId":"endfield","错误":"","rows":[{"id":"a","name":"A","group":"g","have":1,"need":3,"servings":0.3,"box":0,"short":2}]}]}"#.utf8))
+        let note = "需求表这次没拿到（需求表拿不到（500）），人份按 01:00 拿到的旧表算"
+        let bad = try JSONValue.parse(Data(#"{"取自":"02:40","games":[{"game":"终末地","gameId":"endfield","错误":"森空岛刷新失败","needNote":"\#(note)","rows":[]}]}"#.utf8))
+        let page = Stockpile()
+        var next = good
+        page.loader = { _ in next }
+        await page.load(force: true)
+        next = bad
+        await page.load(force: true)
+        guard case let .list(_, foot) = page.content else { return XCTFail("expected the list, got \(page.content)") }
+        XCTAssertEqual(foot.first, "01:00 读取的数据；这次没读到：森空岛刷新失败")
+        XCTAssertEqual(foot.dropFirst().first, note)
+    }
+
+    /// Rows came back but none carries a group: the page says the table's grouping does not match, not that 森空岛
+    /// returned nothing.
+    func testUngroupedRowsBlameTheTable() async throws {
+        let json = try JSONValue.parse(Data(#"{"取自":"02:40","games":[{"game":"终末地","gameId":"endfield","错误":"","rows":[{"id":"a","name":"A","have":5,"need":null}]}]}"#.utf8))
+        let page = Stockpile()
+        page.loader = { _ in json }
+        await page.load(force: true)
+        XCTAssertEqual(page.content, .zero(Stockpile.ungrouped))
+        XCTAssertNotEqual(page.content, .zero(Self.wrongLine))
+        XCTAssertTrue(Stockpile.ungrouped.contains("需求表"))
+    }
+
     /// Older than today: the date goes in front of the time.
     func testReadAtOlderThanToday() {
         let ms = Date().addingTimeInterval(-3 * 86400).timeIntervalSince1970 * 1000
