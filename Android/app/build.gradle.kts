@@ -104,3 +104,10 @@ android {
         }
     }
 }
+
+// Local unit tests (src/test, run on the JVM: gradle :app:testDebugUnitTest). JUnit 4.13.2 is the current JUnit 4
+// release. "By default, the source files for local unit tests are placed in module-name/src/test/."
+// (https://developer.android.com/training/testing/local-tests)
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+}
