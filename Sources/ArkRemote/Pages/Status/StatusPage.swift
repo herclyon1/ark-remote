@@ -457,7 +457,7 @@ struct StatusPage: View {
     /// The last one-shot order until a newer receipt answers it; a failed one stays until the next order.
     private var shownShot: StatusShot? {
         guard let s = outbox.shot else { return nil }
-        return s.failure != nil || data.receipts.first?.id == s.head ? s : nil
+        return s.failure != nil || s.lost || data.receipts.first?.id == s.head ? s : nil
     }
 
     @ViewBuilder private var receiptsSection: some View {
@@ -486,21 +486,26 @@ struct StatusPage: View {
 
     /// The order just sent (or not), in the place its receipt will appear (HIG Feedback: "Consider integrating status
     /// feedback into your interface.").
-    private func shotRow(_ s: StatusShot) -> some View {
+    @ViewBuilder private func shotRow(_ s: StatusShot) -> some View {
+        let bad = s.failure != nil || s.lost
         LabeledContent {
             Text(s.at).foregroundStyle(.secondary)
         } label: {
             Label {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(s.what)
-                    Text(s.failure.map { "没寄出：\($0)" } ?? "已寄出，等机器回执")
-                        .font(.footnote).foregroundStyle(s.failure == nil ? Color.secondary : Color.red)
+                    Text(s.failure.map { "没寄出：\($0)" } ?? (s.lost ? Pending.lostText : "已寄出，等机器回执"))
+                        .font(.footnote).foregroundStyle(bad ? Color.red : Color.secondary)
                 }
             } icon: {
-                Image(systemName: s.failure == nil ? "paperplane" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(s.failure == nil ? Color.secondary : Color.red)
+                Image(systemName: bad ? "exclamationmark.triangle.fill" : "paperplane")
+                    .foregroundStyle(bad ? Color.red : Color.secondary)
                     .accessibilityHidden(true)
             }
+        }
+        // sent while the machine was off past ntfy's 12 h (relay.信箱空窗): sent again only when tapped
+        if s.lost, let order = s.ask {
+            Button("再发一次") { actions.resendShot(order) }
         }
     }
 }

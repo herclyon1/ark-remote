@@ -169,6 +169,9 @@ struct PendingBar: Sendable, Equatable {
             let at = p.resentAt ?? p.sentAt
             // D207: the relay took it and runs it after the script now running; grey, no 「再发一次」 (staleResendKey)
             if isQueued(p) { return .sent(text: Self.queuedText) }
+            // sent while the machine was off past ntfy's 12 h: the machine will never read it (relay.信箱空窗); 「再发一次」
+            // at once (staleResendKey) instead of 「已寄出 · 机器开机后生效」 until the 10 h mark
+            if isLost(p) { return .sent(text: Self.lostText) }
             // pending.js:58-59: past 10 h the mailbox (12 h) may have dropped it; resent only by a tap, never automatically
             if Self.isStale(p) { return .sent(text: "没回执 · 已寄出 \(Self.hhmm(at))") }
             return .sent(text: "已寄出 \(Self.hhmm(at)) · \(waitNote)")
@@ -200,8 +203,39 @@ struct PendingBar: Sendable, Equatable {
     /// The key for the 「再发一次」 button under a 「没回执 · 已寄出 HH:MM」 line (pending.js:59 `data-again`), or nil.
     /// That line is a `.sent` tag (grey, class "sent", not "sent bad"), so the page asks for the button here.
     func staleResendKey(for key: String) -> String? {
-        guard let p = items[key], Self.isStale(p), !isQueued(p) else { return nil }
+        guard let p = items[key], Self.isStale(p) || isLost(p), !isQueued(p) else { return nil }
         return key
+    }
+
+    // MARK: the mailbox window a long power-off could not read (relay.信箱空窗)
+
+    /// 「机器关机超过 12 小时，这条没收到」 under a change, or the one-shot order, sent inside such a window.
+    static let lostText = "机器关机超过 12 小时，这条没收到"
+
+    /// relay.信箱空窗 of the state (maa-automation relay/ark_relay/phone.py, relay-phone-1007 0223741d): each boot that came
+    /// more than 12 h after the mailbox was last read records [从, 到] (unix s, ntfy's / the machine's clock), the span whose
+    /// messages ntfy had dropped before the boot read ("cache-duration: defines the duration for which messages are stored
+    /// in the cache (default is 12h).", https://docs.ntfy.sh/config/). An older relay sends none: nothing is lost then.
+    var blindWindows: [(from: Double, to: Double)] {
+        (relay.snap?["relay"]?["信箱空窗"]?.array ?? []).compactMap { w in
+            guard let f = w["从"]?.number, let t = w["到"]?.number else { return nil }
+            return (f, t)
+        }
+    }
+
+    /// Whether a send at `sentAt` (this phone's clock, seconds) fell in a window the machine could not read. The windows
+    /// are on ntfy's / the machine's clock, so the send is moved to ntfy's (clockSkewMs, as in reconcile).
+    func lostInMailbox(sentAt: Int) -> Bool {
+        Self.inBlind(Double(sentAt) + relay.clockSkewMs / 1000, windows: blindWindows)
+    }
+
+    /// The change's last (re)send fell in such a window.
+    func isLost(_ p: PendingEdit) -> Bool {
+        p.mismatchAt == nil && lostInMailbox(sentAt: p.resentAt ?? p.sentAt)
+    }
+
+    nonisolated static func inBlind(_ t: Double, windows: [(from: Double, to: Double)]) -> Bool {
+        windows.contains { t >= $0.from && t <= $0.to }
     }
 
     /// Drops 「已应用」 marks older than a day (applyPending does it while painting).
@@ -217,10 +251,13 @@ struct PendingBar: Sendable, Equatable {
         let n = items.count
         guard n > 0 else { return nil }
         let bad = items.values.filter { $0.mismatchAt != nil }.count
+        let lost = items.values.filter { isLost($0) }.count
         // D207: every waiting item queued behind the run says so; a mix keeps the B9 wording (waitNote)
-        let queued = bad == 0 && items.values.allSatisfy { isQueued($0) }
+        let queued = bad == 0 && lost == 0 && items.values.allSatisfy { isQueued($0) }
         let text = bad > 0
             ? "\(bad) 项改动机器没接受（见红字）" + (n - bad > 0 ? "，另 \(n - bad) 项还在等回执" : "")
+            : lost > 0 ? "\(lost) 项改动机器没收到（关机超过 12 小时），要的话点「再发一次」"
+                + (n - lost > 0 ? "，另 \(n - lost) 项还在等回执" : "")
             : queued ? "\(n) 项改动\(Self.queuedText)" : "\(n) 项改动已寄出 · \(waitNote)"
         return PendingBar(text: text, hasMismatch: bad > 0)
     }

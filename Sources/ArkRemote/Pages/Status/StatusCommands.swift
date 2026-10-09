@@ -40,6 +40,12 @@ struct StatusShot: Equatable {
     var failure: String? = nil
     /// the newest receipt's id when it went out: once a newer receipt is in, that receipt is the answer and the row goes
     var head: String? = nil
+    /// when it went out (this phone's clock, s), to tell whether it fell in a window the machine could not read
+    var sentAt: Int? = nil
+    /// the order itself, for 「再发一次」 (sent again only on that tap, never by itself)
+    var ask: StatusAsk? = nil
+    /// sent inside relay.信箱空窗 (Pending.lostInMailbox): the machine never read it; set by `withLost`
+    var lost = false
 }
 
 /// The 状态 tab's commands, with the request bodies of the web page's view.js wire() (959–1020).
@@ -62,7 +68,7 @@ enum StatusCommands {
         if why == nil && a.isEstop { return true }
         let c = Calendar.current.dateComponents([.hour, .minute], from: Date())
         outbox.wrappedValue.shot = StatusShot(what: a.what, at: "\(pad2(c.hour ?? 0)):\(pad2(c.minute ?? 0))", failure: why,
-                                              head: head)
+                                              head: head, sentAt: why == nil ? nowSec() : nil, ask: a)
         return why == nil
     }
 
@@ -131,6 +137,15 @@ enum StatusCommands {
         a.setSkipShutdown = { on in relaySwitch(StatusSwitchID.skipShutdown, on: on) }
         a.setDebugMode = { on in relaySwitch(StatusSwitchID.debugMode, on: on) }
         a.resend = { id in EWSave.resend(id) }   // pending.js [data-again] → resend(key)
+        // a one-shot the machine never read (StatusShot.lost): an order that asked before asks again in the same dialog; one
+        // that went out without asking (收工时刻) goes again at once. Either way only on the user's tap.
+        a.resendShot = { order in
+            if order.title.isEmpty {
+                Task { _ = await shoot(order, head: head, outbox: outbox) }
+            } else {
+                ask.wrappedValue = order
+            }
+        }
         return a
     }
 
@@ -156,9 +171,13 @@ enum StatusCommands {
         EWSave.apply(id, EWEdit(label: label, src: "relay", from: .bool(from), to: .bool(on), body: raw))
     }
 
-    /// The outbox with the switches' orders from the pool (EWEdits / EWSendQueue): on their way, or did not go out.
+    /// The outbox with the switches' orders from the pool (EWEdits / EWSendQueue): on their way, or did not go out; and the
+    /// one-shot marked lost when it went out inside a window the machine could not read (relay.信箱空窗).
     static func withSwitches(_ outbox: StatusOutbox) -> StatusOutbox {
         var box = outbox
+        if let s = box.shot, s.failure == nil, let t = s.sentAt, Pending.shared.lostInMailbox(sentAt: t) {
+            box.shot?.lost = true
+        }
         let q = EWSendQueue.shared
         for (id, e) in EWEdits.shared.items where id.hasPrefix("relay|") {
             if let f = e.failure {

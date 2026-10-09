@@ -172,6 +172,7 @@ struct StatusActions {
     var setSkipShutdown: (Bool) -> Void = { _ in }
     var setDebugMode: (Bool) -> Void = { _ in }
     var resend: (String) -> Void = { _ in }                       // 「再发一次」 under a row, switch id
+    var resendShot: (StatusAsk) -> Void = { _ in }                // 「再发一次」 of a one-shot the machine never read
 }
 
 extension StatusData {

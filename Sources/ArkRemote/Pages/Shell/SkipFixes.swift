@@ -88,6 +88,58 @@ func menuPicker<Selection: Hashable, Content: View, Title: View>(selection: Bind
     #endif
 }
 
+#if os(Android)
+/// SwiftUI's LabeledContent on Android, laid out as iOS lays out a list row with a value: the value keeps its own width
+/// on the right and the label takes the rest, wrapping. This module's type shadows the SwiftUI one on Android only, so
+/// every `LabeledContent` in Sources/ gets it; iOS keeps the system view.
+///
+/// skip-ui's LabeledContent composes label and value into a plain Compose Row with neither child weighted (skip-ui
+/// Text/LabeledContent.swift:54-57). A Row measures its children in order, each against the width left, so a label whose
+/// hint wraps took the whole row: the 方舟 page's 关卡 and 活动关序号 fields got no width at all and were not drawn
+/// (10-07 replay, probe-android/ark-fresh.png), and short values such as 「本周已打满」, 「已选 6/7」 and 「没有」 were
+/// squeezed to one character a line (n1007-ark/008-ark.mail.png, n1007-ef/009-ef.days.back.png). In skip-ui's HStack a
+/// child framed to `maxWidth: .infinity` is weighted (Containers/HStack.swift:98), and Compose measures weighted children
+/// after the others, so the value is measured first at its own width; a text field (skip-ui fills its width) shares the
+/// row with the label. menuPicker below is the same fix for a picker row.
+struct LabeledContent<Label: View, Content: View>: View {
+    let content: Content
+    let label: Label
+
+    init(@ViewBuilder content: () -> Content, @ViewBuilder label: () -> Label) {
+        self.content = content()
+        self.label = label()
+    }
+
+    var body: some View {
+        HStack {
+            label.frame(maxWidth: .infinity, alignment: .leading)
+            content
+        }
+    }
+}
+
+extension LabeledContent where Label == Text {
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.init(content: content) { Text(title) }
+    }
+}
+
+extension LabeledContent where Label == Text, Content == LabeledValueText {
+    init<S: StringProtocol>(_ title: String, value: S) {
+        self.init(content: { LabeledValueText(value: String(value)) }) { Text(title) }
+    }
+}
+
+/// `LabeledContent(_:value:)`'s value, in the secondary colour as iOS draws it in a list row.
+struct LabeledValueText: View {
+    let value: String
+
+    var body: some View {
+        Text(value).foregroundStyle(.secondary)
+    }
+}
+#endif
+
 /// `if shown { Section … }` for the top level of a List.
 ///
 /// A false `if` reaches SkipUI as an EmptyView, and its List takes that for a row: an item after a section footer
