@@ -97,7 +97,10 @@ enum StatusCommands {
                 body: .object(["action": .string("estop"), "confirmed": .bool(true)]),
                 what: "停止一切", isEstop: true)   // view.js:1263
         }
-        a.selectQueue = { storedQueue.wrappedValue = $0 }
+        a.selectQueue = {
+            storedQueue.wrappedValue = $0
+            ShiftPick.shared.queue = $0   // the game tabs' ShiftGate follows it (ShiftPick.swift)
+        }
         a.setRunsToday = { name, on in
             // the time as the row shows it (StatusPlanBlock.shownTime), so Pending's label matches the row
             let label = data.plan.first(where: { $0.queueName == name && !$0.time.isEmpty }).map { "\(name) · \($0.shownTime)" } ?? name

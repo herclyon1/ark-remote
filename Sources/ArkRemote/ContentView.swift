@@ -16,12 +16,14 @@ struct ContentView: View {
 
     /// view.js:317-327 inShift: the games of the shown shift (the picked one, else the first queue); no queue or an
     /// empty script list means every game is in.
-    private func inShift(_ owner: String) -> Bool {
+    static func inShift(_ owner: String, queue: String) -> Bool {
         let qs = Relay.shared.snap?["queues"]?.array ?? []
-        guard let q = qs.first(where: { $0["名"]?.string == storedQueue }) ?? qs.first,
+        guard let q = qs.first(where: { $0["名"]?.string == queue }) ?? qs.first,
               let scripts = q["脚本"]?.array, !scripts.isEmpty else { return true }
         return scripts.contains { $0.string == owner }
     }
+
+    private func inShift(_ owner: String) -> Bool { Self.inShift(owner, queue: storedQueue) }
 
     /// Each tab's pushed pages, bound to its NavigationStack so a reselect can pop them (D39). One @State per tab rather
     /// than a dictionary of paths: a binding into a dictionary element is not one Skip is known to transpile safely.
@@ -110,7 +112,7 @@ struct ContentView: View {
 
             Tab(value: ContentTab.arknights) {
                 NavigationStack(path: $arknightsPath) {
-                    ShiftGate(name: "方舟", inShift: inShift("MAA"), toStatus: { tab = .status }) { ArknightsTab() }
+                    ShiftGate(name: "方舟", owner: "MAA", toStatus: { tab = .status }) { ArknightsTab() }
                 }
                 .expandsTopBarOnReselect(.arknights)
                 .modifier(DiagRoom())
@@ -120,7 +122,7 @@ struct ContentView: View {
 
             Tab(value: ContentTab.endfield) {
                 NavigationStack(path: $endfieldPath) {
-                    ShiftGate(name: "终末地", inShift: inShift("MaaEnd"), toStatus: { tab = .status }) { EndfieldTab() }
+                    ShiftGate(name: "终末地", owner: "MaaEnd", toStatus: { tab = .status }) { EndfieldTab() }
                 }
                 .expandsTopBarOnReselect(.endfield)
                 .modifier(DiagRoom())
@@ -130,7 +132,7 @@ struct ContentView: View {
 
             Tab(value: ContentTab.wuwa) {
                 NavigationStack(path: $wuwaPath) {
-                    ShiftGate(name: "鸣潮", inShift: inShift("OK-WW"), toStatus: { tab = .status }) { WuwaTab() }
+                    ShiftGate(name: "鸣潮", owner: "OK-WW", toStatus: { tab = .status }) { WuwaTab() }
                 }
                 .expandsTopBarOnReselect(.wuwa)
                 .modifier(DiagRoom())
@@ -172,15 +174,18 @@ private extension View {
 
 /// A game tab's root: the game's page while the shown shift runs that game, else a page that says why it is empty
 /// (HIG Tab bars: "If a section is empty, explain why its content is unavailable."; SwiftUI ContentUnavailableView:
-/// "display when the content of your app is unavailable to users").
+/// "display when the content of your app is unavailable to users"). The gate reads the shift itself (ShiftPick, the
+/// snap), so it follows a change of shift on the 状态 tab at once (ShiftPick.swift says why it cannot take it from
+/// ContentView).
 struct ShiftGate<Page: View>: View {
     let name: String
-    let inShift: Bool
+    /// The game's script name in the shift's 脚本 list (MAA / MaaEnd / OK-WW).
+    let owner: String
     let toStatus: () -> Void
     @ViewBuilder let page: () -> Page
 
     var body: some View {
-        if inShift {
+        if ContentView.inShift(owner, queue: ShiftPick.shared.queue) {
             page().noticed()
         } else {
             unavailable
