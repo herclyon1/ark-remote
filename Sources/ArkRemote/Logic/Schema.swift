@@ -268,9 +268,13 @@ struct RelaySwitch: Sendable {
 /// (relay.调试模式, in the phone's time: StatusMapping).
 let debugModeRule = "打开后跑完都不关机，一直到下一次预定开机前 10 分钟才自动关掉（两个半小时内就要到的那次开机不算），可能开十几个小时"
 
+/// 下次跑完不关机 as the relay applies it (modes.py skip_armed / set_skip_shutdown): a one-shot mark with no time,
+/// spent when the next 早班/晚班 run finishes; the run after that shuts down. Same words as web/schema.js.
+let skipShutdownRule = "一次性：接下来第一趟早班/晚班跑完不关，开到再下一趟跑完才关；用掉就没了"
+
 let relaySwitches: [RelaySwitch] = [
     RelaySwitch(id: "relay|skip_shutdown", key: "下次别关机", tab: "状态", label: "下次跑完不关机",
-                hint: "只跳过下一次关机，再下一趟照常关",
+                hint: skipShutdownRule,
                 on: .object(["action": .string("skip_shutdown")]),
                 off: .object(["action": .string("skip_shutdown"), "off": .bool(true)])),
     RelaySwitch(id: "relay|debug_mode", key: "调试模式", tab: "状态", label: "调试模式",
