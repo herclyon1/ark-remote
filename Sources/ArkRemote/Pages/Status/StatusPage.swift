@@ -399,7 +399,7 @@ struct StatusPage: View {
             Toggle(isOn: Binding(get: { data.skipShutdown }, set: { actions.setSkipShutdown($0) })) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("下次跑完不关机")
-                    Text("只跳过下一次关机，再下一趟照常关").font(.footnote).foregroundStyle(.secondary)
+                    Text(skipShutdownRule).font(.footnote).foregroundStyle(.secondary)
                     tagLine(StatusSwitchID.skipShutdown)
                 }
             }
