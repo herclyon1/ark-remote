@@ -5,14 +5,17 @@
 // on `Relay`, because this is the lowest layer of the logic. Rendering is left to SwiftUI
 // observation, so view.js's render() has no counterpart.
 //
-// Not a straight port: the browser's DecompressionStream("gzip") has no Foundation counterpart
-// on Android, so `Gzip.inflate` below is a small pure-Swift gzip / DEFLATE decoder.
+// Not a straight port: the browser's DecompressionStream("gzip") → `Gzip.inflate` below, the system zlib on every
+// platform (the iOS / macOS SDKs and the Android Swift SDK each ship a `zlib` module that links libz).
 
 import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
 import Observation
+#if !SKIP   // a C module: kept out of the Kotlin skipstone generates for this file (Kotlin has no `zlib`)
+import zlib
+#endif
 import SkipFuse   // @Observable types only drive the Android UI with SkipFuse imported (skipstone warning)
 
 /// view.js: `const NTFY = "https://ntfy.sh"`.
@@ -556,193 +559,35 @@ struct PinScan: Sendable, Equatable {
 
 // MARK: - gzip
 
-/// A minimal gzip (RFC 1952) / DEFLATE (RFC 1951) decoder: stored, fixed and dynamic Huffman blocks.
-/// The relay compresses with Python's gzip.compress (relay/ark_relay/phone.py:86).
+/// gzip (RFC 1952) as the relay writes it with Python's gzip.compress (relay/ark_relay/phone.py:86), decoded by the
+/// system zlib: inflateInit2 with windowBits 16 + MAX_WBITS reads the gzip header and checks the CRC32 / ISIZE trailer
+/// (zlib manual, https://www.zlib.net/manual.html, inflateInit2).
 enum Gzip {
     static func inflate(_ data: Data) throws -> Data {
-        let b = [UInt8](data)
-        guard b.count >= 18, b[0] == 0x1f, b[1] == 0x8b, b[2] == 8 else { throw AppError("不是 gzip 数据") }
-        let flg = b[3]
-        var pos = 10
-        if flg & 0x04 != 0 {                       // FEXTRA
-            guard pos + 2 <= b.count else { throw AppError("gzip 头不完整") }
-            pos += 2 + (Int(b[pos]) | Int(b[pos + 1]) << 8)
+        guard data.count >= 18, data.starts(with: [0x1f, 0x8b, 8]) else { throw AppError("不是 gzip 数据") }
+        var z = z_stream()
+        guard inflateInit2_(&z, 16 + MAX_WBITS, zlibVersion(), Int32(MemoryLayout<z_stream>.size)) == Z_OK else {
+            throw AppError("gzip 解不开")
         }
-        if flg & 0x08 != 0 { while pos < b.count, b[pos] != 0 { pos += 1 }; pos += 1 }   // FNAME
-        if flg & 0x10 != 0 { while pos < b.count, b[pos] != 0 { pos += 1 }; pos += 1 }   // FCOMMENT
-        if flg & 0x02 != 0 { pos += 2 }                                                   // FHCRC
-        guard pos < b.count else { throw AppError("gzip 头不完整") }
-        var inf = Inflater(input: b, pos: pos)
-        let out = try inf.run()
-        return Data(out)
-    }
-
-    private struct Huffman {
-        var counts = [Int](repeating: 0, count: 16)
-        var symbols: [Int] = []
-
-        init(lengths: [Int]) throws {
-            for l in lengths { counts[l] += 1 }
-            counts[0] = 0
-            var left = 1
-            for len in 1..<16 {
-                left <<= 1
-                left -= counts[len]
-                if left < 0 { throw AppError("gzip 数据损坏") }
-            }
-            var offs = [Int](repeating: 0, count: 16)
-            for len in 1..<15 { offs[len + 1] = offs[len] + counts[len] }
-            symbols = [Int](repeating: 0, count: lengths.count)
-            for (sym, l) in lengths.enumerated() where l != 0 {
-                symbols[offs[l]] = sym
-                offs[l] += 1
-            }
-        }
-    }
-
-    private struct Inflater {
-        let input: [UInt8]
-        var pos: Int
-        var bitBuf = 0
-        var bitCnt = 0
-        var out: [UInt8] = []
-
-        init(input: [UInt8], pos: Int) {
-            self.input = input
-            self.pos = pos
-        }
-
-        static let lenBase = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31,
-                              35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
-        static let lenExtra = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2,
-                               3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0]
-        static let distBase = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
-                               257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145,
-                               8193, 12289, 16385, 24577]
-        static let distExtra = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
-                                7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13]
-        static let clOrder = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
-
-        mutating func bits(_ need: Int) throws -> Int {
-            var val = bitBuf
-            while bitCnt < need {
-                guard pos < input.count else { throw AppError("gzip 数据不完整") }
-                val |= Int(input[pos]) << bitCnt
-                pos += 1
-                bitCnt += 8
-            }
-            bitBuf = val >> need
-            bitCnt -= need
-            return val & ((1 << need) - 1)
-        }
-
-        mutating func decode(_ h: Huffman) throws -> Int {
-            var code = 0, first = 0, index = 0
-            for len in 1..<16 {
-                code |= try bits(1)
-                let count = h.counts[len]
-                if code - count < first { return h.symbols[index + (code - first)] }
-                index += count
-                first += count
-                first <<= 1
-                code <<= 1
-            }
-            throw AppError("gzip 数据损坏")
-        }
-
-        mutating func stored() throws {
-            bitBuf = 0
-            bitCnt = 0
-            guard pos + 4 <= input.count else { throw AppError("gzip 数据不完整") }
-            let len = Int(input[pos]) | Int(input[pos + 1]) << 8
-            let nlen = Int(input[pos + 2]) | Int(input[pos + 3]) << 8
-            pos += 4
-            guard len == (~nlen & 0xffff) else { throw AppError("gzip 数据损坏") }
-            guard pos + len <= input.count else { throw AppError("gzip 数据不完整") }
-            out.append(contentsOf: input[pos..<(pos + len)])
-            pos += len
-        }
-
-        mutating func codes(_ lencode: Huffman, _ distcode: Huffman) throws {
-            while true {
-                var sym = try decode(lencode)
-                if sym < 256 {
-                    out.append(UInt8(sym))
-                } else if sym == 256 {
-                    return
-                } else {
-                    sym -= 257
-                    guard sym < 29 else { throw AppError("gzip 数据损坏") }
-                    let len = Self.lenBase[sym] + (try bits(Self.lenExtra[sym]))
-                    let dsym = try decode(distcode)
-                    guard dsym < 30 else { throw AppError("gzip 数据损坏") }
-                    let dist = Self.distBase[dsym] + (try bits(Self.distExtra[dsym]))
-                    guard dist <= out.count else { throw AppError("gzip 数据损坏") }
-                    let start = out.count - dist
-                    for k in 0..<len { out.append(out[start + k]) }
-                }
-            }
-        }
-
-        mutating func fixed() throws {
-            var lengths = [Int](repeating: 0, count: 288)
-            for i in 0..<144 { lengths[i] = 8 }
-            for i in 144..<256 { lengths[i] = 9 }
-            for i in 256..<280 { lengths[i] = 7 }
-            for i in 280..<288 { lengths[i] = 8 }
-            let lencode = try Huffman(lengths: lengths)
-            let distcode = try Huffman(lengths: [Int](repeating: 5, count: 30))
-            try codes(lencode, distcode)
-        }
-
-        mutating func dynamic() throws {
-            let nlen = try bits(5) + 257
-            let ndist = try bits(5) + 1
-            let ncode = try bits(4) + 4
-            guard nlen <= 286, ndist <= 30 else { throw AppError("gzip 数据损坏") }
-            var cl = [Int](repeating: 0, count: 19)
-            for i in 0..<ncode { cl[Self.clOrder[i]] = try bits(3) }
-            let clcode = try Huffman(lengths: cl)
-            var lengths: [Int] = []
-            while lengths.count < nlen + ndist {
-                let sym = try decode(clcode)
-                if sym < 16 {
-                    lengths.append(sym)
-                } else {
-                    var len = 0
-                    var rep: Int
-                    if sym == 16 {
-                        guard let last = lengths.last else { throw AppError("gzip 数据损坏") }
-                        len = last
-                        rep = 3 + (try bits(2))
-                    } else if sym == 17 {
-                        rep = 3 + (try bits(3))
-                    } else {
-                        rep = 11 + (try bits(7))
-                    }
-                    guard lengths.count + rep <= nlen + ndist else { throw AppError("gzip 数据损坏") }
-                    lengths.append(contentsOf: [Int](repeating: len, count: rep))
-                }
-            }
-            guard lengths[256] != 0 else { throw AppError("gzip 数据损坏") }
-            let lencode = try Huffman(lengths: Array(lengths[0..<nlen]))
-            let distcode = try Huffman(lengths: Array(lengths[nlen...]))
-            try codes(lencode, distcode)
-        }
-
-        mutating func run() throws -> [UInt8] {
-            var last = 0
+        defer { inflateEnd(&z) }
+        var input = [UInt8](data)
+        var chunk = [UInt8](repeating: 0, count: 64 * 1024)
+        var out = Data()
+        var ret = Z_OK
+        input.withUnsafeMutableBufferPointer { inp in
+            z.next_in = inp.baseAddress
+            z.avail_in = uInt(inp.count)
             repeat {
-                last = try bits(1)
-                let type = try bits(2)
-                switch type {
-                case 0: try stored()
-                case 1: try fixed()
-                case 2: try dynamic()
-                default: throw AppError("gzip 数据损坏")
+                let n = chunk.withUnsafeMutableBufferPointer { buf in
+                    z.next_out = buf.baseAddress
+                    z.avail_out = uInt(buf.count)
+                    ret = zlib.inflate(&z, Z_NO_FLUSH)
+                    return buf.count - Int(z.avail_out)
                 }
-            } while last == 0
-            return out
+                out.append(contentsOf: chunk[0..<n])
+            } while ret == Z_OK
         }
+        guard ret == Z_STREAM_END else { throw AppError(ret == Z_BUF_ERROR ? "gzip 数据不完整" : "gzip 数据损坏") }
+        return out
     }
 }

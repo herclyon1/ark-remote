@@ -23,7 +23,8 @@
 // 250 messages per IP per day.
 //
 // Not a straight port:
-//   · EventSource (SSE) → ntfy's `/json` stream read through a URLSessionDataDelegate (`NtfyStream`);
+//   · EventSource (SSE) → ntfy's `/json` stream (`NtfyStream`): on iOS / macOS read with URLSession.bytes(for:) and
+//     AsyncBytes.lines, on Android (no AsyncBytes in swift-corelibs-foundation) through a URLSessionDataDelegate;
 //     same event fields (event, topic, message, time). Reconnects after 3 s like EventSource. No polling
 //     (user 2026-09-02, quoted under Presence above); FoundationNetworking hands a delegate each chunk.
 //   · setInterval → Task loops started by `start()`; document.hidden → `foreground`, set by the page from
@@ -559,9 +560,11 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
 /// one JSON event per line (ntfy sends an `open` event at once and a `keepalive` every 45 s). Events are
 /// delivered on the main actor. Reconnects 3 s after a drop until closed, from the last message id seen.
 ///
-/// No polling fallback, like live.js (user 2026-09-02, see the file header). On Android, FoundationNetworking's
-/// NativeProtocol.didReceive(data:) passes each libcurl chunk to `urlSession(_:dataTask:didReceive:)`
-/// as it arrives (swift-corelibs-foundation main, NativeProtocol.swift:96-141), so the stream works there.
+/// No polling fallback, like live.js (user 2026-09-02, see the file header).
+#if os(Android)
+/// swift-corelibs-foundation has no URLSession.AsyncBytes, so on Android the lines are cut from the delegate's chunks:
+/// FoundationNetworking's NativeProtocol.didReceive(data:) passes each libcurl chunk to
+/// `urlSession(_:dataTask:didReceive:)` as it arrives (swift-corelibs-foundation main, NativeProtocol.swift:96-141).
 final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let topics: String
     private let since: String
@@ -640,3 +643,71 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         DispatchQueue.global().asyncAfter(deadline: .now() + 3) { [weak self] in self?.open() }
     }
 }
+#else
+/// Read with Foundation's URLSession.bytes(for:) and AsyncBytes.lines
+/// (https://developer.apple.com/documentation/foundation/urlsession/asyncbytes): one Task reads, reconnects and
+/// hands each event to the main actor in order; close() cancels it, which cancels the request.
+final class NtfyStream: @unchecked Sendable {
+    private let topics: String
+    private let since: String
+    private let onEvent: @MainActor (JSONValue) -> Void
+    private let lock = NSLock()
+    private var reader: Task<Void, Never>?
+    private var closed = false
+    private var lastId: String?
+
+    init(topics: String, since: String, onEvent: @escaping @MainActor (JSONValue) -> Void) {
+        self.topics = topics
+        self.since = since
+        self.onEvent = onEvent
+    }
+
+    func open() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed, reader == nil else { return }
+        reader = Task { [self] in await read() }
+    }
+
+    func close() {
+        lock.lock()
+        closed = true
+        let r = reader
+        reader = nil
+        lock.unlock()
+        r?.cancel()
+    }
+
+    private var isClosed: Bool { lock.withLock { closed } }
+
+    private func read() async {
+        while !isClosed {
+            guard let url = URL(string: "\(ntfyBase)/\(topics)/json?since=\(lock.withLock { lastId } ?? since)") else { return }
+            var req = URLRequest(url: url)
+            req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            req.timeoutInterval = 24 * 3600
+            let session = URLSession(configuration: .default)
+            DiagLog.shared.record("stream", ["state": "connecting"])
+            var failure: Error?
+            do {
+                let (bytes, _) = try await session.bytes(for: req)
+                for try await line in bytes.lines {
+                    guard let e = try? JSONValue.parse(Data(line.utf8)) else { continue }
+                    if let id = e["id"]?.string { lock.withLock { lastId = id } }
+                    if e["event"]?.string == "open" { DiagLog.shared.record("stream", ["state": "open"]) }
+                    if isClosed { break }
+                    let f = onEvent
+                    await MainActor.run { f(e) }   // one at a time, so events are handled in the order they came
+                }
+            } catch {
+                failure = error
+            }
+            session.invalidateAndCancel()
+            let reconnect = !isClosed
+            DiagLog.shared.record("stream", ["state": reconnect ? "dropped" : "closed", "error": failure.map { errorMessage($0) } ?? ""])
+            guard reconnect else { return }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+        }
+    }
+}
+#endif
