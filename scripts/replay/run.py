@@ -412,6 +412,8 @@ class Runner:
         elif kind == "clipboard":
             if rest and rest[0] == "@link":
                 self.drv.set_clipboard(self.own_link())
+            elif rest and rest[0] == "@oldlink":
+                self.drv.set_clipboard(self.own_link(old=True))
             elif rest and rest[0]:
                 self.drv.set_clipboard(rest[0])
             else:
@@ -597,13 +599,14 @@ class Runner:
                      f"落在「首帧已画完且不到 400 ms」的 {len(inwin)} 次")
         self.ctx["gate_rows"] = rows
 
-    def own_link(self):
-        """A 免输入链接 for the THROWAWAY mailbox (PhoneTab.swift PhoneLink.make: pageURL#k=base64url({"t","p"})); never
-        the real one, so the app taking it from the clipboard keeps talking to the throwaway mailbox."""
+    def own_link(self, old=False):
+        """A 免输入链接 for the THROWAWAY mailbox (PhoneTab.swift PhoneLink.make: linkBase#k=base64url({"t","p"})); never
+        the real one, so the app taking it from the clipboard keeps talking to the throwaway mailbox. old=True: the
+        form copied before (PhoneLink.oldPageURL, the web page), which must still be taken."""
         import base64
         self.guard.check_publish(self.guard.topic)
         k = base64.urlsafe_b64encode(json.dumps({"t": self.guard.topic, "p": self.mb.pin}, separators=(",", ":")).encode()).decode().rstrip("=")
-        return "https://herclyon1.github.io/maa/#k=" + k
+        return ("https://herclyon1.github.io/maa/" if old else "arkremote://link") + "#k=" + k
 
     def fluency(self, cycles=3):
         """Android: switch the five tabs `cycles` times (1.5 s apart) and read the app's own FluencyRec lines for those

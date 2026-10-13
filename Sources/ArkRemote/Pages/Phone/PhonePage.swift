@@ -84,9 +84,10 @@ struct PhonePage: View {
             } header: {
                 Text("这台手机")
             } footer: {
-                // one sentence of what the link does (HIG Writing: "If you can use fewer words, do so.")
+                // one sentence of what the link does (HIG Writing: "If you can use fewer words, do so."). The link opens
+                // the App now (PhoneLink.linkBase), not the web page, so no 「存成书签或放到主屏幕」.
                 Text((data.hasConfig ? "" : "这台手机还没填信箱和 PIN，链接里没东西可带。")
-                     + "存成书签或放到主屏幕，以后打开不用再填信箱和 PIN；别转发给别人。")
+                     + "把链接发到另一台手机，复制后打开遥控，就不用再填信箱和 PIN；别转发给别人。")
             }
 
             Section {

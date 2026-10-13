@@ -8,7 +8,7 @@ import XCTest
     static let kPart = PhoneLink.enc(#"{"t":"t","p":"1"}"#)
     static let tPart = PhoneLink.enc(#"{"kuro":{"token":"x","did":"y"}}"#)
     /// Built the way PhoneLink.make() builds it.
-    static let fullLink = PhoneLink.pageURL + "#k=" + kPart + "&t=" + tPart
+    static let fullLink = PhoneLink.linkBase + "#k=" + kPart + "&t=" + tPart
     static let snap: JSONValue = .object([
         "at": .int(nowSec()),
         "密钥": .object(["sk": .object(["cred": .string("CRED-MACHINE"), "dId": .string("d1")])]),
@@ -68,7 +68,7 @@ import XCTest
         defer { saved.restore() }
         prepare()
         let before = StaminaStore.shared.tokens
-        let url = try XCTUnwrap(URL(string: PhoneLink.pageURL + "#k=" + Self.kPart))
+        let url = try XCTUnwrap(URL(string: PhoneLink.oldPageURL + "#k=" + Self.kPart))
 
         XCTAssertFalse(StaminaStore.shared.fromLink(url))
         PhoneLink.open(url)

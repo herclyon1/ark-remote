@@ -4,5 +4,17 @@
 <dict>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
+    <!-- the no-input link the App copies (PhoneLink.linkBase, arkremote://link#k=...) opens the App -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.herclyon.arkremote.link</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>arkremote</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
