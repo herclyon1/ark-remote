@@ -369,9 +369,12 @@ step("ph.open", "phone", "手机标签 → 版本 / 诊断记录 / 「密钥」�
                      "复制免输入链接", "密钥"]})
 step("ph.diag.on", "phone", "诊断记录打开 → 分享 / 清空 / 运行自检 / 就是这里",
      [("toggle", "诊断记录")], expect=["~分享诊断记录", "清空诊断记录", "运行自检", "就是这里"])
-step("ph.selftest", "phone", "运行自检 → 结果单「通过 N / 6」",
-     [tap("运行自检")], expect=["re:通过 \\d+ ?/ ?\\d+"], timeout=30)
-step("ph.selftest.close", "phone", "关掉自检结果", [CONFIRM_WAIT, tap(["关闭", "好"], last=True)], absent=["re:通过 \\d+ ?/ ?\\d+"])
+# 自检结果 lists one row per check (「信箱和 PIN  通过」…; app-r1 fix round 2, owner decision P5); the 0.4.4 base says
+# 「通过 N / 6」 in one sentence
+SELFCHECK = ["~信箱和 PIN", "re:通过 \\d+ ?/ ?\\d+"]
+step("ph.selftest", "phone", "运行自检 → 结果单每项一行（信箱和 PIN …）",
+     [tap("运行自检")], expect=[SELFCHECK], timeout=30)
+step("ph.selftest.close", "phone", "关掉自检结果", [CONFIRM_WAIT, tap(["关闭", "好"], last=True)], absent=[SELFCHECK])
 step("ph.clear.ask", "phone", "清空诊断记录 → 弹确认 → 取消", [tap("清空诊断记录"), ("wait", 0.8), tap("取消", last=True)],
      absent=["清空诊断记录？"],
      # iOS: an action sheet from its button is a popover with no 取消 row; a tap anywhere else cancels it (P10 row,

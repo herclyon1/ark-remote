@@ -79,11 +79,13 @@ struct SelfCheckSheet: View {
     var body: some View {
         let rec = LastSelfCheck.stored() ?? .null
         let json = rec.encodedString()
-        let total = Int(rec["total"]?.number ?? 0), fails = Int(rec["fails"]?.number ?? 0)
-        // what failed first, then the count; no file format or size (HIG Writing: "avoiding jargon")
-        DiagSheetBox(title: "自检结果",
-                     message: (fails > 0 ? "\(fails) 项没通过，" : "") + "通过 \(total - fails) / \(total)。复制后粘到聊天里，或用分享发出。",
-                     json: json, canShare: true, close: close)
+        // one row per check, so a failure says which check and why (BOARD/App-待他定项-从记录定-1014.md P5; his 09-07
+        // 14:59 「描述模糊是第一大禁止」); no file format or size (HIG Writing: "avoiding jargon")
+        let rows = (rec["rows"]?.array ?? []).map {
+            SelfCheckItem(name: $0["name"]?.jsString ?? "", ok: $0["ok"]?.truthy ?? false, detail: $0["detail"]?.jsString ?? "")
+        }
+        DiagSheetBox(title: "自检结果", message: "复制后粘到聊天里，或用分享发出。", json: json, canShare: true,
+                     checks: rows, close: close)
     }
 }
 
@@ -114,6 +116,8 @@ struct DiagSheetBox: View {
     var message: String
     var json: String
     var canShare: Bool
+    /// 自检结果: one row per check above the buttons.
+    var checks: [SelfCheckItem] = []
     var close: () -> Void
 
     @State var copied = false
@@ -121,6 +125,11 @@ struct DiagSheetBox: View {
     var body: some View {
         NavigationStack {
             List {
+                listSection("diag-checks", if: !checks.isEmpty) {
+                    Section {
+                        ForEach(checks.indices, id: \.self) { i in checkRow(checks[i]) }
+                    }
+                }
                 Section {
                     Button(copied ? "已复制整份记录" : "复制") {
                         PhoneLink.copy(json)
@@ -153,6 +162,24 @@ struct DiagSheetBox: View {
             Button("好") {}
         } message: {
             Text(verbatim: DiagShare.shared.failNote ?? "")
+        }
+    }
+
+    /// A passed check: its name and a grey 「通过」, no colour. A failed one: its name with what failed under it, and the
+    /// system red ✗ (an error in Apple's system colours; named 没通过 for VoiceOver).
+    @ViewBuilder private func checkRow(_ c: SelfCheckItem) -> some View {
+        if c.ok {
+            LabeledContent(c.name) { Text("通过").foregroundStyle(.secondary) }
+        } else {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(c.name)
+                    Text(c.detail).font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer()
+                symbol("xmark.circle.fill", android: "Icons.Filled.Close").foregroundStyle(Color.red)
+                    .accessibilityLabel("没通过")
+            }
         }
     }
 
