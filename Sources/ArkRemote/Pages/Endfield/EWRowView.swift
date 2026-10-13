@@ -136,35 +136,35 @@ struct EWRowView: View {
                 Spacer()
                 Text("\(boxCount) 格").foregroundStyle(.secondary)
             }
+        // The field rows: the system's label + value row (LabeledContent), the field taking the width the name leaves,
+        // its text at the trailing edge, as a Form's TextField beside a label. Was an HStack with the field capped at a
+        // fixed 100 / 160 pt (HIG Layout: "respecting system-defined safe areas, margins, and guides").
         case .box:
-            HStack {
-                Text(row.label)
-                Spacer()
+            LabeledContent {
                 TextField(row.label, text: Binding(get: { value.boxValues[row.boxKey ?? ""] ?? "" }, set: { setBox($0) }))
                     .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 160)
                     #if !os(macOS)
                     .keyboardType(.numberPad)
                     #endif
+            } label: {
+                Text(row.label)
             }
         case .number:
-            HStack {
-                EWRowTitle(label: row.label, hint: hint)
-                Spacer()
+            LabeledContent {
                 TextField(row.label, text: Binding(get: { value.display }, set: { setNumber($0) }))
                     .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 100)
                     #if !os(macOS)
                     .keyboardType(.numberPad)
                     #endif
+            } label: {
+                EWRowTitle(label: row.label, hint: hint)
             }
         case .text:
-            HStack {
-                EWRowTitle(label: row.label, hint: hint)
-                Spacer()
+            LabeledContent {
                 TextField(row.label, text: Binding(get: { value.display }, set: { set(.text($0)) }))
                     .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 160)
+            } label: {
+                EWRowTitle(label: row.label, hint: hint)
             }
         }
     }
@@ -239,6 +239,8 @@ struct EWChoiceList: View {
     let initial: [String]
     @State var draft: [String]
     @Environment(\.dismiss) var dismiss
+    /// The echo-set icon, 28 pt at the default text size, growing with Dynamic Type (HIG Typography; was a fixed 28).
+    @ScaledMetric(relativeTo: .body) var iconSize: CGFloat = 28
 
     init(title: String, choices: [EWChoice], multi: Bool, icons: Bool = false,
          initial: [String], commit: @escaping ([String]) -> Void) {
@@ -253,31 +255,39 @@ struct EWChoiceList: View {
 
     var body: some View {
         List {
-            ForEach(choices, id: \.value) { c in
-                Button {
-                    toggle(c.value)
-                } label: {
-                    HStack {
-                        if icons {
-                            ForEach(c.label.components(separatedBy: " ＋ "), id: \.self) { name in
-                                if let asset = WuwaSchema.setIcons[name] {
-                                    decorativeImage(asset)   // c.label beside says the names
-                                        .resizable()
-                                        .frame(width: 28, height: 28)
-                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+            Section {
+                ForEach(choices, id: \.value) { c in
+                    Button {
+                        toggle(c.value)
+                    } label: {
+                        HStack {
+                            if icons {
+                                ForEach(c.label.components(separatedBy: " ＋ "), id: \.self) { name in
+                                    if let asset = WuwaSchema.setIcons[name] {
+                                        decorativeImage(asset)   // c.label beside says the names
+                                            .resizable()
+                                            .frame(width: iconSize, height: iconSize)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    }
                                 }
                             }
-                        }
-                        Text(c.label)
-                        Spacer()
-                        if draft.contains(c.value) {
-                            Image(systemName: "checkmark").accessibilityHidden(true)
+                            // P4 (快捷指令 › Custom 选周几, 日历 › Repeat): the option in the label colour, only the
+                            // checkmark in the accent colour; a bare Button label in a List took the accent colour
+                            Text(c.label).foregroundStyle(.primary)
+                            Spacer()
+                            if draft.contains(c.value) {
+                                Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityHidden(true)
+                            }
                         }
                     }
+                    // the checkmark is said as the row's selected state, as a native selection list does
+                    // (AccessibilityTraits.isSelected: "The accessibility element is currently selected.")
+                    .accessibilityAddTraits(draft.contains(c.value) ? .isSelected : Self.noTraits)
                 }
-                // the checkmark is said as the row's selected state, as a native selection list does
-                // (AccessibilityTraits.isSelected: "The accessibility element is currently selected.")
-                .accessibilityAddTraits(draft.contains(c.value) ? .isSelected : Self.noTraits)
+            } footer: {
+                // why ✓ is grey (shell-api 191, was the toast 「至少要留一个」 view.js:1399): HIG Entering data "make the
+                // button available only after people enter the data you require"
+                if blocked { Text("至少要留一个") }
             }
         }
         .navigationTitle(title)
@@ -285,9 +295,13 @@ struct EWChoiceList: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button { done() } label: { Image(systemName: "checkmark") }
                     .accessibilityLabel("完成")   // icon-only: named as EWLive's ✓ (index.html:921 aria-label 完成)
+                    .disabled(blocked)
             }
         }
     }
+
+    /// Nothing ticked on a multi-choice page: MaaEnd ends the task on an empty list, so ✓ cannot write it back.
+    private var blocked: Bool { ewChoiceResult(draft: draft, initial: initial, listed: choices.map { $0.value }, multi: multi) == .blocked }
 
     /// No traits. On Android not `[]`: skip-fuse-ui's AccessibilityTraits (SkipSwiftUI/System/Accessibility.swift:899-901)
     /// defines `init() { self = [] }`, and `[]` is SetAlgebra's init(arrayLiteral:), which calls init() — so an empty
@@ -312,22 +326,35 @@ struct EWChoiceList: View {
         }
     }
 
-    /// view.js:1146-1149: written back in the option table's order; none at all is refused (MaaEnd ends the task).
-    /// A value the option table does not list (any more) stays, after the listed ones: it has no row here to untick, and
-    /// dropping it on ✓ deleted it from the machine. The same set in another order is no change (edge audit 33): the
-    /// machine's order differing from the table's made a bare ✓ a 「待保存」 edit.
+    /// ✓: ewChoiceResult below.
     private func done() {
-        let listed = choices.map { $0.value }
-        let next = listed.filter { draft.contains($0) } + draft.filter { !listed.contains($0) }
-        if multi && Set(next) == Set(initial) {
+        switch ewChoiceResult(draft: draft, initial: initial, listed: choices.map { $0.value }, multi: multi) {
+        case .unchanged: dismiss()
+        case .blocked: return   // ✓ is disabled then; the footer says why
+        case .commit(let next):
+            commit(next)
             dismiss()
-            return
         }
-        if next.isEmpty {
-            if multi { Relay.shared.showToast("至少要留一个") }   // view.js:1399 toast("至少要留一个")
-            return
-        }
-        commit(next)
-        dismiss()
     }
+}
+
+/// What ✓ on the choice page does with the ticked values (view.js:1146-1149).
+enum EWChoiceResult: Equatable {
+    /// The same set as when the page opened: close, no edit.
+    case unchanged
+    /// Nothing ticked: ✓ is disabled (multi: 「至少要留一个」; single: nothing to write).
+    case blocked
+    /// Write these back, in the option table's order.
+    case commit([String])
+}
+
+/// view.js:1146-1149: written back in the option table's order; none at all is refused (MaaEnd ends the task).
+/// A value the option table does not list (any more) stays, after the listed ones: it has no row to untick, and
+/// dropping it on ✓ deleted it from the machine. The same set in another order is no change (edge audit 33): the
+/// machine's order differing from the table's made a bare ✓ a 「待保存」 edit.
+func ewChoiceResult(draft: [String], initial: [String], listed: [String], multi: Bool) -> EWChoiceResult {
+    let next = listed.filter { draft.contains($0) } + draft.filter { !listed.contains($0) }
+    if multi && Set(next) == Set(initial) { return .unchanged }
+    if next.isEmpty { return .blocked }
+    return .commit(next)
 }

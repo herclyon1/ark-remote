@@ -266,6 +266,12 @@ step("ef.stock.tabpop", "d39", "再进库存 → 点「终末地」→ 回根页
 step("ef.more", "endfield", "更多设置 → 推入页「执行周期」", [tap("更多设置")], expect=["~执行周期"])
 step("ef.days", "endfield", "执行周期 → 选择页 周一…周日", [tap("~执行周期")], expect=["周一", "周日"])
 step("ef.days.untick", "endfield", "去掉周日（安卓旧闪退点）→ 不闪退", [tap("周日")], expect=["周日"])
+step("ef.days.none", "endfield", "勾选页六天也去掉 → 页脚「至少要留一个」，✓ 灰着、点了不关页（原来是提示条）",
+     [tap("周一"), tap("周二"), tap("周三"), tap("周四"), tap("周五"), tap("周六"), ("wait", 0.5),
+      tap(SAVE, region="top"), ("wait", 0.8)], expect=["至少要留一个", "周一"])
+step("ef.days.back", "endfield", "勾回周一…周六 → 页脚那句没了",
+     [tap("周一"), tap("周二"), tap("周三"), tap("周四"), tap("周五"), tap("周六"), ("wait", 0.5)],
+     expect=["周六"], absent=["至少要留一个"])
 step("ef.days.done", "endfield", "✓ → 回推入页「已选 6/7」「待保存 1 项」",
      [tap(SAVE, region="top")], expect=["~6/7", "~待保存 1 项"])
 step("ef.more.tabpop", "d39", "点「终末地」→ 更多设置页退掉、回根页", [("tab", "终末地")], expect=["库存"], absent=["周日"])

@@ -206,11 +206,14 @@ enum EWLastGood {
     }
 }
 
-/// The 库存 page (stockpile.js): sections of materials, or a loading / empty state.
+/// The 库存 page (stockpile.js): sections of materials, or a loading / empty state. Apple counterpart (app-page-references
+/// P5 / N4): 健康 › 步数 › All Recorded Data, a plain system List of rows with the reading in the label colour.
 struct EndfieldStockpilePage: View {
     /// ContentView's tab selection (same AppStorage key), for 「去手机页」.
     @AppStorage("tab") var tab = ContentTab.status
     @Environment(\.dismiss) var dismiss
+    /// The material's picture, 28 pt at the default text size, growing with Dynamic Type (was a fixed 28 pt frame).
+    @ScaledMetric(relativeTo: .body) var iconSize: CGFloat = 28
 
     var body: some View {
         let s = Stockpile.shared
@@ -224,39 +227,35 @@ struct EndfieldStockpilePage: View {
             case .zero(let text):
                 Text(text).foregroundStyle(.secondary)
             case .empty(let title, let text, let button, let action):
-                VStack(alignment: .leading, spacing: 6) {
-                    EWStockBox()   // stockpile.js:146 the empty-state box
-                    Text(title).font(.headline)
-                    Text(text).foregroundStyle(.secondary)
-                    if action == .retry {
-                        Button(button) { Task { await s.load(force: true) } }
-                    } else {
-                        // 「去手机页」: pop 库存 and select 手机 (accept-stockpile.js ⑨).
-                        Button(button) {
-                            dismiss()
-                            tab = .phone
-                        }
-                    }
-                }
+                #if os(Android)
+                empty(title: title, text: text, button: button, action: action)
+                #else
+                EmptyView()   // iOS: the empty state is the List's overlay (below), centred on the page
+                #endif
             case .list(let sections, let footnote):
                 ForEach(sections) { sec in
                     Section {
                         ForEach(sec.rows) { r in
-                            HStack {
-                                // stockpile.js:74, 98: the material's picture, 28 pt, fit; a picture that fails leaves the space empty
-                                AsyncImage(url: r.icon.flatMap { URL(string: $0) }) { img in
-                                    img.resizable().scaledToFit()
-                                } placeholder: {
-                                    Color.clear
+                            LabeledContent {
+                                // P5 (app-page-references): the reading in the label colour, as Health's numbers; a
+                                // row short of one build (「差 N」) in the system orange
+                                if let v = r.value { Text(v).foregroundStyle(r.short ? Color.orange : Color.primary) }
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(r.name)
+                                        Text(r.subtitle + (r.origin ?? "")).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    // stockpile.js:74, 98: the material's picture, fit; a picture that fails leaves the space empty
+                                    AsyncImage(url: r.icon.flatMap { URL(string: $0) }) { img in
+                                        img.resizable().scaledToFit()
+                                    } placeholder: {
+                                        Color.clear
+                                    }
+                                    .frame(width: iconSize, height: iconSize)
+                                    .accessibilityHidden(true)   // r.name beside names it (HIG VoiceOver: decorative)
                                 }
-                                .frame(width: 28, height: 28)
-                                .accessibilityHidden(true)   // r.name beside names it (HIG VoiceOver: decorative)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(r.name)
-                                    Text(r.subtitle + (r.origin ?? "")).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if let v = r.value { Text(v).foregroundStyle(.secondary) }
                             }
                         }
                     } header: {
@@ -269,6 +268,16 @@ struct EndfieldStockpilePage: View {
                 }
             }
         }
+        #if !os(Android)
+        // the system empty state over the (empty) List, centred on the page, the way the ContentUnavailableView
+        // documentation places it (`.overlay { if … { ContentUnavailableView.search } }`, 7b6a3f1); the List under it
+        // keeps pull to refresh
+        .overlay {
+            if case .empty(let title, let text, let button, let action) = s.content {
+                empty(title: title, text: text, button: button, action: action)
+            }
+        }
+        #endif
         .navigationTitle(Stockpile.title)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -279,12 +288,51 @@ struct EndfieldStockpilePage: View {
         .refreshable { await s.load(force: true) }
         .task { await s.open() }
     }
+
+    /// No stock to show: the system empty state (ContentUnavailableView) with its one action.
+    @ViewBuilder
+    private func empty(title: String, text: String, button: String, action: StockpileEmptyAction) -> some View {
+        #if os(Android)
+        // skip-fuse-ui has no ContentUnavailableView and skip-ui's init is fatalError() (System/ContentUnavailableView.swift:59);
+        // Skip maps no box symbol to a Material icon (Components/Image.swift symbol table), so the web page's box stays here
+        VStack(alignment: .leading, spacing: 6) {
+            EWStockBox()   // stockpile.js:146 the empty-state box
+            Text(title).font(.headline)
+            Text(text).foregroundStyle(.secondary)
+            emptyAction(button: button, action: action)
+        }
+        #else
+        ContentUnavailableView {
+            Label(title, systemImage: "shippingbox")
+        } description: {
+            Text(text)
+        } actions: {
+            emptyAction(button: button, action: action)
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private func emptyAction(button: String, action: StockpileEmptyAction) -> some View {
+        if action == .retry {
+            Button(button) { Task { await Stockpile.shared.load(force: true) } }
+        } else {
+            // 「去手机页」: pop 库存 and select 手机 (accept-stockpile.js ⑨).
+            Button(button) {
+                dismiss()
+                tab = .phone
+            }
+        }
+    }
 }
 
-/// The empty-state box, traced from stockpile.js:146's SVG (viewBox 24, drawn 60 pt, stroke 1.2, secondary label colour).
+/// Android's empty-state box, traced from stockpile.js:146's SVG (viewBox 24, stroke 1.2, secondary label colour), 60 pt
+/// at the default text size. iOS shows the system symbol shippingbox in ContentUnavailableView instead.
 struct EWStockBox: View {
+    @ScaledMetric(relativeTo: .largeTitle) var side: CGFloat = 60
+
     var body: some View {
-        let k: CGFloat = 60.0 / 24.0
+        let k: CGFloat = side / 24.0
         var p = Path()
         p.move(to: CGPoint(x: 3 * k, y: 7.5 * k))
         p.addLine(to: CGPoint(x: 12 * k, y: 3 * k))
@@ -299,6 +347,6 @@ struct EWStockBox: View {
         p.move(to: CGPoint(x: 12 * k, y: 12 * k))
         p.addLine(to: CGPoint(x: 12 * k, y: 21 * k))
         return p.stroke(Color.secondary, style: StrokeStyle(lineWidth: 1.2 * k, lineJoin: .round))
-            .frame(width: 60, height: 60)
+            .frame(width: side, height: side)
     }
 }
