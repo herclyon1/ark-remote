@@ -166,6 +166,11 @@ class Mailbox:
         r["下次别关机"] = False
         r["调试模式"] = ""
         r["刷声骸"] = {}
+        # 今天: failed runs and the last run are present, so status.noresult checks a page that would show them
+        # (regression #26; a count of 0 hid 「失败 N 趟」 even on the code that drew it)
+        t = b.setdefault("今天", {})
+        t["失败"] = max(int(t.get("失败") or 0), 2)
+        t["最近"] = t.get("最近") or "OK-WW"
         return b
 
     def variant(self, name, extra_receipts=None):
