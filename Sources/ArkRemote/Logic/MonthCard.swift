@@ -264,10 +264,11 @@ struct MonthCardEntry: Sendable, Equatable {
     /// The grey line under a local registration (monthcard.js syncNote()).
     static var syncNote: String { alive ? "正在同步到游戏机" : "游戏机开机后同步" }
 
-    /// monthcard.js line(e), led by the days left as the game's page leads with them (no colon or brackets).
+    /// monthcard.js line(e), led by the days left as the game's page leads with them (no colon or brackets); the date in the
+    /// same word order as the 月卡 page's card (「最后一次领取 10月29日」, MonthCardRows.swift; HIG Writing: consistent terms).
     static func line(_ e: MonthCardEntry?) -> String {
         guard let e else { return "未登记" }
-        return e.expired ? "已过期" : "还剩 \(e.left) 天 · \(md(e.last))最后一次领取"
+        return e.expired ? "已过期" : "还剩 \(e.left) 天 · 最后一次领取 \(md(e.last))"
     }
 
     /// The cards with 0–5 days left (monthcard.js banner(); spec §4: the reminder starts 5 days before).
