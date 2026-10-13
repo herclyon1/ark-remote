@@ -51,7 +51,7 @@ struct ArknightsTab: View {
                 refresh()
             }
         }, edited: edited)
-            .modifier(EWSaveBar(title: "游戏机遥控"))   // view.js:1554: one title for every page, 「待保存 N 项」 while editing
+            .modifier(EWSaveBar(title: "明日方舟"))   // the tab's own name (HIG Toolbars: "Don't title windows with your app name."); 「待保存 N 项」 while editing
             .task { await reload() }
             // Pull to refresh asks the machine to report again (view.js:1150 → live.js:21 ping: {action:"refresh"}, up to 11 s),
             // as the 状态 tab does (StatusTab.swift:23); the state it adopts redraws through onChange(of: snapAt).

@@ -75,8 +75,9 @@ struct EWRowView: View {
                 EWTagLine(tag: tag, onResend: onResend)
             }
         }
-        // index.html:689-690: unsaved rows tinted accent 8 %, sent rows ok-green 8 % (近似: replaces the card colour, not mixed into it)
-        .listRowBackground(rowBackground(row.kind == .box ? nil : EWTagLine.tint(tag)))   // never nil on Android: a nil → tint swap drops the keyboard (SkipFixes.swift)
+        // no row tint for 待保存 / 已寄出 (the web's accent / green 8 %): a row tinted for long reads as a selection that
+        // never cleared (HIG Lists and tables: a list "highlights a row only briefly"); the line under the row says it
+        .listRowBackground(rowBackground(nil))   // never nil on Android (SkipFixes.swift)
     }
 
     @ViewBuilder
@@ -198,7 +199,7 @@ struct EWRowView: View {
     }
 }
 
-/// The small lines under a row: 「待保存」 in the accent colour (view.js:1273, index.html:686), then the receipt —
+/// The small lines under a row: 「待保存」 in grey (not the accent colour of things that can be tapped: HIG Color), then the receipt —
 /// grey, or red with 「再发一次」 (pending.js:51-58, index.html:691-695; ArknightsPage.tagged).
 struct EWTagLine: View {
     var tag: EWRowTag
@@ -207,16 +208,16 @@ struct EWTagLine: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
             if tag.unsaved {
-                Text("待保存").font(.caption2).foregroundStyle(Color.accentColor)
+                Text("待保存").font(.footnote).foregroundStyle(.secondary)
             }
             if let text = tag.text {
                 HStack(spacing: 6) {
                     Text(verbatim: text)
-                        .font(.caption2)
+                        .font(.footnote)
                         .foregroundStyle(tag.bad ? Color.red : Color.secondary)   // the 10 h line has a button but stays grey (class "sent")
                     if let key = tag.resendKey {
                         Button("再发一次") { onResend(key) }
-                            .font(.caption2)
+                            .font(.footnote)
                             .buttonStyle(.borderless)
                     }
                 }
@@ -225,10 +226,6 @@ struct EWTagLine: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
-    static func tint(_ tag: EWRowTag?) -> Color? {
-        guard let tag else { return nil }
-        return tag.unsaved ? Color.accentColor.opacity(0.08) : tag.posted ? Color.green.opacity(0.08) : nil
-    }
 }
 
 /// The checklist page behind an icons (single) or pills (multi) row: one row per choice, a checkmark on the chosen ones.

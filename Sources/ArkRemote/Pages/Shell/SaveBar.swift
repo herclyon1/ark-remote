@@ -57,29 +57,25 @@ struct EWSaveBar: ViewModifier {
                 }
             }
             // index.html:933-939 #confirm; doSave (view.js:1609-1617). A sheet, not an alert: an alert's message is plain
-            // text, and the web's list sets each name in bold, a shift skip in red (index.html:875-876 .diff.skip / .diff b),
-            // the old value grey and struck through, the new one green (index.html:877-878 .old / .new). The system's
-            // full-height sheet (no detents: HIG Sheets "A sheet helps people perform a scoped task"), 再想想 leading and
-            // 寄出 N 项 trailing (HIG Sheets: "the Cancel button belongs on the leading edge of the top toolbar. When
-            // present, the Done button belongs on the trailing edge").
+            // text, and each change shows its name, the new value and the old one struck through, a shift skip in red
+            // (index.html:875-878). ✕ (再想想) leading and 寄出 N 项 trailing (HIG Sheets: "the Cancel button belongs on
+            // the leading edge of the top toolbar. When present, the Done button belongs on the trailing edge").
             .sheet(isPresented: $reviewing, onDismiss: {
                 sheetUp = false
                 if let f = heldFail { heldFail = nil; failNote = f }
             }) {
                 NavigationStack {
                     List {
+                        // each change: its name, the new value on its own line in the label colour, the old one under it
+                        // grey and struck through (HIG Lists and tables: "Short, succinct text can help minimize
+                        // truncation and wrapping"); a shift skip stays red, as the web's .diff.skip
                         ForEach(EWSave.review(edits)) { line in
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(verbatim: line.title)
-                                    .bold()
                                     .foregroundStyle(line.skip ? Color.red : Color.primary)
                                 if let old = line.old, let new = line.new {
-                                    HStack(spacing: 4) {
-                                        Text(verbatim: old).strikethrough().foregroundStyle(.secondary)
-                                        Text(verbatim: "→")
-                                        Text(verbatim: new).foregroundStyle(Color.green)
-                                    }
-                                    .font(.subheadline)
+                                    Text(verbatim: new).font(.subheadline).foregroundStyle(Color.primary)
+                                    Text(verbatim: old).font(.subheadline).strikethrough().foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -90,7 +86,7 @@ struct EWSaveBar: ViewModifier {
                     #endif
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
-                            Button("再想想", role: .cancel) { reviewing = false }
+                            cancelReviewButton
                         }
                         ToolbarItem(placement: .confirmationAction) {
                             // doSave (view.js:1617) names the button by how many orders go out: 「寄出 N 项」
@@ -99,6 +95,10 @@ struct EWSaveBar: ViewModifier {
                         }
                     }
                 }
+                // a few rows in a full-height sheet: half height first, pulled up when the list is long (HIG Sheets: "In
+                // an iPhone app, consider supporting the medium detent to allow progressive disclosure of the sheet's
+                // content.")
+                .presentationDetents([.medium, .large])
                 #if os(Android)
                 // where each press on the sheet began (ReviewPress); the sheet is its own dialog window, which the
                 // activity's touch feed (Main.kt dispatchTouchEvent) never sees
@@ -123,6 +123,18 @@ struct EWSaveBar: ViewModifier {
         Button { endEditing(); discardAsk = true } label: { Image(systemName: "xmark") }
         #else
         Button(role: .cancel) { endEditing(); discardAsk = true }
+        #endif
+    }
+
+    /// The review sheet's leading button: the system's ✕ (iOS 26 `Button(role: .cancel)`, as 密码 › 新建, P12), named
+    /// 再想想 for VoiceOver (HIG Toolbars: "Prefer simple, recognizable symbols for items instead of text"). Android: the
+    /// word, as skip-ui has no system cancel symbol for a role-only button.
+    @ViewBuilder private var cancelReviewButton: some View {
+        #if os(Android)
+        Button("再想想", role: .cancel) { reviewing = false }
+        #else
+        Button(role: .cancel) { reviewing = false }
+            .accessibilityLabel("再想想")
         #endif
     }
 

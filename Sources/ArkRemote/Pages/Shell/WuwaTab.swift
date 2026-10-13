@@ -64,7 +64,7 @@ struct WuwaTab: View {
             ewPutEdit(Self.bossKey, n == bossBase ? nil
                 : EWEdit(label: "周本 · 打第几个", src: "wb", from: .int(bossBase), to: .int(n)))   // view.js:1336-1339
         }, onResend: { k in Task { await Pending.shared.resend(k) } })
-        .modifier(EWSaveBar(title: "游戏机遥控"))   // view.js:1283 one title for every page
+        .modifier(EWSaveBar(title: "鸣潮"))   // the tab's own name (HIG Toolbars: "Don't title windows with your app name.")
         // a pull asks the machine to report again and waits for it, up to 11 s (view.js:1150 pullRefresh → live.js ping, the
         // 状态 tab's Live.ping); the state it adopts comes back through onChange(of: snapAt) below
         .refreshable {

@@ -16,25 +16,42 @@ struct SetupScreen: View {
         NavigationStack {
             List {
                 Section {
+                    // the typed text at the trailing edge, so both fields line up (P12 密码 › 新建; HIG Text fields:
+                    // "use consistent widths to create a more organized layout")
                     HStack {
                         Text("信箱名")
                         TextField("ark-…", text: $topic)
+                            .multilineTextAlignment(.trailing)
                             .setupPlainInput()
                     }
                     HStack {
                         Text("PIN")
                         TextField("4 位数字", text: $pin)
+                            .multilineTextAlignment(.trailing)
                             .setupNumberInput()
                     }
-                    Button("开始使用") {
+                } footer: {
+                    // one fixed line, so the page does not jump as the fields fill (view.js:126 「两样都要填」 kept)
+                    Text(Self.footNote)
+                }
+                Section {
+                    // the most likely action of the page in the prominent style, not a third grey row under two grey
+                    // placeholders (HIG Buttons: "use a button that has a prominent visual style for the most likely
+                    // action in a view")
+                    Button {
                         // view.js: cfg = {topic, pin}; localStorage; boot(). ContentView switches to the tabs on the
                         // config appearing, and AppShell starts Live on that change (Logic/AppGlue.swift).
                         Relay.shared.saveConfig(topic: trimmedTopic, pin: trimmedPin)
+                    } label: {
+                        Text("开始使用").frame(maxWidth: .infinity)
                     }
+                    .setupProminent()
                     .disabled(!filled)
-                } footer: {
-                    // view.js:126 「两样都要填」 while one is empty
-                    Text(filled ? Self.footNote : "两样都要填。" + Self.footNote)
+                    #if !os(Android)
+                    // the button on the page ground, not in a row (skip-ui has no listRowInsets)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    #endif
                 }
                 // The web page is entered with the 免输入链接 (#k=…); on Android that link opens the browser, not the app
                 // (no assetlinks.json on herclyon1.github.io), so the app takes the same link from the clipboard instead.
@@ -43,7 +60,7 @@ struct SetupScreen: View {
                         if !Self.takeLink() { noLinkShown = true }
                     }
                 } footer: {
-                    Text("用免输入链接进网页的：在网页「手机」页复制免输入链接（或从书签复制那条链接），回来点这里。")
+                    Text("在网页「手机」页或书签里复制免输入链接，再点上面。")
                 }
             }
             #if os(Android)
@@ -59,7 +76,7 @@ struct SetupScreen: View {
         }
     }
 
-    static let footNote = "填一次就好，之后不再问。这两样只存在这台手机里。"
+    static let footNote = "两样都要填。只存在这台手机里，填一次就不再问。"
     /// case kept: ntfy topics are case-sensitive (Relay.saveConfig)
     private var trimmedTopic: String { topic.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedPin: String { pin.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -102,6 +119,15 @@ extension View {
         return self.textInputAutocapitalization(.never).autocorrectionDisabled()
         #else
         return self.autocorrectionDisabled()
+        #endif
+    }
+
+    /// The page's one prominent button: the system's glass style on iOS 26+, Material's filled button on Android.
+    @ViewBuilder func setupProminent() -> some View {
+        #if os(Android)
+        self.buttonStyle(.borderedProminent)
+        #else
+        self.buttonStyle(.glassProminent).controlSize(.large)
         #endif
     }
 

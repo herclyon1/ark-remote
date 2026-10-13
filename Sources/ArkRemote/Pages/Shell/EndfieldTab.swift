@@ -19,7 +19,7 @@ struct EndfieldTab: View {
             let (k, e) = EWSave.masterEdit(game: Self.game, path: path, label: label, to: v, machine: base)
             ewPutEdit(k, e)   // a row changed again keeps its place in the review order
         }, onResend: { k in Task { await Pending.shared.resend(k) } })
-        .modifier(EWSaveBar(title: "游戏机遥控"))   // view.js:1283 one title for every page
+        .modifier(EWSaveBar(title: "终末地"))   // the tab's own name (HIG Toolbars: "Don't title windows with your app name.")
         // a pull asks the machine to report again and waits for it (view.js:1151 pullRefresh → live.js ping), as the 状态
         // tab does (StatusTab.swift:23); the state it adopts is then checked against what was sent
         .refreshable {

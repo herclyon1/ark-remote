@@ -35,7 +35,7 @@ struct ArknightsPage: View {
         // skip-ui's List (Form.swift:9-14).
         .id(reselect)
         .keyboardDone()
-        // the title (「游戏机遥控」, or 「待保存 N 项」 while changes wait, view.js:1554) is set by ArknightsTab's EWSaveBar
+        // the title (the tab's name, or 「待保存 N 项」 while changes wait, view.js:1554) is set by ArknightsTab's EWSaveBar
     }
 
     // MARK: 明日方舟 (schema.js:116-127)
@@ -250,39 +250,22 @@ struct ArknightsPage: View {
         data.labels[path] ?? fallback
     }
 
-    /// A row with its 「已寄出 / 已应用 / 没生效」 line under it (pending.js:47-67: the tag sits under the control).
-    /// An unsaved edit adds 「待保存」 in the accent colour under that line (view.js:1523-1528 re-appends it last), so a sent
-    /// row being edited again shows both; 「已应用」 is not shown while editing (pending.js:67). The ground: a sent row is
-    /// light green (pending.js:63 `.posted`), an edited one accent 8% (`.changed`); with both, `.posted` wins as it comes
-    /// later in index.html (:767-768).
+    /// A row with its 「待保存」 / 「已寄出 / 已应用 / 没生效」 lines under it, drawn by the same EWTagLine as the 终末地 and
+    /// 鸣潮 rows (HIG Writing: "use it consistently throughout your app"); no row tint (EWRowView explains).
     /// One shape with or without a tag (as EWRowView, 8c1160d): a branch around `row()` rebuilt the text field on the first
     /// keystroke, when 「待保存」 appears, and dropped the keyboard.
     private func tagged<Row: View>(_ path: String, @ViewBuilder _ row: () -> Row) -> some View {
         let unsaved = edited.contains(path)
         let tag = data.tags[path]
-        let posted = tag?.posted ?? false
         return VStack(alignment: .leading, spacing: 4) {
             row()
-            if let tag {
-                HStack(spacing: 8) {
-                    Text(verbatim: tag.text)
-                        .font(.footnote)
-                        .foregroundStyle(tag.bad ? Color.red : Color.secondary)
-                    if let key = tag.resendKey {
-                        Button("再发一次") { onResend(key) }
-                            .font(.footnote)
-                            .buttonStyle(.borderless)
-                    }
-                }
-            }
-            if unsaved {
-                Text("待保存")
-                    .font(.footnote)
-                    .foregroundStyle(Color.accentColor)
+            if unsaved || tag != nil {
+                EWTagLine(tag: EWRowTag(unsaved: unsaved, text: tag?.text, resendKey: tag?.resendKey,
+                                        bad: tag?.bad ?? false, posted: tag?.posted ?? false),
+                          onResend: onResend)
             }
         }
-        .listRowBackground(rowBackground(posted ? Color.green.opacity(0.08)
-            : unsaved ? Color.accentColor.opacity(0.08) : nil))   // never nil on Android (SkipFixes.swift)
+        .listRowBackground(rowBackground(nil))   // never nil on Android (SkipFixes.swift)
         .id("ark-row-" + path)   // constant per row, so the shape stays one
     }
 

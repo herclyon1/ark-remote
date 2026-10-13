@@ -23,21 +23,19 @@ struct SubtitleLine: View {
     var body: some View {
         if let bar = Pending.shared.bar {
             Button { asking = true } label: {
-                if bar.hasMismatch {
-                    // the text says it (「机器没接受」): the cross is hidden from screen readers (HIG VoiceOver: "Exclude
-                    // purely decorative images from VoiceOver.")
-                    Label {
-                        Text(verbatim: bar.text)
-                    } icon: {
+                HStack(spacing: 4) {
+                    if bar.hasMismatch {
+                        // the text says it (「机器没接受」): the cross is hidden from screen readers (HIG VoiceOver:
+                        // "Exclude purely decorative images from VoiceOver.")
                         Image(systemName: "xmark.circle.fill").foregroundStyle(Color.red).accessibilityHidden(true)
                     }
-                    .labelStyle(.titleAndIcon)   // a toolbar draws a Label as its icon alone otherwise
-                } else {
-                    Text(verbatim: bar.text)
+                    Text(verbatim: bar.text).foregroundStyle(.secondary)
+                    Text("不等了").foregroundStyle(.tint)
                 }
             }
-            // a link in the accent colour under the title, as Mail's 「Undo Send」
-            .foregroundStyle(.tint)
+            // the status itself grey and passive, only its action in the accent colour, as Mail's line with 「Undo Send」
+            // (P15; HIG Feedback: "it often works well to display status information in a passive way so that people
+            // can view it when they need it"); the same slot is grey for the 已派 note below
             .modifier(SubtitlePlace(large: large))
             .confirmationDialog(bar.text, isPresented: $asking, titleVisibility: .visible) {
                 Button(PendingBar.clearLabel, role: .destructive) { Pending.shared.clearAll() }

@@ -233,6 +233,6 @@ struct WuwaPage: View {
                 EWTagLine(tag: tag, onResend: onResend)
             }
         }
-        .listRowBackground(rowBackground(EWTagLine.tint(data.tags[key])))   // never nil on Android (SkipFixes.swift)
+        .listRowBackground(rowBackground(nil))   // no state tint (EWRowView); never nil on Android (SkipFixes.swift)
     }
 }

@@ -120,6 +120,8 @@ class Runner:
                 continue
             if reg == "top" and n["y"] > H * 0.2:
                 continue
+            if reg == "upper" and n["y"] >= H * 0.8:   # anywhere above the tab bar (a page title, not the tab's label)
+                continue
             hits.append(n)
         hits.sort(key=lambda n: (n["y"], n["x"]))
         if d.get("after"):

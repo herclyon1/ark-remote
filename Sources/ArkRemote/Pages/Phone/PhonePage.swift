@@ -124,7 +124,7 @@ struct PhonePage: View {
         .sheet(isPresented: Binding(get: { selfCheckShown }, set: { SelfCheckRun.shared.shown = $0 })) {
             SelfCheckSheet { SelfCheckRun.shared.shown = false }
         }
-        // the title (「游戏机遥控」, or 「待保存 N 项」 while changes wait, view.js:1283 / 1554) is set by ContentView's EWSaveBar
+        // the title (the tab's name, or 「待保存 N 项」 while changes wait, view.js:1283 / 1554) is set by ContentView's EWSaveBar
         // view.js #tokpaste: prompt("把 KUROBBS_TOKEN=… 和 KUROBBS_DID=… 两行粘贴到这里：") — a multi-line field here,
         // so the two lines stay two lines (a one-line field would join them)
         .sheet(isPresented: $pasteShown, onDismiss: {

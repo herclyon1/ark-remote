@@ -62,8 +62,13 @@ MEDICINE = ["理智药数量", "理智药"]
 FIGHT = ["是否理智作战", "作战开关"]
 STATUS_ROOT = "现在跑一趟"
 # a tab's root page (title, no back button). 现在跑一趟 is only in the tree near the top of the lazy list
-HOME = {"t": "游戏机遥控", "kind": ["StaticText", "TextView"]}
-BACK_BTN = {"t": "游戏机遥控", "kind": "Button"}
+# the 状态 root's title is the tab's own name (Pages/Shell/StatusTab.swift EWSaveBar(title:)); "upper" leaves out the
+# tab bar's label of the same name; while changes wait the title is 「待保存 N 项」 on every tab (SaveBar.swift)
+_EDITING = "re:^待保存 \\d+ 项$"
+HOME = {"t": ["状态", _EDITING], "kind": ["StaticText", "TextView"], "region": "upper"}
+BACK_BTN = {"t": ["状态", _EDITING], "kind": "Button", "region": "upper"}
+HOME_EF = {"t": ["终末地", _EDITING], "kind": ["StaticText", "TextView"], "region": "upper"}
+BACK_BTN_EF = {"t": ["终末地", _EDITING], "kind": "Button", "region": "upper"}
 CONFIRM_WAIT = ("wait", 0.5)                 # confirm alerts / review sheets ignore a press in their first 400 ms
 OFF_NOTE = "~所以这次没有发"                  # the 「机器关着」 notice (StatusCommands.swift:69, :102)
 SEND_N = "re:^寄出 \\d+ 项$"
@@ -296,8 +301,8 @@ step("ef.protocol", "endfield", "协议空间 选「武器养成」→ 待保存
               "android": {"do": [tap("~干员养成"), ("wait", 0.8), tap("~武器养成", last=True), ("wait", 0.6),
                                  ("discard",)]}})
 step("ef.collect.more", "endfield", "自动采集 · 更多设置 → 推入页 → 返回",
-     [tap({"t": "更多设置", "after": "~自动采集"}), ("wait", 1.0), ("back",)], expect=[HOME, "~自动采集"],
-     absent=[BACK_BTN], timeout=10)
+     [tap({"t": "更多设置", "after": "~自动采集"}), ("wait", 1.0), ("back",)], expect=[HOME_EF, "~自动采集"],
+     absent=[BACK_BTN_EF], timeout=10)
 step("ef.ticket.open", "endfield", "再进「更多设置」→ 执行周期「已选 7/7」、使用刻写券关（机器值）",
      [("tab", "终末地"), ("top", 3), tap("更多设置")], expect=["已选 7/7", "使用刻写券"], switch={"使用刻写券": False})
 step("ef.ticket.on", "endfield", "打开「使用刻写券」→ 那行出现小字「待保存」",

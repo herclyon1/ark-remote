@@ -31,8 +31,7 @@ struct DiagMarkMenu: View {
 struct DiagAccessory: View {
     #if os(iOS)
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
-    /// Inline (beside the minimised tab bar) there is room for one line and the flag alone; expanded, two lines and
-    /// the flag with its name.
+    /// Inline (beside the minimised tab bar) there is room for the title alone; expanded, the title and the grey line.
     private var inline: Bool { placement == .inline }
     #else
     private var inline: Bool { false }
@@ -44,10 +43,15 @@ struct DiagAccessory: View {
             Button {
                 ui.openSheet()
             } label: {
+                // as MiniPlayer: a title line and a grey line under it (P14; one wrapped footnote sentence before)
                 Label {
-                    Text(verbatim: ui.line)
-                        .lineLimit(inline ? 1 : 2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("诊断记录中").font(.subheadline).fontWeight(.semibold)
+                        if !inline {
+                            Text(verbatim: Self.detail(ui.line)).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 } icon: {
                     // the recorder's sign, as MiniPlayer leads with the artwork; skip-ui has no record symbol, so
                     // Android's row starts with the text
@@ -55,18 +59,19 @@ struct DiagAccessory: View {
                     Image(systemName: "record.circle").accessibilityHidden(true)
                     #endif
                 }
-                .font(.footnote)
             }
             .buttonStyle(.plain)
-            // the line tells people to press 「就是这里」: its name stays beside the flag while the bar has the room;
-            // beside the minimised tab bar the flag alone, as MiniPlayer's inline row
-            if inline {
-                DiagMarkMenu().labelStyle(.iconOnly)
-            } else {
-                DiagMarkMenu().labelStyle(.titleAndIcon)
-            }
+            // MiniPlayer's controls: the symbol alone in the label colour, named 就是这里 for VoiceOver (HIG Toolbars:
+            // "Prefer simple, recognizable symbols for items instead of text")
+            DiagMarkMenu().labelStyle(.iconOnly).tint(Color.primary)
         }
         .padding(.horizontal)
+    }
+
+    /// The grey line: what the recorder last said, without the 「诊断记录中：」 the title already says.
+    static func detail(_ line: String) -> String {
+        if line == DiagUI.startLine { return "记在手机里，点旗子才送出" }
+        return line.hasPrefix("诊断记录中：") ? String(line.dropFirst("诊断记录中：".count)) : line
     }
 }
 

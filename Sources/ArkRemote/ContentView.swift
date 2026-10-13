@@ -170,7 +170,7 @@ struct ContentView: View {
                     // 「粘贴密钥串」 sheet does not inherit it
                     // the one top bar of the web page (index.html:921, view.js:1551-1556 updateBar) is over 手机 as well:
                     // ✕ / 「待保存 N 项」 / ✓ for the changes left on the other tabs
-                    .modifier(EWSaveBar(title: "游戏机遥控"))
+                    .modifier(EWSaveBar(title: "手机"))   // the tab's own name (HIG Toolbars: "Don't title windows with your app name.")
                     .noticed()
             }
             .expandsTopBarOnReselect(.phone)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
