@@ -59,10 +59,11 @@ PLUS = ["Increment", "增加", "增量", "+", "re:, (Increment|增量)$"]
 MINUS = ["Decrement", "减少", "减量", "-", "−", "re:, (Decrement|减量)$"]
 CLEAR = "不等了，清掉"
 TAB_EF = {"t": "终末地", "region": "bottom"}
-# 方舟 row names are the app's own short ones (ArknightsPage label(path, ours)): 「理智药」 / 「作战开关」; the machine's
-# 「理智药数量」 / 「是否理智作战」 are kept for a build before app-r1 fix round 2 (the 0.4.4 base)
+# 方舟 row names are the app's own short ones (ArknightsPage label(path, ours)): 「理智药」 / 「作战」; the machine's
+# 「理智药数量」 / 「是否理智作战」 are kept for a build before app-r1 fix round 2 (the 0.4.4 base), 「作战开关」 for one
+# before the HIG review of 10-14
 MEDICINE = ["理智药数量", "理智药"]
-FIGHT = ["是否理智作战", "作战开关"]
+FIGHT = ["是否理智作战", "作战开关", "作战"]
 MAIL = ["邮件", "领取所有邮件奖励"]
 DRONES = ["无人机用途", "基建无人机用在哪"]
 STATUS_ROOT = "现在跑一趟"
@@ -247,7 +248,7 @@ step("mc.align.go", "monthcard", "弹窗 · 对准 → 寄出 monthcard left 15�
 step("mc.tabpop", "d39", "点「状态」→ 月卡页退掉、回根页", [("tab", "状态")], expect=[HOME], absent=[BACK_BTN, "终末地月卡"])
 
 # ------------------------------------------------------------------ 方舟
-step("ark.open", "arknights", "方舟标签 → 关卡 / 理智药 / 作战开关", [("tab", "方舟")], expect=["关卡", MEDICINE, FIGHT])
+step("ark.open", "arknights", "方舟标签 → 关卡 / 理智药 / 作战", [("tab", "方舟")], expect=["关卡", MEDICINE, FIGHT])
 step("ark.sanity.x", "arknights", "理智药改 1000（键盘开着）→ 点 ✕ → 回原值、键盘收起、没有待保存（0878f3b）",
      [("field", MEDICINE, "1000"), ("wait", 0.6), ("discard",)], keyboard=False, absent=["~待保存"],
      expect=[MEDICINE], nocmd=2)
@@ -270,7 +271,7 @@ step("ark.review", "arknights", "✓ → 确认单「寄出 4 项」", [tap(SAVE
 step("ark.send", "arknights", "寄出 → set_master 赤金 / 邮件 + set_config 理智药 2 / CE-6",
      [CONFIRM_WAIT, tap("寄出 4 项")], absent=["确认这次修改"],
      cmd=["~PureGold", "~Mail", "~MedicineNumb", "~CE-6"])
-step("ark.battle.discard", "arknights", "作战开关切换 → 待保存 → ✕ 放弃 → 回原值",
+step("ark.battle.discard", "arknights", "作战切换 → 待保存 → ✕ 放弃 → 回原值",
      [("clear",), ("toggle", FIGHT), ("wait", 0.6), ("discard",)], absent=["~待保存"], nocmd=2,
      offline={"do": [("toggle", FIGHT), ("wait", 0.6), ("discard",)]})
 step("ark.menu.left", "arknights", "菜单行：点行左边的名字不出菜单（照原生，只有右边的值能点；已知存疑 D203 不改）",

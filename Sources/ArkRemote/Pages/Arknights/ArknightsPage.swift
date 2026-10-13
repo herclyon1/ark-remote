@@ -107,7 +107,9 @@ struct ArknightsPage: View {
             }
             if data.ifFight != nil {
                 tagged("Task.IfFight") {
-                    ArknightsToggleRow(label: label("Task.IfFight", "作战开关"),
+                    // 「作战」, not 「作战开关」: the switch beside it already says it is one (HIG Toggles: "the content in the row
+                    // provides the context for the state the switch controls"; HIG review 1014)
+                    ArknightsToggleRow(label: label("Task.IfFight", "作战"),
                                        isOn: binding(\.ifFight, default: false))
                 }
             }
