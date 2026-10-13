@@ -194,7 +194,7 @@ struct SelfCheckItem: Sendable, Equatable {
         }
 
         // 4. the push stream: open one, wait for ntfy's `open` event, close it
-        let pushMs = await pushProbe(topic: cfg.topic)
+        let pushMs = await PushProbe.openMs(topic: cfg.topic)   // Logic/PushProbe.swift
         out.append(SelfCheckItem(name: "推送通道", ok: pushMs != nil,
                                  detail: pushMs.map { "\($0) ms 连上" } ?? "8 秒内没连上"))
 
@@ -216,41 +216,6 @@ struct SelfCheckItem: Sendable, Equatable {
         for i in out { DiagLog.shared.record("selfcheck", ["name": i.name, "ok": i.ok ? "yes" : "no", "detail": i.detail]) }
         LastSelfCheck.save(out)
         return out
-    }
-
-    /// ms until the stream's `open` event, or nil after 8 s.
-    private static func pushProbe(topic: String) async -> Int? {
-        let t0 = nowMs()
-        return await withCheckedContinuation { (cont: CheckedContinuation<Int?, Never>) in
-            let done = OnceFlag()
-            var stream: NtfyStream?
-            stream = NtfyStream(topics: topic, since: "\(Int(t0 / 1000))") { e in
-                if e["event"]?.string == "open", done.take() {
-                    stream?.close()
-                    cont.resume(returning: Int(nowMs() - t0))
-                }
-            }
-            stream?.open()
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-                if done.take() {
-                    stream?.close()
-                    cont.resume(returning: nil)
-                }
-            }
-        }
-    }
-}
-
-/// True for the first caller only.
-final class OnceFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var used = false
-    func take() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        if used { return false }
-        used = true
-        return true
     }
 }
 
@@ -316,7 +281,9 @@ func diagKB(_ text: String) -> String {
     static let markWords = ["不该动", "动错了", "卡住了", "慢半拍", "位置不对"]
     /// seg-frames-logger.js:497, the line while nothing has been sent yet. The App logs messages, the network and the
     /// machine status (not taps) and sends the whole log as one record, so the web's wording would be wrong here.
-    static let startLine = "诊断记录开着：收发消息、网络通断和机器状态记在手机里，不送；出问题按右下角「就是这里」，送整份记录"
+    /// Short enough for the bar's two lines beside 「就是这里」 and for one line inline (P14: MiniPlayer's one row,
+    /// 「诊断记录中」); no 「右下角」: the button sits beside the line now (Pages/Shell/DiagAccessory.swift).
+    static let startLine = "诊断记录中：记在手机里，按「就是这里」才送出"
 
     /// The 诊断记录 switch, mirrored here so the mark button and the line appear / go at once.
     var on = DiagLog.shared.enabled
@@ -369,7 +336,7 @@ func diagKB(_ text: String) -> String {
         sheetOpen = true
     }
 
-    /// Sets the record the sheet shows without presenting it (the 手机 page's own row presents its own sheet).
+    /// Sets the record the sheet shows without presenting it.
     func prepareSheet() {
         if let m = lastMarked, m["upload"]?["state"]?.string != "sent" {
             sheetRecord = m
@@ -409,7 +376,7 @@ func diagKB(_ text: String) -> String {
         } else {
             // DiagUpload.put says only yes / no, so the web's reason is 「原因不明」 here (view.js upWord's own fallback)
             keep(key, body)
-            report(rec, "kept", "没送到（原因不明），已存在手机里共 \(keptN) 份；点这行可复制 / 分享", key)
+            report(rec, "kept", "没送到，手机里存着 \(keptN) 份；点这行可复制 / 分享", key)
         }
     }
 
