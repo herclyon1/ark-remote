@@ -14,8 +14,9 @@ struct PhoneTab: View {
                                       hasConfig: Relay.shared.config != nil),
                   actions: PhonePageActions(
                     pasteTokens: { s in
-                        // A 免输入链接 (…#k=…&t=…) pasted here goes the way an opened link goes: on Android a tapped link
-                        // opens the browser, not the app (no assetlinks.json), so pasting is the only way in once set up.
+                        // A 免输入链接 (…#k=…&t=…) pasted here goes the way an opened link goes: an old web page link
+                        // (PhoneLink.oldPageURL) opens the browser when tapped on Android (no assetlinks.json), so pasting
+                        // is its way in once set up.
                         let str = s.trimmingCharacters(in: .whitespacesAndNewlines)
                         // No 「密钥已存到这台手机」 toast: the 密钥 row's value (森空岛、库街区) is the state (shell API id 289).
                         if str.contains("#"), let u = URL(string: str), PhoneLink.open(u) { return }
@@ -37,8 +38,14 @@ struct PhoneTab: View {
 
 /// The no-input link (view.js myLink / fromLink).
 enum PhoneLink {
-    /// The web page the link opens (view.js uses location.origin + location.pathname of the page itself).
-    static let pageURL = "https://herclyon1.github.io/maa/"
+    /// The start of the link 复制免输入链接 copies: the App's own URL scheme (Darwin/Info.plist CFBundleURLTypes,
+    /// Android/app/src/main/AndroidManifest.xml intent-filter), so a tapped link opens the App, not the old web page.
+    /// With a host: iOS's clipboard check (detectPatterns .probableWebURL, AppGlue.takeClipboardIfDue) and
+    /// NSDataDetector see `arkremote://link#…` as a link, `arkremote:#…` not.
+    static let linkBase = "arkremote://link"
+    /// The web page the old links open (view.js myLink: location.origin + location.pathname). Links copied before
+    /// still work: open() reads only the `#k=` / `&t=` fragment, whatever the scheme and host.
+    static let oldPageURL = "https://herclyon1.github.io/maa/"
 
     static var appVersion: String {
         let info = Bundle.main.infoDictionary
@@ -86,7 +93,7 @@ enum PhoneLink {
         let k = enc("{\"t\":\(jsonQuote(cfg.topic)),\"p\":\(jsonQuote(cfg.pin))}")
         let stamina = StaminaStore.shared
         let tok = stamina.tokens ?? stamina.loadTokens()
-        return pageURL + "#k=" + k + (tok.map { "&t=" + enc($0.encodedString()) } ?? "")
+        return linkBase + "#k=" + k + (tok.map { "&t=" + enc($0.encodedString()) } ?? "")
     }
 
     /// The last link this phone took (its SHA-256, not the link: the link carries the PIN and the game tokens).

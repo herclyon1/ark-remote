@@ -41,13 +41,14 @@ struct ArknightsPage: View {
     // MARK: 明日方舟 (schema.js:116-127)
 
     /// Each row's hint (schema.js:124-133), one sentence of what the row does, in words rather than 「0＝」 signs (HIG
-    /// Lists: "Keep item text succinct so row content is comfortable to read."; design rule 8).
+    /// Lists: "Keep item text succinct so row content is comfortable to read."; design rule 8). Each one stands on its
+    /// own: the footer has no 「行名：」 in front (decision A2/W4), so a sentence names its subject where it needs one.
     private static let hints: [String: String] = [
-        "Info.Stage": "游戏里的关卡号，如 1-7、CE-6、AT-4。",
-        "Info.MedicineNumb": "一趟最多用几瓶，填 0 不用，填 999 不限。",
-        "Task.IfFight": "关掉后只做基建、公招等日常，不刷关卡。",
+        "Info.Stage": "关卡填游戏里的关卡号，如 1-7、CE-6、AT-4。",
+        "Info.MedicineNumb": "理智药填一趟最多用几瓶，填 0 不用，填 999 不限。",
+        "Task.IfFight": "作战关掉后只做基建、公招等日常，不刷关卡。",
         "Task.IfActivityFirst": "有活动先刷活动关，活动结束后回到上面的关卡。",
-        "Task.ActivityStageIndex": "活动关卡列表从上往下数第几关，活动关优先开着时才用。",
+        "Task.ActivityStageIndex": "活动关按活动关卡列表从上往下数第几关来选，活动关优先开着时才用。",
         "Infrast/UsesOfDrones": "贸易站加速订单，制造站加速产物。",
         "Award/Mail": "每趟收下邮箱里的奖励，关着的话邮件到期作废。",
         "Award/Orundum": "每天去幸运墙领合成玉。",
@@ -55,28 +56,29 @@ struct ArknightsPage: View {
         "Award/SpecialAccess": "周年送的月卡每天也领。",
     ]
 
-    /// view.js:978-995 (layoutTabs): the hints leave the rows for a footer under the card, one line each, prefixed with
-    /// 「行名：」 when the card has more than one row. `rows` = the rows drawn, in order.
-    private func hintFooter(_ rows: [ArknightsHintRow]) -> some View {
-        let lines = rows.compactMap { row -> String? in
-            guard let hint = Self.hints[row.path] else { return nil }
-            let title = label(row.path, row.name)
-            return (rows.count > 1 && !title.isEmpty ? title + "：" : "") + hint
-        }
+    /// The hints leave the rows for a footer under the card (view.js:978-995), one sentence a line. No 「行名：」 list in
+    /// front: it repeated every row name right above it (decision A2/W4, BOARD/App-待他定项-从记录定-1014.md).
+    /// `paths` = the rows drawn, in order.
+    static func footerText(_ paths: [String]) -> String {
+        paths.compactMap { hints[$0] }.joined(separator: "\n")
+    }
+
+    private func hintFooter(_ paths: [String]) -> some View {
+        let text = Self.footerText(paths)
         return Group {
-            if !lines.isEmpty {
-                Text(verbatim: lines.joined(separator: "\n"))
+            if !text.isEmpty {
+                Text(verbatim: text)
             }
         }
     }
 
-    private var stageRows: [ArknightsHintRow] {
-        var out: [ArknightsHintRow] = []
-        if data.stage != nil { out.append(ArknightsHintRow(path: "Info.Stage", name: "关卡")) }
-        if data.medicineNumb != nil { out.append(ArknightsHintRow(path: "Info.MedicineNumb", name: "理智药")) }
-        if data.ifFight != nil { out.append(ArknightsHintRow(path: "Task.IfFight", name: "作战开关")) }
-        if data.ifActivityFirst != nil { out.append(ArknightsHintRow(path: "Task.IfActivityFirst", name: "活动关优先")) }
-        if data.activityStageIndex != nil { out.append(ArknightsHintRow(path: "Task.ActivityStageIndex", name: "活动关序号")) }
+    private var stageRows: [String] {
+        var out: [String] = []
+        if data.stage != nil { out.append("Info.Stage") }
+        if data.medicineNumb != nil { out.append("Info.MedicineNumb") }
+        if data.ifFight != nil { out.append("Task.IfFight") }
+        if data.ifActivityFirst != nil { out.append("Task.IfActivityFirst") }
+        if data.activityStageIndex != nil { out.append("Task.ActivityStageIndex") }
         return out
     }
 
@@ -133,8 +135,8 @@ struct ArknightsPage: View {
 
     // MARK: 明日方舟 · 基建 (schema.js:128-131)
 
-    private var infrastRows: [ArknightsHintRow] {
-        data.usesOfDrones != nil ? [ArknightsHintRow(path: "Infrast/UsesOfDrones", name: "无人机用途")] : []
+    private var infrastRows: [String] {
+        data.usesOfDrones != nil ? ["Infrast/UsesOfDrones"] : []
     }
 
     /// view.js:973 (layoutTabs): a master section is drawn when its card holds anything — a row or a yellow note.
@@ -165,13 +167,13 @@ struct ArknightsPage: View {
 
     // MARK: 明日方舟 · 领取奖励 (schema.js:132-141)
 
-    private var awardRows: [ArknightsHintRow] {
-        var out: [ArknightsHintRow] = []
-        if data.awardMail != nil { out.append(ArknightsHintRow(path: "Award/Mail", name: Self.awardName["Award/Mail"]!)) }
-        if data.awardOrundum != nil { out.append(ArknightsHintRow(path: "Award/Orundum", name: Self.awardName["Award/Orundum"]!)) }
-        if data.awardMining != nil { out.append(ArknightsHintRow(path: "Award/Mining", name: Self.awardName["Award/Mining"]!)) }
+    private var awardRows: [String] {
+        var out: [String] = []
+        if data.awardMail != nil { out.append("Award/Mail") }
+        if data.awardOrundum != nil { out.append("Award/Orundum") }
+        if data.awardMining != nil { out.append("Award/Mining") }
         if data.awardSpecialAccess != nil {
-            out.append(ArknightsHintRow(path: "Award/SpecialAccess", name: Self.awardName["Award/SpecialAccess"]!))
+            out.append("Award/SpecialAccess")
         }
         return out
     }
@@ -430,12 +432,6 @@ struct ArknightsPickerRow: View {
             Text(verbatim: label)
         }
     }
-}
-
-/// A row drawn in a section, for its footer line (view.js:978-995): the field's path and our name for it.
-struct ArknightsHintRow {
-    let path: String
-    let name: String
 }
 
 /// Shown instead of the rows when the master config can't be read and there is no earlier copy (view.js:418),

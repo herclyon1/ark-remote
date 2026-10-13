@@ -31,7 +31,15 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- the no-input link (PhoneLink.pageURL + #k=...); opens the app only once the domain is verified
+            <!-- the no-input link the App copies (PhoneLink.linkBase, arkremote://link#k=...); skip-ui's onOpenURL
+                 takes the ACTION_VIEW intent -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="arkremote" android:host="link" />
+            </intent-filter>
+            <!-- the old no-input link (PhoneLink.oldPageURL + #k=...); opens the app only once the domain is verified
                  (https://herclyon1.github.io/.well-known/assetlinks.json), otherwise Android 12+ opens the browser -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />

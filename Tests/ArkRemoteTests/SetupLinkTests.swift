@@ -18,7 +18,7 @@ import XCTest
         let saved = SharedStateGuard()
         defer { saved.restore() }
         notSetUp()
-        PhoneLink.readClipboard = { PhoneLink.pageURL + "#k=" + PhoneLink.enc(#"{"t":"box1","p":"4321"}"#) }
+        PhoneLink.readClipboard = { PhoneLink.oldPageURL + "#k=" + PhoneLink.enc(#"{"t":"box1","p":"4321"}"#) }
 
         let took = SetupScreen.takeLink()
         try await SharedStateGuard.settleStaminaRefresh()

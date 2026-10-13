@@ -514,6 +514,9 @@ step("clip.first.hello", "clip", "没配置：剪贴板里是「hello」→ 「�
 step("clip.first.link", "clip", "没配置：剪贴板里是（一次性信箱的）免输入链接 → 自动配好进标签页，22 秒不闪退",
      [("forget_config",), ("clipboard", "@link"), ("relaunch",), ("allow_paste", 10), ("wait", CLIP_WAIT)],
      expect=[STATUS_ROOT], absent=["第一次使用"], timeout=20, on="ios")
+step("clip.first.oldlink", "clip", "没配置：剪贴板里是老网页地址的免输入链接（以前复制的）→ 照样自动配好进标签页",
+     [("forget_config",), ("clipboard", "@oldlink"), ("relaunch",), ("allow_paste", 10), ("wait", CLIP_WAIT)],
+     expect=[STATUS_ROOT], absent=["第一次使用"], timeout=20, on="ios")
 step("clip.restore", "clip", "清剪贴板、写回一次性信箱 → 冷启动回状态页",
      [("clipboard", ""), ("restore_config",), ("relaunch",)], expect=[STATUS_ROOT], timeout=30, on="ios", always=True)
 
