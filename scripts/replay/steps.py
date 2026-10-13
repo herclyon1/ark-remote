@@ -102,7 +102,7 @@ step("status.stop.ask", "status", "状态 · 停止一切 → 弹「停止一切
      [tap("停止一切")], expect=["停止一切？"],
      offline={"say": "状态 · 停止一切（关机）→ 提示「机器关着…所以这次没有发」", "expect": [OFF_NOTE]})
 step("status.stop.cancel", "status", "弹窗 · 取消 → 关掉，没寄出",
-     [CONFIRM_WAIT, tap("取消", last=True)], absent=["停止一切？"], nocmd=3,
+     [CONFIRM_WAIT, ("dismiss",)], absent=["停止一切？"], nocmd=3,
      offline={"say": "提示 · 好 → 关掉", "do": [CONFIRM_WAIT, tap("好", last=True)], "absent": [OFF_NOTE]})
 step("status.4c.menu", "status", "刷 4C 声骸 · 打哪个（点当前值）→ 菜单列出 boss",
      [tap({"t": "re:^\\d\\. ", "kind": ["StaticText", "TextView"]})], expect=["re:^3\\. "])
@@ -145,7 +145,7 @@ step("status.clear", "status", "顶上条「不等了，清掉」→ 待回执�
      [("clear_receipts",), ("state", "base"), ("clear",)], absent=[CLEAR, "~已寄出"], timeout=15,
      offline={"do": [], "absent": [], "skip": "额度"})
 step("status.skip.pending", "status", "早班开关关掉 → 「今天跳过，明天照常」+ 待保存 1 项",
-     [("toggle", "re:^早班 · (机器|今天)")], expect=["~今天跳过，明天照常", "~待保存 1 项"])
+     [("toggle", "re:(^|, )早班 · (机器|今天)")], expect=["~今天跳过，明天照常", "~待保存 1 项"])
 step("status.skip.review", "status", "✓ → 确认单红字「今天不跑：早班」",
      [("remember", SAVE, "save", {"region": "top"}), tap(SAVE, region="top")], expect=["确认这次修改", "~今天不跑：早班", "寄出 1 项"])
 step("status.skip.think", "status", "再想想 → 关单，改动还在",
@@ -210,7 +210,7 @@ step("mc.open", "monthcard", "终末地月卡行 → 月卡页",
 step("mc.plus", "monthcard", "＋ → 充值了 2 次", [tap(PLUS)], expect=["充值了 2 次"])
 step("mc.minus", "monthcard", "－ → 回到 1 次", [tap(MINUS)], expect=["充值了 1 次"])
 step("mc.register.ask", "monthcard", "登记 → 弹「登记充值 1 次？」", [tap("登记", region="content")], expect=["登记充值 1 次？"])
-step("mc.register.cancel", "monthcard", "取消 → 没寄出", [CONFIRM_WAIT, tap("取消", last=True)], absent=["登记充值 1 次？"], nocmd=2)
+step("mc.register.cancel", "monthcard", "点框外（iOS 无取消键）/ 取消 → 关掉，没寄出", [CONFIRM_WAIT, ("dismiss",)], absent=["登记充值 1 次？"], nocmd=2)
 step("mc.align.bad", "monthcard", "天数填 500 → 「对准」灰着，组下说明「填 0–400 的整数」",
      [("field", "游戏里显示还剩", "500"), ("hidekb",)], expect=["~填 0–400 的整数"], keyboard=False, timeout=5)
 step("mc.days", "monthcard", "天数填 15 → 收键盘（iOS 完成键）",
