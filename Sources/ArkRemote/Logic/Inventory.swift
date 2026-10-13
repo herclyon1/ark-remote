@@ -1,8 +1,8 @@
 // Ported from maa-automation/web/inventory.js
 //
 // Inventory (库存): the app asks the game's official API itself, on the user's action only, and lays
-// the answer next to the static "one full build needs" table (data/need.json, built by
-// scripts/mac/build-need-tables.py). Endfield only for now; the result is shaped per game so
+// the answer next to the "one full build needs" table (the relay rebuilds it every server day,
+// maa-automation relay/ark_relay/features/needtable/). Endfield only for now; the result is shaped per game so
 // 明日方舟 / 鸣潮 can be added later without changing the shape. Field meanings are the ones in the
 // header of inventory.js (section, group, owner, uses, origin, footnote, lagNote, have, need,
 // standards, servings, box, short, boxUsed / boxLeft, virtual, icon).
@@ -15,9 +15,11 @@
 // early only when the inventory names an id the cache does not know.
 //
 // Not a straight port:
-// - The page fetched the relative "data/need.json" from its own origin; the app has no origin, so it
-//   reads the deployed copy (`needURL`). Both the plain and the forced read skip the HTTP cache
-//   (the page used `no-cache` / `reload`; both end up with the server's current file).
+// - The page fetched the relative "data/need.json" from its own origin. The app reads the copy the relay
+//   rebuilds every server day next to the phone state on COS (`Relay.needURL(topic:)`, maa-automation
+//   needtable.py, since 2026-10-14), and the old deployed copy (`needURL`, last built 09-23) only when that is
+//   not there (no topic yet, an older relay). Both reads skip the HTTP cache (the page used `no-cache` /
+//   `reload`; both end up with the server's current file).
 // - The "森空岛没给终末地的仓库：…" message lists the first six keys of an unordered dictionary, so
 //   the order of the names may differ from the page's.
 
@@ -319,7 +321,8 @@ enum InventoryCalc {
 
     static let zonaiInventory = "/web/v1/game/endfield/calculate/user-game-data"
     static let zonaiMaterials = "/web/v1/game/endfield/calculate/material-list"
-    /// The page read "data/need.json" next to itself; this is that file on the deployed site.
+    /// The page read "data/need.json" next to itself; this is that file on the deployed site. Since the relay
+    /// rebuilds the table itself (`relayNeedURL`), this is the fallback: it was last built 2026-09-23.
     static let needURL = "https://herclyon1.github.io/maa/data/need.json"
     static let matKey = "ark-remote-matlist"
     static let standardKey = "ark-remote-need-standard"
@@ -337,22 +340,39 @@ enum InventoryCalc {
     var need: JSONValue?
     /// The last need.json error (the reading still goes ahead without it).
     var err = ""
+    /// The GETs loadNeed makes; tests replace it so no request leaves the Mac.
+    @ObservationIgnored var fetchNeed: (String) async throws -> (Data, Int) = { try await httpFetch($0, noStore: true) }
 
     /// Where the 森空岛 session and signing live.
     var stamina: StaminaStore { StaminaStore.shared }
 
     // MARK: need table
 
-    /// inventory.js loadNeed(force): the static need table, read fresh on every refresh.
+    /// The relay's daily copy of the table next to the phone state (Relay.needURL); nil without a topic.
+    var relayNeedURL: String? {
+        let t = (Relay.shared.config?.topic ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : Relay.needURL(topic: t)
+    }
+
+    /// inventory.js loadNeed(force): the need table, read fresh on every refresh - the relay's daily copy first, the old
+    /// deployed one when that cannot be read. The error is the last one's.
     @discardableResult
     func loadNeed(force: Bool = false) async throws -> JSONValue {
-        let (body, status) = try await httpFetch(Self.needURL, noStore: true)
-        guard (200..<300).contains(status) else { throw AppError("需求表拿不到（\(status)）") }
-        let j: JSONValue
-        do { j = try JSONValue.parse(body) } catch { throw AppError("需求表格式不对") }
-        guard j["games"]?.array != nil else { throw AppError("需求表格式不对") }
-        need = j
-        return j
+        var last: Error = AppError("需求表拿不到")
+        for url in [relayNeedURL, Self.needURL].compactMap({ $0 }) {
+            do {
+                let (body, status) = try await fetchNeed(url)
+                guard (200..<300).contains(status) else { throw AppError("需求表拿不到（\(status)）") }
+                let j: JSONValue
+                do { j = try JSONValue.parse(body) } catch { throw AppError("需求表格式不对") }
+                guard j["games"]?.array != nil else { throw AppError("需求表格式不对") }
+                need = j
+                return j
+            } catch {
+                last = error
+            }
+        }
+        throw last
     }
 
     /// inventory.js needFor(gameId).

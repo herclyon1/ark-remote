@@ -206,6 +206,17 @@ enum StockpileEmptyAction: Sendable, Equatable {
                         origin: nil, value: "剩 \(nf.num(r["boxLeft"]?.number)) 个")
     }
 
+    /// The day the need table was built, so a table that stopped being rebuilt shows its age: the relay rebuilds it every
+    /// server day (maa-automation needtable.py), and `built` reads "2026-10-14 03:36 UTC+8" (older copies: "… JST").
+    /// nil when there is no date at the start.
+    static func builtLine(_ built: String?) -> String? {
+        guard let b = built, b.count >= 10 else { return nil }
+        let parts = b.prefix(10).split(separator: "-")
+        guard parts.count == 3, parts[0].count == 4, let m = Int(parts[1]), let d = Int(parts[2]),
+              (1...12).contains(m), (1...31).contains(d) else { return nil }
+        return "需求表 \(m)月\(d)日 核对过最新六星"
+    }
+
     /// stockpile.js listHtml(g, d, err): sections and footnote for one game.
     static func list(_ g: JSONValue, _ d: JSONValue, err: String) -> StockpileContent {
         var nf = NumFormat()
@@ -251,6 +262,7 @@ enum StockpileEmptyAction: Sendable, Equatable {
         // M4i: 人份 speaks of materials only; the box line (games[].box.note) does not
         foot.append("人份 = 材料库存 ÷ 一人所需" + (boxed ? "（缺的先用资源箱补）" : ""))
         if let c = g["caliber"], c.truthy { foot.append("一人所需 = \(c.jsString)") }
+        if let b = builtLine(g["built"]?.string) { foot.append(b) }
         foot.append("差 N = \(boxed ? "补箱后" : "库存")不够一人份，还差 N（需 − 库存\(boxed ? " − 箱" : "")）")
         if let note = box?["note"], note.truthy { foot.append(note.jsString) }
         if nf.usedK { foot.append("k = 千") }

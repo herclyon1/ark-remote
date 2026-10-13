@@ -474,6 +474,12 @@ struct PinScan: Sendable, Equatable {
         String(stateURL(topic: topic).dropLast(".json".count)) + ".hb.json"
     }
 
+    /// needtable.py need_key(topic): the need table the relay rebuilds every server day, `state/<same hash>.need.json`
+    /// (maa-automation relay/ark_relay/features/needtable/needtable.py; public-read like the state).
+    nonisolated static func needURL(topic: String) -> String {
+        String(stateURL(topic: topic).dropLast(".json".count)) + ".need.json"
+    }
+
     /// The GET cosHb() makes; tests replace it so no request leaves the Mac.
     @ObservationIgnored var fetchHb: (String) async throws -> (Data, Int) = { try await httpFetch($0) }
 
