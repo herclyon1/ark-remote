@@ -361,7 +361,8 @@ func diagKB(_ text: String) -> String {
         else if state == "sent" { up = "上传：已送达" }
         else if state == "local" { up = "没标记，留在手机里没送" }
         else { up = "上传：没送到（\(u?["detail"]?.string ?? "原因不明")）" }
-        return (json, "\(mk)一份 JSON，\(diagKB(json)) KB，\(n) 条。\(up)。送不到时复制后粘到聊天里，或用分享发出。", state == "sent")
+        // no file format or size in the words (HIG Writing: "avoiding jargon"; app-1013 review 手机 8)
+        return (json, "\(mk)\(n) 条。\(up)。送不到时复制后粘到聊天里，或用分享发出。", state == "sent")
     }
 
     // MARK: 件 C

@@ -25,13 +25,16 @@ struct PhoneDiagRows: View {
             DiagLog.shared.setEnabled(v)
             if v { DiagWatch.start() }
         })) {
-            PhoneRowLabel(title: "诊断记录", hint: "开着时记下这台手机收发消息、网络通断和机器状态的变化，可复制 / 分享给我们")
+            PhoneRowLabel(title: "诊断记录", hint: "开着时记下这台手机收发消息、网络通断和机器状态的变化，可以复制或分享。")
         }
         .onAppear { if diagOn { DiagWatch.start(); DiagUI.shared.start() } }
         if diagOn {
             // the same sheet a tap on the 诊断记录 bar opens (Pages/Shell/DiagAccessory.swift DiagSheet presents it on the
             // TabView), so the two ways in show one thing and the page's pull to refresh never reaches the sheet's list
-            Button("分享诊断记录（\(count) 条）") { DiagUI.shared.openSheet() }
+            // the count as the row's grey value, as P13 puts a number on the right of its row
+            Button { DiagUI.shared.openSheet() } label: {
+                LabeledContent("分享诊断记录", value: "\(count) 条")
+            }
             Button("清空诊断记录", role: .destructive) { clearAsk = true }
                 // as 清除密钥: an action sheet from the button (P10 / N9; HIG Action sheets "Use an action sheet — not
                 // an alert — to offer choices related to an intentional action")
@@ -39,7 +42,9 @@ struct PhoneDiagRows: View {
                     Button("清空", role: .destructive) { DiagLog.shared.clear() }
                     Button("取消", role: .cancel) {}
                 } message: {
-                    Text("这台手机记下的 \(count) 条都会删掉，还没分享的就找不回来了。")
+                    // no count: the record keeps growing while the dialog is up, and a number frozen in it did not
+                    // match the row behind (HIG Action sheets: "Provide a message only if necessary.")
+                    Text("还没分享的会找不回来。")
                 }
             // view.js:602 #selfcheck is hidden while 诊断记录 is off. The running flag and the result sheet live in
             // SelfCheckRun and the sheet is on PhonePage outside its .id(reselect): a reselect of 手机 rebuilds this List
@@ -75,13 +80,15 @@ struct SelfCheckSheet: View {
         let rec = LastSelfCheck.stored() ?? .null
         let json = rec.encodedString()
         let total = Int(rec["total"]?.number ?? 0), fails = Int(rec["fails"]?.number ?? 0)
+        // what failed first, then the count; no file format or size (HIG Writing: "avoiding jargon")
         DiagSheetBox(title: "自检结果",
-                     message: "通过 \(total - fails) / \(total)，不通过 \(fails) 项。一份 JSON，\(diagKB(json)) KB。复制后粘到聊天里，或用分享发出。",
+                     message: (fails > 0 ? "\(fails) 项没通过，" : "") + "通过 \(total - fails) / \(total)。复制后粘到聊天里，或用分享发出。",
                      json: json, canShare: true, close: close)
     }
 }
 
-/// view.js showDiagSheet(rec): 「诊断记录已生成」 for DiagUI.sheetRecord, redrawn while its upload moves on.
+/// view.js showDiagSheet(rec): 「诊断记录」 for DiagUI.sheetRecord, redrawn while its upload moves on (the web's
+/// 「诊断记录已生成」; HIG Toolbars: "Aim for a word or short phrase that distills the purpose of the window").
 struct DiagRecordSheet: View {
     var close: () -> Void
 
@@ -89,15 +96,16 @@ struct DiagRecordSheet: View {
         let rec = DiagUI.shared.sheetRecord ?? .null
         let m = DiagUI.sheetMessage(rec)
         // once the record is in the bucket there is nothing left to hand over: 分享 goes (view.js sent())
-        DiagSheetBox(title: "诊断记录已生成", message: m.text, json: m.json, canShare: !m.sent, close: close)
+        DiagSheetBox(title: "诊断记录", message: m.text, json: m.json, canShare: !m.sent, close: close)
     }
 }
 
 /// index.html #diagsheet: title, message, then 复制 / 分享 / 关闭.
 /// The system's sheet as P12 / P13 have it: a navigation bar with the title and the close ✕ leading (HIG Sheets: "the
-/// Cancel button belongs on the leading edge of the top toolbar"), the message and the two actions as list rows. No
-/// detents (the system's full-height sheet, as Passwords' 「New Password」, evidence/app-pages-1007/apple/
-/// P12-密码-新建弹出单.png) and nothing measured: the list scrolls a long 自检结果 by itself, never cut (no lineLimit).
+/// Cancel button belongs on the leading edge of the top toolbar"), the message as the grey text over the two actions
+/// (P13 puts its explanation above the rows, not in a card), the sheet at half height first and pulled up for more
+/// (HIG Sheets: "In an iPhone app, consider supporting the medium detent to allow progressive disclosure of the
+/// sheet's content."). Nothing measured: the list scrolls a long 自检结果 by itself, never cut (no lineLimit).
 /// 复制's own label says 「已复制整份记录」 once it took (shell API id 272: "a button whose label turns into 「已复制」"),
 /// no toast; 分享 is the system share sheet (DiagShare), and only its failure is said, in this sheet's own alert
 /// (view.js ask("分享没成", …, "好", false, { single: true })).
@@ -114,9 +122,6 @@ struct DiagSheetBox: View {
         NavigationStack {
             List {
                 Section {
-                    Text(verbatim: message)
-                }
-                Section {
                     Button(copied ? "已复制整份记录" : "复制") {
                         PhoneLink.copy(json)
                         copied = true
@@ -125,6 +130,8 @@ struct DiagSheetBox: View {
                         // view.js share.onclick (DiagShare)
                         Button("分享") { DiagShare.shared.share(json, title: title == "自检结果" ? "自检结果" : "诊断记录") }
                     }
+                } header: {
+                    Text(verbatim: message).textCase(nil)
                 }
             }
             .navigationTitle(title)
@@ -138,6 +145,7 @@ struct DiagSheetBox: View {
                 }
             }
         }
+        .presentationDetents([.medium, .large])
         // a new record (the line's upload moved on, or another 分享诊断记录) is not the one that was copied
         .onChange(of: json) { _, _ in copied = false }
         .alert("分享没成", isPresented: Binding(get: { DiagShare.shared.failNote != nil },

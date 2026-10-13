@@ -66,7 +66,8 @@ struct PhonePage: View {
         let selfCheckShown = SelfCheckRun.shared.shown
         List {
             Section {
-                PhoneValueRow(title: "页面版本", hint: "这个安装包的版本号；App 里更新过就会变", value: data.pageVersion)
+                // a name and a value, no hint under them (HIG Lists: "Keep item text succinct"; P13's rows)
+                PhoneValueRow(title: "页面版本", value: data.pageVersion)
                 PhoneDiagRows(appVersion: data.pageVersion)
                 Button(linkCopied ? "链接已复制" : "复制免输入链接") {
                     // view.js #mklink; prompt("长按复制这条链接：", url) when the clipboard refuses
@@ -83,14 +84,14 @@ struct PhonePage: View {
             } header: {
                 Text("这台手机")
             } footer: {
+                // one sentence of what the link does (HIG Writing: "If you can use fewer words, do so.")
                 Text((data.hasConfig ? "" : "这台手机还没填信箱和 PIN，链接里没东西可带。")
-                     + "把这条链接存成书签或加到主屏幕，以后打开就直接是控制台，再也不用填信箱和 PIN。链接里带着这两样，别转发给别人")
+                     + "存成书签或放到主屏幕，以后打开不用再填信箱和 PIN；别转发给别人。")
             }
 
             Section {
                 // 「密钥」, not the web's 「已配置」 (view.js:608): with none stored the row read 「已配置 … 没有」 (test pass 1, 问题 7)
-                PhoneValueRow(title: "密钥", hint: "体力数字由这台手机直接问森空岛和库街区，密钥只存在这台手机里",
-                              value: hasTokens ? data.staminaStatus : "没有")
+                PhoneValueRow(title: "密钥", value: hasTokens ? data.staminaStatus : "没有")
                 Button("粘贴密钥串") {
                     pasteText = ""
                     pasteShown = true
@@ -108,17 +109,21 @@ struct PhonePage: View {
             } header: {
                 Text("游戏账号")
             } footer: {
-                Text("免输入链接会把这里存着的密钥一起带上，换手机开一次那条链接就全有。森空岛的会话由机器交过来；库街区的：点「粘贴密钥串」，粘贴网页「手机」页复制的免输入链接、电脑上 scripts/mac/phone-link.py 打出来的链接，或 ~/.config/ark/.env 里 KUROBBS_TOKEN 和 KUROBBS_DID 那两行")
+                // plain words, no paths or file names (HIG Writing: "Choose simple, plain language … avoiding jargon");
+                // what to paste is the paste field's own prompt now
+                Text("密钥只存在这台手机里；免输入链接会带上它，换手机打开一次就全有。")
             }
         }
         // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
         // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
         // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).
         .id(reselect)
-        // view.js:1150-1153 pullRefresh: a pull on any tab but the pushed 库存 page is ping(), the 手机 tab too.
-        // Inside the sheets below: a sheet's content inherits the refresh action, and the 自检结果 sheet's ScrollView
-        // (DiagSheetBox) then kept room for a refresh control, its title cut at the sheet's top edge (diagsheet frames4).
-        .refreshable { await Live.shared.ping() }
+        // A pull here reads the stamina again, the one thing on this tab that comes from outside the phone; asking the
+        // machine (view.js:1150 ping) changed nothing on this page and held the spinner up to 11 s (HIG Refresh content
+        // controls). Inside the sheets below: a sheet's content inherits the refresh action, and the 自检结果 sheet's
+        // ScrollView (DiagSheetBox) then kept room for a refresh control, its title cut at the sheet's top edge
+        // (diagsheet frames4).
+        .refreshable { await StaminaStore.shared.refresh(force: true) }
         .onDisappear { linkCopied = false }
         // 运行自检's result (PhoneDiagRows), here outside .id(reselect) so a reselect mid-run keeps it (SelfCheckRun)
         .sheet(isPresented: Binding(get: { selfCheckShown }, set: { SelfCheckRun.shared.shown = $0 })) {
@@ -156,8 +161,10 @@ struct PhonePage: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("", text: $pasteText, axis: .vertical)
-                        .lineLimit(5, reservesSpace: true)
+                    // what to paste as the field's prompt (HIG Text fields: "Show a hint in a text field to help
+                    // communicate its purpose"; Passwords' grey 「User」 / 「Notes」, P12), not a footer under it
+                    TextField("", text: $pasteText, prompt: Text("免输入链接，或 KUROBBS_TOKEN=… 两行"), axis: .vertical)
+                        .lineLimit(3, reservesSpace: true)
                         .setupPlainInput()
                     #if !os(Android)
                     // The system paste control (P12 row: "Paste 是系统粘贴按钮、随系统语言"): one tap, no paste prompt
@@ -168,8 +175,6 @@ struct PhonePage: View {
                         Task { @MainActor in pasteText = s }
                     }
                     #endif
-                } footer: {
-                    Text("把免输入链接，或 KUROBBS_TOKEN=… 和 KUROBBS_DID=… 两行粘贴到这里：")
                 }
             }
             .navigationTitle("粘贴密钥串")
@@ -213,7 +218,7 @@ struct PhonePage: View {
     }
 }
 
-/// A row title with its grey hint under it (the web's <label> + .hint).
+/// A row title with its grey hint under it (the web's <label> + .hint); a switch's one line of what it does.
 struct PhoneRowLabel: View {
     var title: String
     var hint: String
@@ -233,12 +238,11 @@ struct PhoneRowLabel: View {
 /// shot after-light-04, 10-13), moving a value the owner reads on the right.
 struct PhoneValueRow: View {
     var title: String
-    var hint: String
     var value: String
 
     var body: some View {
         HStack {
-            PhoneRowLabel(title: title, hint: hint)
+            Text(title)
             Spacer()
             Text(value)
                 .foregroundStyle(.secondary)
