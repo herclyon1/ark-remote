@@ -71,6 +71,12 @@ struct StatusPage: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    #if !os(Android)
+                    // on the page ground, not in a card, as Health's D / W / M control (ios27-健康Steps详情);
+                    // skip-ui: listRowInsets unavailable
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    #endif
                 }
             }
             thisShift
@@ -134,9 +140,12 @@ struct StatusPage: View {
     private var deviceCard: some View {
         Section {
             Label {
+                // the name alone on the first line, the state and how fresh it is on the grey line under it, as Find My's
+                // card puts 「This Mac」 and the time under the name (P7; HIG Writing: "Choose simple, plain language")
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(data.deviceHead.isEmpty ? data.deviceName : "\(data.deviceName) · \(data.deviceHead)").font(.headline)
-                    Text(data.deviceStatus).font(.footnote).foregroundStyle(.secondary)
+                    Text(data.deviceName).font(.headline)
+                    Text(data.deviceHead.isEmpty ? data.deviceStatus : "\(data.deviceHead) · \(data.deviceStatus)")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
             } icon: {
                 deviceIcon
@@ -202,7 +211,10 @@ struct StatusPage: View {
             }
             .modifier(StatusAsking(ask: $confirm, anchor: "run_now", confirm: actions.confirm))
             Button { actions.refresh() } label: {
-                tileLabel("刷新", data.snapAt.map { ago($0) } ?? data.lastUpdate, tint: .gray, spinning: data.refreshing) {
+                // the icon stays put while a refresh runs: the pull to refresh shows the one progress indicator (HIG
+                // Progress indicators: "Display a progress indicator in a consistent location."); in the tint of the
+                // row's text, as the other two rows
+                tileLabel("刷新", data.snapAt.map { ago($0) } ?? data.lastUpdate, tint: .blue) {
                     symbol("arrow.clockwise", android: "Icons.Outlined.Refresh")
                 }
             }
@@ -216,17 +228,21 @@ struct StatusPage: View {
         }
     }
 
-    private func tileLabel<Icon: View>(_ title: String, _ sub: String, tint: Color, spinning: Bool = false,
+    /// The row's icon and words as the system's Label, so the three icons share one column and the words and the
+    /// separators line up (HIG Layout: "Align elements to make them easier to scan."; the icons were 12, 20 and 13 pt
+    /// wide in an HStack, the words starting at 67, 72 and 69.5 pt).
+    private func tileLabel<Icon: View>(_ title: String, _ sub: String, tint: Color,
                                        @ViewBuilder icon: () -> Icon) -> some View {
-        HStack(spacing: 12) {
-            // the title beside names the action: the icon is decorative (HIG VoiceOver: "Exclude purely decorative images")
-            if spinning { ProgressView() } else { icon().foregroundStyle(tint).accessibilityHidden(true) }
+        Label {
             // a list row that acts is drawn in the tint (red for the destructive role), its detail in grey, as Find My's
             // device actions (reference P7) and Settings' 「Sign Out」
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(Color.secondary) }
             }
+        } icon: {
+            // the title beside names the action: the icon is decorative (HIG VoiceOver: "Exclude purely decorative images")
+            icon().foregroundStyle(tint).accessibilityHidden(true)
         }
     }
 
@@ -311,15 +327,16 @@ struct StatusPage: View {
     @ViewBuilder private func planRows(_ blocks: [StatusPlanBlock]) -> some View {
         ForEach(blocks) { b in
             if let q = b.queueName {
-                // Clock's alarm row (reference P6 / N11: mac27-时钟-闹钟-有数据.png, P6-快捷指令-自动化列表.png): the time
-                // large, the name and what happens today small under it, the switch on the right
+                // 快捷指令's automation row (reference P6-快捷指令-自动化列表.png): the time in bold, the name and what
+                // happens today small under it, the switch on the right
                 Toggle(isOn: Binding(get: { b.runsToday }, set: { actions.setRunsToday(q, $0) })) {
                     VStack(alignment: .leading, spacing: 2) {
                         // a skipped shift's row has no time (StatusMapping, 审查 B2); the lead time is 东京, as the tile (B4)
                         if b.shownTime.isEmpty {
                             Text(q)
                         } else {
-                            Text(b.shownTime).font(.title2).bold().tabularDigits()
+                            // the size of 快捷指令 › 自动化's 「At 7:00, daily」 (P6), the iOS reference of the row
+                            Text(b.shownTime).font(.headline).tabularDigits()
                         }
                         Text([b.shownTime.isEmpty ? "" : q, b.machineNote, b.runsToday ? "今天照常" : "今天跳过，明天照常", b.after]
                                 .filter { !$0.isEmpty }.joined(separator: " · "))
@@ -329,7 +346,7 @@ struct StatusPage: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(b.shownTime).font(.title2).bold().tabularDigits()
+                    Text(b.shownTime).font(.headline).tabularDigits()
                     let sub = [b.machineNote, b.after].filter { !$0.isEmpty }.joined(separator: " · ")
                     if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(.secondary) }
                 }
@@ -345,7 +362,9 @@ struct StatusPage: View {
         }
     }
 
-    private static let switchFoot = "时刻行的开关：关掉 = 这趟今天不跑，明天照常；再打开就恢复"
+    /// What a time row's switch does, once on the page (under 这一趟; 明日安排 has the same rows). HIG Toggles: "Describe
+    /// what it does when turned on, and people can infer the opposite."
+    private static let switchFoot = "关掉时刻行的开关，这趟今天不跑，明天照常。"
 
     @ViewBuilder private var thisShift: some View {
         let mine = data.plan.filter { $0.queueName != nil && $0.queueName == data.currentQueue }
@@ -375,7 +394,10 @@ struct StatusPage: View {
             } header: {
                 Text("明日安排")
             } footer: {
-                Text((data.planFoot + [Self.switchFoot]).joined(separator: "\n"))   // view.js:259 foot lines + the switch note
+                // view.js:259 foot lines; the switch note is said once, under 这一趟 (or here when 这一趟 has no rows)
+                let mineEmpty = !data.plan.contains { $0.queueName != nil && $0.queueName == data.currentQueue }
+                let lines = data.planFoot + (mineEmpty ? [Self.switchFoot] : [])
+                if !lines.isEmpty { Text(lines.joined(separator: "\n")) }
             }
         }
     }
