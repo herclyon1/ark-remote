@@ -1152,6 +1152,7 @@ def main():
             base = json.load(open(cache, encoding="utf-8"))
         else:
             base = mbmod.fetch_real_state(g.real_topic_for_read())
+            os.makedirs(os.path.dirname(cache), exist_ok=True)   # with --out elsewhere, out/ may not exist yet
             with open(cache, "w", encoding="utf-8") as f:
                 json.dump(base, f, ensure_ascii=False)
     local = None
