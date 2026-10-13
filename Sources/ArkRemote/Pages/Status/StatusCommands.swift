@@ -53,27 +53,29 @@ enum StatusCommands {
         a.runNow = {
             // sending while a run is on makes AUTO-MAS and the manual run fight (view.js:1209: a one-button alert)
             if !data.busy.isEmpty {
-                ask.wrappedValue = StatusAsk.notice("正在跑别的", "现在正在跑 \(data.busy.joined(separator: "、"))，跑完再派。硬要派会和它打架。")
+                ask.wrappedValue = StatusAsk.notice("正在跑别的", "现在正在跑 \(data.busy.joined(separator: "、"))，跑完再派。")
                 return nil
             }
+            // each confirmation says one sentence (HIG Action sheets: "Provide a message only if necessary"; reference P10,
+            // Calendar's discard confirmation): what the press costs or changes; the 12-hour mailbox rule is the receipt's to tell
             return StatusAsk(
-                title: "现在跑一趟？", message: "让「\(queue)」现在多跑一趟。会真的花掉理智／波片；机器关着的话，12 小时内开机才会跑，再晚就作废。",
+                title: "现在跑一趟？", message: "「\(queue)」多跑一趟，会花掉理智和波片。",
                 ok: "跑一趟",
                 body: .object(["action": .string("run_now"), "confirmed": .bool(true), "queue": .string(queue)]),
                 // the mailbox keeps a message 12 hours (ntfy.sh's cache; Pending.swift isStale) and nothing tracks a one-shot
                 // order: 「下次开机跑」 promised a run that a machine off longer never got (edge audit 23)
-                okText: "已派：现在跑一趟", anchor: "run_now")   // view.js:1215: one line, the confirm before it already says what happens when off
+                okText: "已派：现在跑一趟", anchor: "run_now")   // view.js:1215
         }
         a.refresh = { Task { await Live.shared.ping() } }
         a.stopAll = {
             // the relay drops an estop read from the boot backlog (boot_stages.py:534-546 LIVE_ONLY_ACTIONS): sent while the
             // machine is off it never runs, and the page waited 6 h for its receipt (审查 B8)
             if data.machineOff {
-                ask.wrappedValue = StatusAsk.notice("机器关着", "现在没有在跑的东西。关机时按的「停止一切」开机后也不会执行，所以这次没有发。")
+                ask.wrappedValue = StatusAsk.notice("机器关着", "关机时按的「停止一切」开机后不会执行，所以这次没有发。")
                 return nil
             }
             return StatusAsk(
-                title: "停止一切？", message: "停掉现在在跑的：队列、脚本和游戏。不动排班、不动任何设置，下一趟照常。回执会告诉你停干净没有。",
+                title: "停止一切？", message: "停掉在跑的脚本和游戏，下一趟照常。",
                 ok: "停止", destructive: true,
                 body: .object(["action": .string("estop"), "confirmed": .bool(true)]),
                 okText: "已下令停止一切", isEstop: true, anchor: "estop")   // view.js:1263
@@ -96,13 +98,13 @@ enum StatusCommands {
             // 23:00 became the next day's 08:30, a farm of ~24 h over the morning shift (审查 A3; boot_stages.py:692-694,
             // echofarm.py:329 → 114-124). The relay is to refuse a stale one; the App does not send it at all.
             if data.machineOff {
-                ask.wrappedValue = StatusAsk.notice("机器关着", "刷声骸要机器开着才能开始：关机时发出的要等开机才执行，所以这次没有发。开机后再按。")
+                ask.wrappedValue = StatusAsk.notice("机器关着", "刷声骸要机器开着才能开始，所以这次没有发。")
                 return nil
             }
             return StatusAsk(
                 // the relay holds no queue back for a farm (审查 B14: echofarm is read only by commands / engine tick / shutdown /
                 // phone, relay grep): a shift that comes due runs as usual
-                title: "开始刷？", message: "刷「\(nm)」到机器时间 \(t) 为止？期间脚本会一直在打；到点的班次照常跑，可能和它抢游戏。", ok: "开始刷",
+                title: "开始刷？", message: "刷「\(nm)」到机器时间 \(t)，期间到点的班次可能和它抢游戏。", ok: "开始刷",
                 body: .object(["action": .string("echo_farm"), "confirmed": .bool(true), "boss": .int(boss),
                                "until": .string(t), "name": .string(nm)]),
                 okText: "已派：刷到 \(t)", anchor: "echo_farm")   // view.js:1230
@@ -114,15 +116,15 @@ enum StatusCommands {
             let past = v <= machineNowHHMM()
             return StatusAsk(
                 title: "改收工时刻？",
-                message: past ? "机器时间现在已过 \(v)，会算成明天 \(v) 才收工。要马上停，按「提前收工」。"
-                    : "把收工时刻改成 \(v)（机器时间）？",
+                message: past ? "机器时间已过 \(v)，会到明天 \(v) 才收工。"
+                    : "收工改到机器时间 \(v)。",
                 ok: "改",
                 body: .object(["action": .string("echo_farm_until"), "until": .string(v)]), okText: "收工时刻已改",
                 anchor: "echo_farm_until")
         }
         a.stopEchoFarm = {
             StatusAsk(
-                title: "现在收工？", message: "会关掉脚本和游戏，配置还原成你原来那份。", ok: "收工", destructive: true,
+                title: "现在收工？", message: "关掉脚本和游戏，配置还原。", ok: "收工", destructive: true,
                 body: .object(["action": .string("echo_farm_stop")]), okText: "已收工", anchor: "echo_farm_stop")   // view.js:1246
         }
         a.confirm = { q in

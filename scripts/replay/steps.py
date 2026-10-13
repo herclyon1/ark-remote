@@ -444,7 +444,7 @@ step("farm.show", "farm", f"机器正在刷声骸（到机器时间 {FARM_HHMM}�
      expect=["~正在刷「回放Boss」", f"~机器时间 {FARM_HHMM}", "改收工时刻", "提前收工"], timeout=30)
 step("farm.row", "farm", "4C 段只剩「改成刷到几点」：没有「打哪个」「刷到几点」「开始刷」",
      [("see", "改成刷到几点（机器时间）")], expect=["改成刷到几点（机器时间）"],
-     absent=["刷到几点（机器时间）", "开始刷", "刷 4C 声骸 · 打哪个"])
+     absent=["刷到几点（机器时间）", "开始刷", "~打哪个"])
 step("farm.capsule", "farm", f"「改成刷到几点」胶囊显示机器时间的「到」{FARM_HHMM}（不随手机时区）",
      [], expect=[{"t": f"re:^0?{int(FH)}:{FM}$", "kind": "Button"}],
      android={"expect": [f"re:^(0?{int(FH)}:{FM}|{int(FH) % 12 or 12}:{FM} {'AM' if int(FH) < 12 else 'PM'})$"]})

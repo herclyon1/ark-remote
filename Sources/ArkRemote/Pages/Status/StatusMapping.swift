@@ -161,7 +161,7 @@ extension StatusData {
                     StatusPlanGame(name: l.replacingOccurrences(of: "▸", with: "").trimmingCharacters(in: .whitespaces), hints: []))
                 continue
             }
-            if let b = blocks.indices.last, let g = blocks[b].games.indices.last { blocks[b].games[g].hints.append(l) }
+            if let b = blocks.indices.last, let g = blocks[b].games.indices.last { blocks[b].games[g].hints.append(statusTidyHint(l)) }
             else if blocks.isEmpty { foot.append(l) }   // view.js:229 `else if (!cur) foot.push(l)`
         }
         for i in blocks.indices {
@@ -357,3 +357,48 @@ func statusLastGoodConfig() -> JSONValue? {
 
 /// schema.js BOSSES, from Logic/Schema.swift `bosses`.
 let statusBosses: [StatusBoss] = bosses.map { StatusBoss(index: $0.index, name: $0.name) }
+
+/// A plan line from the machine (plan.py) in Chinese typography: a half-width comma or bracket next to Chinese turns
+/// full-width (「梦枢天罗,落渊南丘」 → 「梦枢天罗、落渊南丘」), and a space between two Chinese characters goes
+/// (「剿灭 本周已打满」 → 「剿灭本周已打满」). Spaces next to Latin letters or digits stay (「理智 YW-4」). Nothing is cut.
+func statusTidyHint(_ line: String) -> String {
+    func cjk(_ c: Character?) -> Bool {
+        guard let v = c?.unicodeScalars.first?.value else { return false }
+        return (0x4E00...0x9FFF).contains(v) || (0x3000...0x303F).contains(v) || (0xFF00...0xFFEF).contains(v)
+    }
+    let cs = Array(line)
+    var out = ""
+    var i = 0
+    while i < cs.count {
+        let c = cs[i]
+        let prev = out.last
+        var j = i + 1
+        while j < cs.count, cs[j] == " " { j += 1 }
+        let next: Character? = j < cs.count ? cs[j] : nil
+        switch c {
+        case ",":
+            if cjk(prev) || cjk(next) { out.append("、"); i = j; continue }
+        case "(":
+            // a full-width bracket carries its own space: 「YW-4 (固定)」 → 「YW-4（固定）」
+            if cjk(prev) || cjk(next) {
+                while out.last == " " { out.removeLast() }
+                out.append("（")
+                i = j
+                continue
+            }
+        case ")":
+            if cjk(prev) || cjk(next) {
+                out.append("）")
+                i = j
+                continue
+            }
+        case " ":
+            if cjk(prev) && cjk(next) { i = j; continue }
+        default:
+            break
+        }
+        out.append(c)
+        i += 1
+    }
+    return out
+}

@@ -418,13 +418,12 @@ struct StatusPage: View {
                         .labelsHidden()
                 }
             } else {
+                // the name left and the value right on one line, as Calendar's 「Repeat」 row (P10); the section header already
+                // says 刷 4C 声骸, and the explanation is in the footer
                 Picker(selection: $bossIndex) {
                     ForEach(data.bosses) { b in Text("\(b.index). \(b.name)").tag(b.index) }
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("刷 4C 声骸 · 打哪个")
-                        Text("序号＝「讨伐强敌」列表从上往下数。刷的期间不花波片、不领周本奖励").font(.footnote).foregroundStyle(.secondary)
-                    }
+                    Text("打哪个")
                 }
                 .pickerStyle(.menu)
                 // view.js:174-176 echoFarmBlock: title + explanation left, the time right of them; picked, not typed
@@ -440,8 +439,12 @@ struct StatusPage: View {
         } header: {
             Text("刷 4C 声骸")
         } footer: {
-            // HIG Entering data: 开始刷 is grey until a boss and a time are there, and this line says why
-            if data.echoFarm == nil, let why = StatusCommands.echoFarmProblem(boss: bossIndex, until: echoUntil) { Text(why) }
+            // 打哪个's explanation; HIG Entering data: 开始刷 is grey until a boss and a time are there, and a line says why
+            if data.echoFarm == nil {
+                let why = StatusCommands.echoFarmProblem(boss: bossIndex, until: echoUntil)
+                Text((["序号是「讨伐强敌」列表从上往下数的位置。刷的期间不花波片、不领周本奖励。"] + (why.map { [$0] } ?? []))
+                        .joined(separator: "\n"))
+            }
         }
     }
 
@@ -516,7 +519,7 @@ struct StatusPage: View {
             Section {
                 // view.js:458 nowRow sits above the newest three
                 if let actual = data.todayActual { todayActualRow(actual) }
-                ForEach(data.receipts.prefix(3)) { r in receiptRow(r, at: r.shownAt) }
+                ForEach(data.receipts.prefix(3)) { r in receiptRow(r, at: receiptShortAt(r.shownAt)) }
                 if data.receipts.count > 3 {
                     // by value (StatusRoute.receipts; the page is built in body's navigationDestination), so a reselect can pop it
                     NavigationLink(value: StatusRoute.receipts) {
@@ -528,14 +531,9 @@ struct StatusPage: View {
                     }
                 }
             } header: {
-                // view.js:449 `<h2>机器最近的回执 <small>…</small></h2>`; index.html:232 h2 small = footnote size, weight 400, dim
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("机器最近的回执")
-                    if !note.isEmpty {
-                        Text(note).font(.footnote).fontWeight(.regular).foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)   // Android centred the bare HStack in the header slot
+                // one line in the header's own type (Health's 「Steps」 header is one text; view.js:449 had a smaller second part)
+                Text(note.isEmpty ? "机器最近的回执" : "机器最近的回执 · \(note)")
+                    .frame(maxWidth: .infinity, alignment: .leading)   // Android centred a bare header in the slot
             }
         }
     }
@@ -587,7 +585,9 @@ func receiptRow(_ r: StatusReceipt, at: String) -> some View {
     // overran the text and the card on Android (test pass 4, receipt-row-overlap.png)
     let when = r.when(at)
     let below = when.contains(" 发出 · ")   // StatusModels.swift:78, the two-time form
-    return HStack {
+    // the icon and the time on the first text line (HIG Lists; Health's day list keeps the time level with the words):
+    // centred against a text of 2-4 lines they floated beside its middle
+    return HStack(alignment: .firstTextBaseline) {
         receiptIcon(r).fixedSize(horizontal: true, vertical: false)
         VStack(alignment: .leading, spacing: 2) {
             Text(r.text).foregroundStyle(r.note == nil ? Color.primary : Color.secondary)
@@ -617,8 +617,9 @@ func todayActualRow(_ actual: String) -> some View {
         Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.gray).accessibilityLabel("成功")
     } else if r.ok {
         // the receipt text does not say whether it went through: the icon carries it, so it is named (accessibilityLabel docs:
-        // "a view that doesn't display text, like an icon")
-        Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.green).accessibilityLabel("成功")
+        // "a view that doesn't display text, like an icon"). Grey: a run that went fine is not stressed (design rule 5),
+        // only the red ✗ stands out
+        Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.gray).accessibilityLabel("成功")
     } else {
         // no Material cancel icon in skip-ui's table (Components/Image.swift): its close glyph, in red
         symbol("xmark.circle.fill", android: "Icons.Filled.Close").foregroundStyle(Color.red).accessibilityLabel("失败")
@@ -658,7 +659,13 @@ struct StatusReceiptsList: View {
         return seen
     }
 
+    /// 「今天」 / 「昨天」 for the last two days, else 「9月17日」.
     private func dayName(_ d: String) -> String {
+        switch receiptDayWord(d) {
+        case ""?: return "今天"
+        case let w?: return w
+        case nil: break
+        }
         let p = d.split(separator: "-")
         guard p.count == 2, let m = Int(p[0]), let day = Int(p[1]) else { return d }
         return "\(m)月\(day)日"
@@ -674,7 +681,35 @@ struct StatusReceiptsList: View {
             }
         }
         .navigationTitle("回执")   // view.js:1162 openPage("回执", …)
+        #if os(iOS)
+        // small and centred, as Health's pushed day list (P8); iOS only (MonthCardPage says why)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .refreshable { await Live.shared.ping() }
+    }
+}
+
+/// A receipt day 「MM-DD」 on the phone's clock: "" for today, 「昨天」 for yesterday, nil for an earlier day.
+func receiptDayWord(_ md: String, now: Date = Date()) -> String? {
+    let cal = Calendar.current
+    func mmdd(_ d: Date) -> String {
+        let c = cal.dateComponents([.month, .day], from: d)
+        return "\(pad2(c.month ?? 0))-\(pad2(c.day ?? 0))"
+    }
+    if md == mmdd(now) { return "" }
+    if let y = cal.date(byAdding: .day, value: -1, to: now), md == mmdd(y) { return "昨天" }
+    return nil
+}
+
+/// A receipt's 「MM-DD HH:MM」 as the 状态 page shows it: 「12:57」 today, 「昨天 20:23」 yesterday, else as it is. The
+/// short form leaves the text more of the row (Health's day list: one line of words, the time beside it).
+func receiptShortAt(_ at: String, now: Date = Date()) -> String {
+    guard at.count > 6 else { return at }
+    let time = String(at.dropFirst(6))
+    switch receiptDayWord(String(at.prefix(5)), now: now) {
+    case ""?: return time
+    case let w?: return "\(w) \(time)"
+    case nil: return at
     }
 }
 

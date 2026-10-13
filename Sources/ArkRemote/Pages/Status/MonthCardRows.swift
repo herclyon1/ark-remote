@@ -77,10 +77,10 @@ struct MonthCardRows: View {
 }
 
 /// The pushed page of one game (monthcard.js pageHtml() / open()): what is registered, 「登记充值」 with a stepper and
-/// 「按游戏里的天数对准」 with the day count the game shows; each asks before it registers. Read as Apple's Edit
-/// Subscription page (reference P9 / N6: P9-苹果订阅-4-manage.png): the first group is the subscription card, the
-/// days left large and bold with the last day under it in grey; the asks are confirmationDialogs from their buttons
-/// (reference P10).
+/// 「按游戏里的天数对准」 with the day count the game shows; each asks before it registers. The first group reads as a
+/// Health Summary card (ios27-健康Summary-满数据-1.png): the game's own colour icon and name on top, the day count large
+/// with its unit small and grey (「7,891 steps」), the last day under it; the asks are confirmationDialogs from their
+/// buttons (reference P10).
 struct MonthCardPage: View {
     var game: String
 
@@ -97,11 +97,16 @@ struct MonthCardPage: View {
         List {
             Section {
                 if let e {
-                    // the subscription card: 「还剩 N 天」 as its title (orange from 5 days left, red once lapsed, else the
-                    // primary colour), 「最后一次领取 X月X日」 as its grey line, the sync note under them
+                    // the card: the game's tab icon (his 09-14 project colour icons, design rule 6) and name, then the day
+                    // count large (orange from 5 days left, red once lapsed, else the primary colour) with 「还剩」 and
+                    // 「天」 small and grey, 「最后一次领取 X月X日」 grey under it, the sync note last
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(e.expired ? "已过期" : "还剩 \(e.left) 天").font(.title).bold()
-                            .foregroundStyle(e.expired || e.left <= 5 ? monthCardTone(e) : Color.primary)
+                        HStack(spacing: 6) {
+                            decorativeImage(Self.icon[game] ?? "tab-arknights").resizable().scaledToFit()
+                                .frame(width: iconSide, height: iconSide)
+                            Text(game).font(.subheadline).bold()
+                        }
+                        dayCount(e)
                         Text("最后一次领取 \(MonthCardStore.md(e.last))").foregroundStyle(.secondary)
                         if e.local {
                             Text(MonthCardStore.syncNote).font(.footnote).foregroundStyle(.secondary)
@@ -114,7 +119,8 @@ struct MonthCardPage: View {
                     }
                 }
             } footer: {
-                Text("有效期内每天登录领一次；还剩 1 天＝明天登录那次是最后一次领取。还剩 5 天起每天提醒一次。")
+                // one sentence (HIG Writing: "If you can use fewer words, do so.")
+                Text("还剩 5 天起每天提醒一次。")
             }
             Section {
                 // UIStepper row (monthcard.js .mc-step): minus off at 1, plus off at 12
@@ -132,7 +138,7 @@ struct MonthCardPage: View {
             } header: {
                 Text("登记充值")
             } footer: {
-                Text("付完钱在这里登记。买一次加 \(MonthCardStore.days) 天，接在最后一次领取日后面；已经过期的从登记当天算第 1 天。")
+                Text("买一次加 \(MonthCardStore.days) 天，接在最后一次领取后面。")
             }
             Section {
                 // Health's Add Data row: the name on the left, the number field taking the rest, right-aligned
@@ -150,12 +156,38 @@ struct MonthCardPage: View {
                 // HIG Entering data: 对准 is grey until the field holds a day count; a wrong entry is said here (monthcard.js
                 // #mcset said it in a toast)
                 Text((leftText.isEmpty || leftValue != nil ? "" : "填 0–\(MonthCardStore.maxLeft) 的整数。")
-                     + "第一次用或者日期对不上时，照游戏里显示的「还剩 X 天」填。")
+                     + "照游戏里显示的「还剩 X 天」填。")
             }
         }
         .clearsFocusOnOutsideTap()
         .keyboardDone()
         .navigationTitle("\(game)月卡")
+        #if os(iOS)
+        // a pushed page's title small and centred, as Health's pushed pages (P8); iOS only: on Android the inline title
+        // was the one he called uglier (10-07 21:10)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+
+    /// The tab icon of each game (ContentView tabIcon), as the card's category icon.
+    private static let icon = ["明日方舟": "tab-arknights", "终末地": "tab-endfield", "鸣潮": "tab-wuwa"]
+    @ScaledMetric(relativeTo: .subheadline) var iconSide: CGFloat = 20
+
+    /// 「还剩 15 天」 as Health's card value: the number large and bold, the words around it small and grey; read as one
+    /// element 「还剩 15 天」.
+    @ViewBuilder private func dayCount(_ e: MonthCardEntry) -> some View {
+        let tone = e.expired || e.left <= 5 ? monthCardTone(e) : Color.primary
+        if e.expired {
+            Text("已过期").font(.title).bold().foregroundStyle(tone)
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("还剩").font(.subheadline).foregroundStyle(.secondary)
+                Text("\(e.left)").font(.largeTitle).bold().foregroundStyle(tone)
+                Text("天").font(.subheadline).foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("还剩 \(e.left) 天")
+        }
     }
 
     /// The yes of a registration: the rows show the new date and days at once (no toast; HIG Alerts "Avoid using an
@@ -168,9 +200,10 @@ struct MonthCardPage: View {
         if a.add != nil { count = 1 } else { leftText = ""; leftFocus = false }
     }
 
-    /// index.html .row input.short with inputmode="numeric", placeholder 「天数」, 64–80 px wide.
+    /// index.html .row input.short with inputmode="numeric". The prompt shows the format (HIG Text fields: "Show a hint in
+    /// a text field to help communicate its purpose"); the row's name already says what to enter, 「天」 follows it.
     @ViewBuilder private var dayField: some View {
-        let field = TextField("天数", text: $leftText)
+        let field = TextField("天数", text: $leftText, prompt: Text("0–\(MonthCardStore.maxLeft)"))
             .focused($leftFocus)
             .multilineTextAlignment(.trailing)
             .autocorrectionDisabled()
