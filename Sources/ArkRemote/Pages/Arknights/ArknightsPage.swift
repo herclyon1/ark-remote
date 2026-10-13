@@ -340,8 +340,13 @@ struct ArknightsValueRow<Field: View>: View {
 
     var body: some View {
         HStack {
+            #if os(Android)
+            // skip-fuse-ui has no layoutPriority; the Compose Row measures the name first and the field fills the rest
+            Text(verbatim: label)
+            #else
             Text(verbatim: label)
                 .layoutPriority(1)
+            #endif
             field()
                 .multilineTextAlignment(.trailing)
         }

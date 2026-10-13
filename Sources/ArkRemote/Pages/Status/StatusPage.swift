@@ -284,7 +284,7 @@ struct StatusPage: View {
                     Spacer()
                     if t.error == nil {
                         HStack(alignment: .firstTextBaseline, spacing: 1) {
-                            Text(t.value.map(String.init) ?? "–").font(.title2).bold().monospacedDigit()
+                            Text(t.value.map(String.init) ?? "–").font(.title2).bold().tabularDigits()
                             if let cap = t.cap { Text("/\(cap)").font(.footnote).foregroundStyle(.secondary) }
                         }
                         .redacted(reason: placeholder ? .placeholder : [])
@@ -319,7 +319,7 @@ struct StatusPage: View {
                         if b.shownTime.isEmpty {
                             Text(q)
                         } else {
-                            Text(b.shownTime).font(.title2).bold().monospacedDigit()
+                            Text(b.shownTime).font(.title2).bold().tabularDigits()
                         }
                         Text([b.shownTime.isEmpty ? "" : q, b.machineNote, b.runsToday ? "今天照常" : "今天跳过，明天照常", b.after]
                                 .filter { !$0.isEmpty }.joined(separator: " · "))
@@ -329,7 +329,7 @@ struct StatusPage: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(b.shownTime).font(.title2).bold().monospacedDigit()
+                    Text(b.shownTime).font(.title2).bold().tabularDigits()
                     let sub = [b.machineNote, b.after].filter { !$0.isEmpty }.joined(separator: " · ")
                     if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(.secondary) }
                 }
@@ -653,5 +653,18 @@ struct StatusReceiptsList: View {
         }
         .navigationTitle("回执")   // view.js:1162 openPage("回执", …)
         .refreshable { await Live.shared.ping() }
+    }
+}
+
+private extension Text {
+    /// Digits of equal width, so a changing number or time does not shift (the Health Summary value and the Clock alarm
+    /// time). Android: skip-fuse-ui marks Text.monospacedDigit() unavailable (Text/Text.swift:347-350); Roboto's
+    /// digits are tabular by default, so the Text is used as it is.
+    func tabularDigits() -> Text {
+        #if os(Android)
+        self
+        #else
+        monospacedDigit()
+        #endif
     }
 }

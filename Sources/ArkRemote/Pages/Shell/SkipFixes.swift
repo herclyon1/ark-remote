@@ -170,7 +170,8 @@ extension View {
 /// keyboardDone() on iOS. Since iOS 26 the .keyboard toolbar is a floating glass capsule that is not part of the
 /// keyboard's safe area (developer.apple.com/forums/thread/797250 and /thread/799692), so the List scrolled a focused
 /// field near the page end only to the keyboard's top edge, under the capsule: 鸣潮 「周本打第几个」 at y 599–621 behind
-/// 完成 at 593–629, the typed number unseen (test pass 6, iOS 27). While a keyboard is up the List gets that much more
+/// 完成 at 593–629, the typed number unseen (test pass 6, iOS 27; that row is a Stepper since app-r1, the other number
+/// and text fields still need it). While a keyboard is up the List gets that much more
 /// bottom safe area, so a last row can scroll above the capsule. That room alone did not keep fields clear: the system
 /// scroll stops at a List edge that moves from test to test (the 0.4.4 final pass had 终末地 循环执行 behind 完成 with
 /// it), so KeyboardRowReveal moves the focused row above the keyboard's end frame. The toolbar stays the system one:
