@@ -63,7 +63,22 @@ func menuPicker<Selection: Hashable, Content: View, Title: View>(selection: Bind
     #else
     Picker(selection: selection, content: content, label: title)
         .pickerStyle(.menu)
+        .tint(Color.secondary)   // the value grey (menuValueGrey says why); this branch is iOS only
     #endif
+}
+
+extension View {
+    /// iOS: a menu row's value and its ⌃⌄ in the secondary label colour, as Calendar's 「Alert  None」 and Shortcuts'
+    /// 「Weekly」 (P4); SwiftUI draws them in the accent colour, which marks the value as more than it is (HIG Color:
+    /// "reserve it for elements that truly benefit from emphasis"; app-1013 review 鸣潮 4). Android: as it is (the
+    /// Material dropdown keeps its own colours).
+    func menuValueGrey() -> some View {
+        #if os(Android)
+        self
+        #else
+        tint(Color.secondary)
+        #endif
+    }
 }
 
 /// `if shown { Section … }` for the top level of a List.

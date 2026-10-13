@@ -426,6 +426,7 @@ struct StatusPage: View {
                     Text("打哪个")
                 }
                 .pickerStyle(.menu)
+                .menuValueGrey()
                 // view.js:174-176 echoFarmBlock: title + explanation left, the time right of them; picked, not typed
                 HStack(spacing: 12) {
                     rowTitle("刷到几点（机器时间）", "已过就算明天。到点自动收工、配置还原")

@@ -68,25 +68,7 @@ struct EWRowView: View {
     }
 
     var body: some View {
-        #if os(iOS)
-        if row.kind == .select {
-            // a menu row: the Picker itself is the row, its tag lines inside its label, so the list draws the value grey
-            // with the ⌃⌄ beside it, as Calendar's 「Alert  None」 and Shortcuts' 「Weekly」 (P4); wrapped in a VStack the
-            // Picker was a free-standing menu button, its value in the accent colour (HIG Color: "reserve it for elements
-            // that truly benefit from emphasis"). The kind of a row never changes, so this is still one shape per row.
-            selectRow
-                .listRowBackground(rowBackground(nil))
-        } else {
-            stacked
-        }
-        #else
-        stacked
-        #endif
-    }
-
-    /// The row with its tag lines under it. One shape with or without a tag: a branch here would rebuild the TextField
-    /// on the first keystroke (「待保存」 appears) and drop the keyboard.
-    private var stacked: some View {
+        // One shape with or without a tag: a branch here would rebuild the TextField on the first keystroke (「待保存」 appears) and drop the keyboard.
         VStack(alignment: .leading, spacing: 4) {
             control
             if let tag, row.kind != .box {
@@ -97,20 +79,6 @@ struct EWRowView: View {
         // never cleared (HIG Lists and tables: a list "highlights a row only briefly"); the line under the row says it
         .listRowBackground(rowBackground(nil))   // never nil on Android (SkipFixes.swift)
     }
-
-    #if os(iOS)
-    private var selectRow: some View {
-        Picker(selection: selectBinding) {
-            choiceItems
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                EWRowTitle(label: row.label, hint: hint)
-                if let tag { EWTagLine(tag: tag, onResend: onResend) }
-            }
-        }
-        .pickerStyle(.menu)
-    }
-    #endif
 
     private var selectBinding: Binding<String> {
         Binding(get: { value == .null ? "" : value.key }, set: { setChoice($0) })
