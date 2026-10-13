@@ -248,6 +248,12 @@ class Runner:
                     if self.wait_for(CLEAR_SEL, 4):
                         break
                 self.tap_until_gone(CLEAR_SEL, step)
+                # the action sheet leaves the element tree as its dismissal starts, and the line under the title goes
+                # with it, so the list moves up; a touch during that transition is not delivered to the page (app-r1
+                # fix round 2: ark.battle.discard's 作战开关 toggle right after the clear was lost 2 of 2 times, and
+                # passed once the step waited about a second). Wait for the line to go, then for the transition.
+                self.wait_for(PENDING_LINE, 4, gone=True)
+                time.sleep(0.6)
             else:
                 self.act(("tap", CLEAR_SEL), step)
         elif kind == "tab":
