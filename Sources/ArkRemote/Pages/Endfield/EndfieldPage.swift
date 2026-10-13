@@ -208,6 +208,11 @@ struct EndfieldMorePage: View {
         .keyboardDone()
         // the ✕ / ✓ of 「待保存」 here too, so a change made on this page is saved from it
         .modifier(EWSaveBar(title: name))
+        #if os(iOS)
+        // a pushed page's title small and centred, as Shortcuts' pushed editors and Health's pushed lists (P5); iOS only
+        // (MonthCardPage says why)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         // ✕ (edits dropped), a send, a newer machine state: back to what the master now shows (EndfieldPage's own onChange)
         .onChange(of: data.master.values) { _, _ in
             let d = self.data()

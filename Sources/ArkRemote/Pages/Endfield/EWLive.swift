@@ -283,6 +283,10 @@ struct EndfieldStockpilePage: View {
         }
         #endif
         .navigationTitle(Stockpile.title)
+        #if os(iOS)
+        // a pushed page's title small and centred, as Health › All Recorded Data (P5); iOS only (MonthCardPage says why)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         // refreshed by pulling down only, as every other page (BOARD/App-待他定项-从记录定-1014.md E4: the toolbar 刷新
         // was a duplicate found only here; the page loads itself on open, .task below, and his 09-02 10:29 asks for manual
         // refresh as a fallback); under the empty state too, whose own button stays
