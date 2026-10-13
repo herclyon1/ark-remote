@@ -216,11 +216,13 @@ struct ArknightsPage: View {
     var weeklySection: some View {
         listSection("ark-weekly", ifLet: data.annihilationDoneThisWeek) { done in
             Section {
-                HStack {
-                    Text("剿灭")
-                    Spacer()
+                // a read-only value: the system's name + value row (iOS reads the two as one element); the value
+                // secondary on Android too, where skip-ui's LabeledContent draws it in the primary colour
+                LabeledContent {
                     Text(done ? "本周已打满" : "本周还没打满")
                         .foregroundStyle(.secondary)
+                } label: {
+                    Text("剿灭")
                 }
             } header: {
                 Text("明日方舟 · 周常")
@@ -308,13 +310,40 @@ struct ArknightsTextRow: View {
     let label: String
     @Binding var text: String
 
+    /// The grey prompt of an empty box (the machine has null): the word the 无人机 menu already uses for a null
+    /// (ArknightsPickerRow 「未设」). Not the row's name, which 0.4.4 showed as the prompt under the name: on the same
+    /// row as the name it would say it twice.
+    static let unset = "未设"
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(verbatim: label)
-            // a stage code (1-7, CE-6): an auto-capital or an autocorrection made it a code the relay's pattern refuses or
-            // another stage (edge audit 30); the same input traits as the setup screen's mailbox field
-            TextField(label, text: $text)
+        // a stage code (1-7, CE-6): an auto-capital or an autocorrection made it a code the relay's pattern refuses or
+        // another stage (edge audit 30); the same input traits as the setup screen's mailbox field
+        ArknightsValueRow(label: label) {
+            TextField(label, text: $text, prompt: Text(ArknightsTextRow.unset))
                 .setupPlainInput()
+        }
+    }
+}
+
+/// One row, the name leading and the value trailing, as Shortcuts › an automation's options lay out each setting
+/// (name left, value right; app-page-references P2) and as the 终末地 / 鸣潮 tabs' text rows already do; 0.4.4 put the
+/// field on a second line under the name.
+/// Not LabeledContent: its form style gives the name a fixed share of the row, and 优先刷取的活动关卡序号 was cut
+/// with … beside the field (tried 10-13 on iOS 27) — a cut text is what regression list 8 forbids (10-02 20:49
+/// 「不应该是省略号」); a field sized to its text instead would leave a 10 pt tap target for 「1」. Here the name is
+/// laid out first (layoutPriority) and wraps if it must, and the field takes the rest of the row, so the whole right
+/// side of the row is the field. Android: a Compose Row, the field filling what the name leaves (skip-ui TextField
+/// fillWidth), as 终末地's rows.
+struct ArknightsValueRow<Field: View>: View {
+    let label: String
+    @ViewBuilder let field: () -> Field
+
+    var body: some View {
+        HStack {
+            Text(verbatim: label)
+                .layoutPriority(1)
+            field()
+                .multilineTextAlignment(.trailing)
         }
     }
 }
@@ -326,10 +355,7 @@ struct ArknightsNumberRow: View {
     @Binding var text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(verbatim: label)
-            numberField
-        }
+        ArknightsValueRow(label: label) { numberField }
     }
 
     @ViewBuilder private var numberField: some View {
@@ -345,7 +371,7 @@ struct ArknightsNumberRow: View {
                 }
                 text = out
             }
-        ))
+        ), prompt: Text(ArknightsTextRow.unset))
         #if os(macOS)
         field
         #else
