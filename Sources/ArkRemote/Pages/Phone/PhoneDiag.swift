@@ -330,7 +330,7 @@ func diagKB(_ text: String) -> String {
     }
 
     /// A tap on the line: the latest marked record while it is not in the bucket (the line then says 「点这行可复制 / 分享」),
-    /// otherwise the log as it is now, unsent (upWord 「没标记，留在手机里没送」).
+    /// otherwise the log as it is now, unsent (upWord 「还没按「就是这里」，只在这台手机里」).
     func openSheet() {
         prepareSheet()
         sheetOpen = true
@@ -359,7 +359,7 @@ func diagKB(_ text: String) -> String {
         let up: String
         if u == nil || state == nil { up = "上传：还在送" }
         else if state == "sent" { up = "上传：已送达" }
-        else if state == "local" { up = "没标记，留在手机里没送" }
+        else if state == "local" { up = "还没按「就是这里」，只在这台手机里" }   // plain words for 「没标记」 (HIG Writing: "avoiding jargon"; HIG review 1014)
         else { up = "上传：没送到（\(u?["detail"]?.string ?? "原因不明")）" }
         // no file format or size in the words (HIG Writing: "avoiding jargon"; app-1013 review 手机 8)
         return (json, "\(mk)\(n) 条。\(up)。送不到时复制后粘到聊天里，或用分享发出。", state == "sent")

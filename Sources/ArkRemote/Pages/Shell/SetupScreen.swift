@@ -4,8 +4,8 @@ import SwiftUI
 /// Same words as the web page. P16 (BOARD/app-page-references.txt; no usable Apple image, judged by HIG text): one
 /// short step, nothing optional in it, so it stays the two groups it was. HIG Onboarding: "design a flow that's fast,
 /// fun, and optional"; HIG Entering data: "if you include a Next or Continue button after a set of text fields, make
-/// the button available only after people enter the data you require" — 开始使用 is disabled until both are filled and
-/// the footer says so (the web's toast 「两样都要填」). The topic field takes no auto-capitalisation or auto-correction: the topic is
+/// the button available only after people enter the data you require" — 开始使用 is disabled until both are filled, which
+/// says it by itself (the web's toast 「两样都要填」 is not repeated in the footer). The topic field takes no auto-capitalisation or auto-correction: the topic is
 /// case-sensitive and iOS capitalising its first letter silently broke it (view.js note, simulator 2026-09-14).
 struct SetupScreen: View {
     @State var topic = ""
@@ -31,7 +31,8 @@ struct SetupScreen: View {
                             .setupNumberInput()
                     }
                 } footer: {
-                    // one fixed line, so the page does not jump as the fields fill (view.js:126 「两样都要填」 kept)
+                    // one fixed line, so the page does not jump as the fields fill; no 「两样都要填」: the grey 开始使用 already says both
+                    // are needed (HIG Entering data: "make the button available only after people enter the data you require")
                     Text(Self.footNote)
                 }
                 Section {
@@ -76,7 +77,7 @@ struct SetupScreen: View {
         }
     }
 
-    static let footNote = "两样都要填。只存在这台手机里，填一次就不再问。"
+    static let footNote = "只存在这台手机里，填一次就不再问。"
     /// case kept: ntfy topics are case-sensitive (Relay.saveConfig)
     private var trimmedTopic: String { topic.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedPin: String { pin.trimmingCharacters(in: .whitespacesAndNewlines) }
