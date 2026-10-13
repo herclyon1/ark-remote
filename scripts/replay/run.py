@@ -234,29 +234,13 @@ class Runner:
             # the save bar's ✕ asks first (Pages/Shell/SaveBar.swift: 「放弃这 N 项改动？」 → 放弃改动)
             self.act(("tap", DISCARD_SEL, {"region": "top"}), step)
             # the action sheet takes no touch while it is still coming up (UIKit): tap 放弃改动 until the sheet is gone
-            for _ in range(3):
-                if not self.wait_for(DISCARD_OK, 4):
-                    raise StepFail(f"找不到「{DISCARD_OK}」")
-                time.sleep(0.5)
-                self.act(("tap", DISCARD_OK, {"last": True}), step)
-                if self.wait_for(DISCARD_OK, 3, gone=True):
-                    break
-            else:
-                raise StepFail(f"「{DISCARD_OK}」点了没关")
+            self.tap_until_gone(DISCARD_OK, step)
         elif kind == "clear":
             # 「不等了，清掉」: iOS asks from the pending line under the title (Pages/Shell/PendingBarView.swift
             # SubtitleLine); Android keeps the button on the row
             if self.drv.platform == "ios":
                 self.act(("tap", PENDING_LINE), step)
-                for _ in range(3):
-                    if not self.wait_for(CLEAR_SEL, 4):
-                        raise StepFail(f"找不到「{CLEAR_SEL}」")
-                    time.sleep(0.5)
-                    self.act(("tap", CLEAR_SEL, {"last": True}), step)
-                    if self.wait_for(CLEAR_SEL, 3, gone=True):
-                        break
-                else:
-                    raise StepFail(f"「{CLEAR_SEL}」点了没关")
+                self.tap_until_gone(CLEAR_SEL, step)
             else:
                 self.act(("tap", CLEAR_SEL), step)
         elif kind == "tab":
@@ -309,10 +293,12 @@ class Runner:
         elif kind == "bottom":
             # ("bottom", most): scroll down until the screen stops changing (the page end), at most `most` swipes
             prev = None
+            self.ctx["at_end"] = False
             for _ in range(rest[0] if rest else 8):
                 self.scroll("up")
                 sig = [(n["label"], n["y"]) for n in self.dump(True)["nodes"] if n["label"] and self.on_screen(n)]
                 if sig == prev:
+                    self.ctx["at_end"] = True   # a swipe moved nothing: the page is at its end (check_last)
                     break
                 prev = sig
         elif kind == "top":
@@ -734,6 +720,22 @@ class Runner:
             n = m
         return n
 
+    def tap_until_gone(self, sel, step):
+        """Tap a confirmation's button (放弃改动 / 不等了，清掉) until its sheet is gone. A sheet that comes up takes no
+        touch for a moment (UIKit), so a first tap can be lost; but a sheet that is only closing slowly (a loaded Mac)
+        still lists its button for a while, and a second tap at that place then lands on the page under it: on 状态
+        the iOS popover's 放弃改动 (y 146 pt) lies over the 开始刷 row once the list is scrolled there, and the stray
+        tap brought the 「机器关着」 notice back with the edit gone (status worker's open item 1, app-r1 offline run
+        21-30). So the button is tapped again only when the sheet is still up well after the last tap."""
+        for _ in range(3):
+            if not self.wait_for(sel, 4):
+                raise StepFail(f"找不到「{sel}」")
+            time.sleep(0.5)
+            self.act(("tap", sel, {"last": True}), step)
+            if self.wait_for(sel, 3, gone=True) or self.wait_for(sel, 6, gone=True):
+                return
+        raise StepFail(f"「{sel}」点了没关")
+
     def wait_for(self, sel, secs, gone=False, region="any"):
         """Poll the element tree until sel is on screen (or, gone=True, off it); False on timeout."""
         t_end = time.time() + secs
@@ -920,7 +922,11 @@ class Runner:
             if not hits:
                 return [f"没有「{sel_text(step['last_above'])}」"]
             top = hits[0]["y"] - hits[0]["h"] / 2
-            if not (top - 60 <= b <= top + 1):
+            # within 60 pt of it proves the page was scrolled to its end; a page shorter than the screen (鸣潮 since its
+            # 周本 row is a Stepper, app-r1: footer at 767.5, 就是这里 at 830) ends higher, and the ("bottom") action
+            # already saw a swipe move nothing, so only "above" is judged then
+            near = self.ctx.get("at_end") or top - 60 <= b
+            if not (near and b <= top + 1):
                 return [f"最后一行下边 {b:g}，「{sel_text(step['last_above'])}」上边 {top:g}"]
         if step.get("last_bottom"):
             lo, hi = step["last_bottom"]

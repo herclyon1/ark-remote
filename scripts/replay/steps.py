@@ -398,8 +398,11 @@ step("diag.bottom.ww", "diag", "诊断开 · 鸣潮滑到底 → 最后一行在
      [("tab", "鸣潮"), ("wait", 0.8), ("bottom", 6)], last_above=DIAG_BTN, on="ios")
 step("ph.diag.off", "phone", "诊断记录关掉 → 多出的行收起", [("tab", "手机"), ("top", 4), ("toggle", "诊断记录")],
      absent=["运行自检", "就是这里"])
+# last_bottom: a leftover room for the 诊断记录 bar (about 55 pt) would end the page near 815. Measured app-r1 (iOS 27,
+# tab bar top 872.5): a last card with no footer (状态 「查看全部」) ends at 853 with the system's own margin, diagnostics
+# never turned on; a footer text (方舟, 终末地) ends lower, 860-880.
 step("diag.off.status", "diag", "诊断关 · 状态根页滑到底 → 最后一行贴着底栏（没有多出的空白）",
-     [("tab", "状态"), ("wait", 0.8), ("bottom", 8)], last_bottom=[860, 880], absent=[DIAG_BTN], on="ios")
+     [("tab", "状态"), ("wait", 0.8), ("bottom", 8)], last_bottom=[845, 880], absent=[DIAG_BTN], on="ios")
 step("diag.off.ark", "diag", "诊断关 · 方舟滑到底 → 最后一行贴着底栏",
      [("tab", "方舟"), ("wait", 0.8), ("bottom", 6)], last_bottom=[860, 880], on="ios")
 step("diag.off.ef", "diag", "诊断关 · 终末地根页滑到底 → 最后一行贴着底栏",
