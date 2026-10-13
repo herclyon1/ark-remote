@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A command waiting for the user's yes (view.js ask() before oneShot / the save flow): a confirmationDialog anchored to
-/// the button that asked (StatusPage `Asking`, keyed by `anchor`), or, for `single`, the one-button alert of StatusTab.
+/// the button that asked (StatusPage `StatusAsking`, keyed by `anchor`), or, for `single`, the one-button alert of StatusTab.
 struct StatusAsk: Equatable {
     var title: String
     var message: String

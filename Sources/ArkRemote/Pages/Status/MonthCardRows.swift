@@ -205,7 +205,7 @@ struct MonthCardPage: View {
     }
 }
 
-/// The confirmation of 登记 (kind "add") or 对准 (kind "left"), drawn from its button (as StatusPage's `Asking`).
+/// The confirmation of 登记 (kind "add") or 对准 (kind "left"), drawn from its button (as StatusPage's `StatusAsking`).
 struct MonthCardAsking: ViewModifier {
     @Binding var ask: MonthCardAsk?
     var kind: String
@@ -213,11 +213,16 @@ struct MonthCardAsking: ViewModifier {
 
     private func mine(_ a: MonthCardAsk?) -> Bool { (a?.add != nil ? "add" : a == nil ? "" : "left") == kind }
 
+    /// The last question shown, so the title stays while the dialog animates away after `ask` went nil.
+    @State var last: MonthCardAsk? = nil
+
     func body(content: Content) -> some View {
+        let shown = mine(ask) ? ask : nil
         content
-            .confirmationDialog(mine(ask) ? ask?.title ?? "" : "",
+            .onChange(of: shown) { _, v in if let v { last = v } }
+            .confirmationDialog((shown ?? last)?.title ?? "",
                                 isPresented: Binding(get: { mine(ask) }, set: { if !$0, mine(ask) { ask = nil } }),
-                                titleVisibility: .visible, presenting: mine(ask) ? ask : nil) { a in
+                                titleVisibility: .visible, presenting: shown ?? last) { a in
                 Button(a.ok) { confirm(a) }
                 Button("取消", role: .cancel) {}
             } message: { a in

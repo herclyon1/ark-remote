@@ -14,7 +14,7 @@ struct StatusPage: View {
     @State var bossIndex = 1
     @State var echoUntil = "08:30"
     @State var echoNewUntil = ""
-    /// The question of the command button just pressed, shown as a confirmationDialog drawn from that button (`Asking`;
+    /// The question of the command button just pressed, shown as a confirmationDialog drawn from that button (`StatusAsking`;
     /// reference P10 / N9: Calendar's discard confirmation; HIG Action sheets "Use an action sheet — not an alert — to
     /// offer choices related to an intentional action").
     @State var confirm: StatusAsk? = nil
@@ -22,8 +22,8 @@ struct StatusPage: View {
     @State var tick = 0
     /// Sizes that follow Dynamic Type (HIG Typography; ScaledMetric): the resource icon of a stamina tile, and the
     /// Android-only machine dot (no computer symbol in skip-ui's Material table, Components/Image.swift).
-    @ScaledMetric(relativeTo: .title2) private var resIcon: CGFloat = 30
-    @ScaledMetric(relativeTo: .body) private var dotSide: CGFloat = 10
+    @ScaledMetric(relativeTo: .title2) var resIcon: CGFloat = 30
+    @ScaledMetric(relativeTo: .body) var dotSide: CGFloat = 10
     /// A reselect of the 状态 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.status }
@@ -176,9 +176,9 @@ struct StatusPage: View {
                 }
                 Button("改收工时刻") { confirm = actions.changeEchoFarmUntil(newUntil(ef)) }
                     .disabled(statusTimeHHMM(newUntil(ef)) == nil)
-                    .modifier(Asking(ask: $confirm, anchor: "echo_farm_until", confirm: actions.confirm))
+                    .modifier(StatusAsking(ask: $confirm, anchor: "echo_farm_until", confirm: actions.confirm))
                 Button("提前收工", role: .destructive) { confirm = actions.stopEchoFarm() }
-                    .modifier(Asking(ask: $confirm, anchor: "echo_farm_stop", confirm: actions.confirm))
+                    .modifier(StatusAsking(ask: $confirm, anchor: "echo_farm_stop", confirm: actions.confirm))
             } header: {
                 Text("刷声骸")
             } footer: {
@@ -200,7 +200,7 @@ struct StatusPage: View {
                           (data.nextAt.isEmpty ? data.currentQueue : "\(data.currentQueue) · 下一趟 \(data.nextAt)"),
                           tint: .blue) { Image(systemName: "play.fill") }
             }
-            .modifier(Asking(ask: $confirm, anchor: "run_now", confirm: actions.confirm))
+            .modifier(StatusAsking(ask: $confirm, anchor: "run_now", confirm: actions.confirm))
             Button { actions.refresh() } label: {
                 tileLabel("刷新", data.snapAt.map { ago($0) } ?? data.lastUpdate, tint: .gray, spinning: data.refreshing) {
                     symbol("arrow.clockwise", android: "Icons.Outlined.Refresh")
@@ -212,7 +212,7 @@ struct StatusPage: View {
                     symbol("stop.fill", android: "Icons.Filled.Close")
                 }
             }
-            .modifier(Asking(ask: $confirm, anchor: "estop", confirm: actions.confirm))
+            .modifier(StatusAsking(ask: $confirm, anchor: "estop", confirm: actions.confirm))
         }
     }
 
@@ -406,7 +406,7 @@ struct StatusPage: View {
                 }
                 Button("开始刷") { confirm = actions.startEchoFarm(bossIndex, echoUntil) }
                     .disabled(StatusCommands.echoFarmProblem(boss: bossIndex, until: echoUntil) != nil)
-                    .modifier(Asking(ask: $confirm, anchor: "echo_farm", confirm: actions.confirm))
+                    .modifier(StatusAsking(ask: $confirm, anchor: "echo_farm", confirm: actions.confirm))
             }
         } header: {
             Text("刷 4C 声骸")
@@ -523,17 +523,22 @@ private struct StatusPlanGameRow: Identifiable {
 /// that asks, as its documentation's example does ("In regular size classes in iOS, the system renders confirmation
 /// dialogs as a popover"); reference P10 / N9 (P10-日历-放弃确认.png). One `confirm` state per page, keyed by the
 /// request's action (StatusAsk.anchor), so only the pressed button's dialog shows (7b6a3f1).
-struct Asking: ViewModifier {
+struct StatusAsking: ViewModifier {
     @Binding var ask: StatusAsk?
     var anchor: String
     var confirm: (StatusAsk) -> Void
 
+    /// The last question shown, so the title stays while the dialog animates away after `ask` went nil.
+    @State var last: StatusAsk? = nil
+
     func body(content: Content) -> some View {
+        let mine = ask?.anchor == anchor ? ask : nil
         content
-            .confirmationDialog(ask?.anchor == anchor ? ask?.title ?? "" : "",
+            .onChange(of: mine) { _, v in if let v { last = v } }
+            .confirmationDialog((mine ?? last)?.title ?? "",
                                 isPresented: Binding(get: { ask?.anchor == anchor },
                                                      set: { if !$0, ask?.anchor == anchor { ask = nil } }),
-                                titleVisibility: .visible, presenting: ask?.anchor == anchor ? ask : nil) { a in
+                                titleVisibility: .visible, presenting: mine ?? last) { a in
                 Button(a.ok, role: a.destructive ? .destructive : nil) { confirm(a) }
                 Button("取消", role: .cancel) {}
             } message: { a in
