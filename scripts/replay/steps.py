@@ -52,8 +52,11 @@ On iOS the texts are accessibility labels / values; on Android uiautomator text 
 # chrome controls (iOS accessibility label, Android content-desc as seen in pass 1)
 SAVE = ["完成", "checkmark"]                 # the ✓ of the save bar (EWLive.swift:473) - also the picker pages' ✓
 DISCARD = ["放弃", "xmark"]                  # the ✕ (Pages/Shell/SaveBar.swift)
-PLUS = ["Increment", "增加", "+", "re:, Increment$"]      # iOS 27 Stepper halves: 「充值了 1 次, Increment」
-MINUS = ["Decrement", "减少", "-", "−", "re:, Decrement$"]
+# iOS 27 Stepper halves: 「充值了 1 次, Increment」; in the app's own language since its development region is zh-Hans
+# (app-r1 fix round 2) 「充值了 1 次, 增量」 / 「…, 减量」, and a combined label joins its parts with 「、」
+# (「刷什么、无音区」) where it was 「, 」
+PLUS = ["Increment", "增加", "增量", "+", "re:, (Increment|增量)$"]
+MINUS = ["Decrement", "减少", "减量", "-", "−", "re:, (Decrement|减量)$"]
 CLEAR = "不等了，清掉"
 TAB_EF = {"t": "终末地", "region": "bottom"}
 # 方舟 row names are the app's own short ones (ArknightsPage label(path, ours)): 「理智药」 / 「作战开关」; the machine's
@@ -152,7 +155,7 @@ step("status.clear", "status", "顶上条「不等了，清掉」→ 待回执�
      [("clear_receipts",), ("state", "base"), ("clear",)], absent=[CLEAR, "~已寄出"], timeout=15,
      offline={"do": [], "absent": [], "skip": "额度"})
 step("status.skip.pending", "status", "早班开关关掉 → 「今天跳过，明天照常」+ 待保存 1 项",
-     [("toggle", "re:(^|, )早班 · (机器|今天)")], expect=["~今天跳过，明天照常", "~待保存 1 项"])
+     [("toggle", "re:(^|, |、)早班 · (机器|今天)")], expect=["~今天跳过，明天照常", "~待保存 1 项"])
 step("status.skip.review", "status", "✓ → 确认单红字「今天不跑：早班」",
      [("remember", SAVE, "save", {"region": "top"}), tap(SAVE, region="top")], expect=["确认这次修改", "~今天不跑：早班", "寄出 1 项"])
 step("status.skip.think", "status", "再想想 → 关单，改动还在",
@@ -248,7 +251,7 @@ step("ark.edit4", "arknights", "理智药 2、关卡 CE-6、邮件开关、基�
      android={"do": [("field", MEDICINE, "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", MAIL),
                      tap("贸易站 · 龙门币"), ("wait", 0.8), tap("~赤金", last=True)]},
      ios={"do": [("field", MEDICINE, "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", MAIL),
-                 tap({"t": ["~无人机用途, ", "~基建无人机用在哪"], "kind": "Button"}, right=60), ("wait", 0.8),
+                 tap({"t": ["~无人机用途, ", "~无人机用途、", "~基建无人机用在哪"], "kind": "Button"}, right=60), ("wait", 0.8),
                  tap("~赤金", last=True)]})
 step("ark.review", "arknights", "✓ → 确认单「寄出 4 项」", [tap(SAVE, region="top")], expect=["确认这次修改", "寄出 4 项"])
 step("ark.send", "arknights", "寄出 → set_master 赤金 / 邮件 + set_config 理智药 2 / CE-6",
@@ -287,7 +290,7 @@ step("ef.days.done", "endfield", "✓ → 回推入页「已选 6/7」「待保�
      [tap(SAVE, region="top")], expect=["~6/7", "~待保存 1 项"])
 step("ef.more.tabpop", "d39", "点「终末地」→ 更多设置页退掉、回根页", [("tab", "终末地")], expect=["库存"], absent=["周日"])
 step("ef.mode", "endfield", "刷取设置菜单 → 地区模式 → 待保存 2 项",
-     [("tab", "终末地"), tap({"t": "~刷取设置, ", "kind": "Button"}, right=60), ("wait", 0.8), tap("~地区模式", last=True)],
+     [("tab", "终末地"), tap({"t": ["~刷取设置, ", "~刷取设置、"], "kind": "Button"}, right=60), ("wait", 0.8), tap("~地区模式", last=True)],
      expect=["~待保存 2 项"],
      android={"do": [("tab", "终末地"), tap("随机模式"), ("wait", 0.8), tap("~地区模式", last=True)]})
 step("ef.review", "endfield", "✓ → 确认单「寄出 2 项」", [tap(SAVE, region="top")], expect=["确认这次修改", "寄出 2 项"])
@@ -326,7 +329,7 @@ step("d39.ef.top", "d39", "D39：终末地根页滑到底再点「终末地」�
 # ------------------------------------------------------------------ 鸣潮
 step("ww.open", "wuwa", "鸣潮标签 → 无音区 / 周本", [("tab", "鸣潮")], expect=["~无音区", "周本打第几个"])
 step("ww.what", "wuwa", "刷什么（点右边的值）→ 菜单 无音区 / 凝素领域 / 模拟领域",
-     [tap({"t": "~刷什么, ", "kind": "Button"}, right=50)], expect=["凝素领域", "模拟领域"],
+     [tap({"t": ["~刷什么, ", "~刷什么、"], "kind": "Button"}, right=50)], expect=["凝素领域", "模拟领域"],
      android={"do": [tap("无音区")]})
 step("ww.what.same", "wuwa", "选回「无音区」→ 菜单收起、没有待保存",
      [tap("无音区", last=True), ("wait", 0.6)], absent=["凝素领域", "~待保存"])
@@ -390,8 +393,8 @@ step("ph.copylink", "phone", "复制免输入链接 → 按钮自己写「链接
 step("ph.paste.bad", "phone", "粘贴密钥串 填乱码 → 存 → 「没存上」",
      [tap("粘贴密钥串"), ("wait", 1.0), ("field", {"t": "", "kind": ["TextField", "TextView", "EditText"]}, "zzz"), tap("存")],
      expect=["没存上"], timeout=6,
-     # iOS: the TextEditor shows in the tree only as its cell (the first one under the title)
-     ios={"do": [tap("粘贴密钥串"), ("wait", 1.0), tap({"t": "", "kind": "Cell"}, scroll=False), ("wait", 0.8),
+     # iOS: the field shows as a TextField with its prompt (app-r1 fix round 2); before, only as its cell
+     ios={"do": [tap("粘贴密钥串"), ("wait", 1.0), tap({"t": "", "kind": ["TextField", "Cell"]}, scroll=False), ("wait", 0.8),
                  ("type", "zzz"), tap("存")]},
      # Android: an empty-text selector with kind TextView matches the sheet's 「取消」 first and closes the sheet
      android={"do": [tap("粘贴密钥串"), ("wait", 1.0), ("field", {"t": "", "kind": "EditText"}, "zzz"), tap("存")]})
