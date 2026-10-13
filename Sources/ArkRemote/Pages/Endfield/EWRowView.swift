@@ -27,13 +27,17 @@ struct EWFootItem {
 }
 
 /// The card's footer (view.js:976-995, Settings › Accessibility › Motion): each row's hint moves from the row to a
-/// paragraph under the card, prefixed 「行名：」 when the card has more than one row. `rows` = the card's row count.
+/// paragraph under the card, one sentence a line. No 「行名：」 in front: it repeated every row name drawn right above,
+/// and 方舟 / 鸣潮 dropped it (decision A2/W4; HIG Writing: "Check each word to be sure it needs to be there."), so each
+/// hint names its own subject (EndfieldSchema). A line already said (the four route rows' 「勾上的路线才会去采。」, the
+/// four reward rows') is not said again. `rows` = the card's row count (kept for the callers; the footer no longer depends on it).
 func ewFoot(_ items: [EWFootItem], rows: Int) -> String {
-    items.compactMap { i -> String? in
-        guard let h = i.hint?.trimmingCharacters(in: .whitespacesAndNewlines), !h.isEmpty else { return nil }
-        let t = i.label.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (rows > 1 && !t.isEmpty ? t + "：" : "") + h
-    }.joined(separator: "\n")
+    var lines: [String] = []
+    for i in items {
+        guard let h = i.hint?.trimmingCharacters(in: .whitespacesAndNewlines), !h.isEmpty, !lines.contains(h) else { continue }
+        lines.append(h)
+    }
+    return lines.joined(separator: "\n")
 }
 
 /// ewFoot over drawn rows; warnings are not rows (view.js `.warn`), box rows are (view.js `.row` with no hint).

@@ -51,4 +51,21 @@ import XCTest
         XCTAssertFalse(foot.contains("："), foot)
         XCTAssertTrue(foot.contains("第一个是 1"), foot)
     }
+
+    /// 终末地 cards and their 「…设置」 pages: no 「行名：」 in front either (HIG review 1014: the three game tabs used two
+    /// footer styles), and a sentence shared by several rows (routes, reward groups) is said once.
+    func testEndfieldFootersHaveNoRowNamesAndNoRepeats() {
+        let data = EndfieldPageData.sample
+        for g in EndfieldSchema.groups {
+            guard let c = ewCard(g, data, values: data.master.values) else { return XCTFail("no card for \(g.title)") }
+            for part in [c.rows.filter { EndfieldSchema.firstLevel.contains($0.path) },
+                         c.rows.filter { !EndfieldSchema.firstLevel.contains($0.path) }] {
+                let foot = ewFoot(part, card: c.rows)
+                assertNoNameList(foot, c.rows.map(\.label))
+                let lines = foot.split(separator: "\n")
+                XCTAssertEqual(lines.count, Set(lines).count, foot)
+            }
+        }
+        XCTAssertEqual(ewFoot([EWFootItem(label: "A", hint: "x。"), EWFootItem(label: "B", hint: "y。")], rows: 2), "x。\ny。")
+    }
 }

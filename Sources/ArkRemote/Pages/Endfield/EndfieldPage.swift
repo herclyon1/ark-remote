@@ -83,7 +83,7 @@ struct EndfieldPage: View {
         if let c = ewCard(g, data, values: values) {
             let main = c.rows.filter { EndfieldSchema.firstLevel.contains($0.path) }
             let more = c.rows.contains { !EndfieldSchema.firstLevel.contains($0.path) }
-            let foot = ewFoot(main, card: c.rows)   // view.js:976-995: the hints sit under the card, 「行名：」 in front
+            let foot = ewFoot(main, card: c.rows)   // view.js:976-995: the hints sit under the card, one sentence a line
             // view.js:801-803, 826: a card with no rows this time is not drawn (listSection: a bare `if` leaves an empty
             // grey section on Android, Pages/Shell/SkipFixes.swift).
             listSection("endfield-\(g.title)", if: !c.rows.isEmpty) {
@@ -95,8 +95,10 @@ struct EndfieldPage: View {
                     // The rest of the card one level down, as Settings does (HIG-CHECKLIST.maa.md:55). By value, so a reselect
                     // can pop it (D39); not navigationDestination(isPresented:) - see the 库存 row above (7f89811).
                     if more {
+                        // named after its card, so two rows on one screen never read the same and the pushed page's
+                        // title is the row that opened it (HIG Writing: "Be clear"; HIG review 1014)
                         NavigationLink(value: EndfieldRoute.more(g.title)) {
-                            Text("更多设置")
+                            Text(ewMoreName(g.title))
                         }
                         .listRowBackground(rowBackground(nil))   // same row shape as the EWRowView rows beside it (SkipFixes.swift)
                     }
@@ -126,7 +128,7 @@ struct EndfieldPage: View {
 enum EndfieldRoute: Hashable {
     /// 库存 → EndfieldStockpilePage.
     case stockpile
-    /// A card's 「更多设置」 → EndfieldMorePage, by the card's title (EWGroupSpec.title).
+    /// A card's 「…设置」 row (ewMoreName) → EndfieldMorePage, by the card's title (EWGroupSpec.title).
     case more(String)
 }
 
@@ -144,6 +146,13 @@ func ewCard(_ g: EWGroupSpec, _ data: EndfieldPageData, values: [String: EWValue
 /// 「终末地 · 基质刷取」 → 「基质刷取」: a card's name without the game, which the tab already says. The full title stays
 /// the card's key (EndfieldRoute.more, section ids).
 func ewCardName(_ title: String) -> String { title.components(separatedBy: " · ").last ?? title }
+
+/// The row that pushes a card's EndfieldMorePage, and that page's title: 「基质刷取设置」, 「协议空间设置」. The card
+/// 「另一个任务」 holds one task, 自动采集, so its row is 「自动采集设置」 (EndfieldSchema.otherTasks).
+func ewMoreName(_ title: String) -> String {
+    let n = ewCardName(title)
+    return (title == EndfieldSchema.otherTasks.title ? "自动采集" : n) + "设置"
+}
 
 /// The warnings as rows; `prefix` keeps their ids apart between pages.
 func ewNoteRows(_ notes: [String], _ prefix: String) -> [EWRow] {
@@ -176,7 +185,7 @@ struct EndfieldMorePage: View {
         _values = State(initialValue: ewEffectiveMaster(d.master, lastGood: d.lastGoodMaster).0?.values ?? [:])
     }
 
-    private var name: String { ewCardName(group.title) }
+    private var name: String { ewMoreName(group.title) }
 
     var body: some View {
         let data = self.data()

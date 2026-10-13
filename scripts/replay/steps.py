@@ -279,18 +279,20 @@ step("d39.ark.top", "d39", "D39：方舟滑到底再点「方舟」→ 回顶",
      [("swipe", "up", 4), ("tab", "方舟"), ("wait", 1.2)], visible=["关卡"])
 
 # ------------------------------------------------------------------ 终末地
-step("ef.open", "endfield", "终末地标签 → 库存 / 更多设置 / 「另一个任务」",
-     [("tab", "终末地")], expect=["库存", "更多设置"])
+# the 基质刷取 card's row to its pushed page (EndfieldPage ewMoreName: each card's row is named after it, HIG review 1014)
+EF_MORE = "基质刷取设置"
+step("ef.open", "endfield", "终末地标签 → 库存 / 基质刷取设置 / 「另一个任务」",
+     [("tab", "终末地")], expect=["库存", EF_MORE])
 step("ef.title", "endfield", "卡片标题是「另一个任务」（不带「终末地 · 」，不是「另外两个」）",
      [("swipe", "up", 3)], expect=["另一个任务"], absent=["~另外两个任务", "~终末地 · "])
 step("ef.stock", "endfield", "库存 → 推入库存页（没配森空岛）",
      [("top", 4), tap("库存")], expect=["~森空岛"], timeout=10)
 step("ef.stock.tophone", "endfield", "库存页「去手机页」→ 跳到手机标签", [tap("~去手机页")], expect=[VERSION])
-step("ef.stock.popped", "d39", "回终末地 → 库存页已退掉", [("tab", "终末地")], expect=["库存", "更多设置"])
+step("ef.stock.popped", "d39", "回终末地 → 库存页已退掉", [("tab", "终末地")], expect=["库存", EF_MORE])
 step("ef.stock.tabpop", "d39", "再进库存 → 点「终末地」→ 回根页",
-     [tap("库存"), ("wait", 1.0), ("tab", "终末地")], expect=["库存", "更多设置"], absent=["~去手机页"])
-step("ef.more", "endfield", "更多设置 → 推入页「执行周期」（先点「终末地」：只跑 endfield 时 ef.stock.tophone 停在手机页）",
-     [("tab", "终末地"), tap("更多设置")], expect=["~执行周期"])
+     [tap("库存"), ("wait", 1.0), ("tab", "终末地")], expect=["库存", EF_MORE], absent=["~去手机页"])
+step("ef.more", "endfield", "基质刷取设置 → 推入页「执行周期」（先点「终末地」：只跑 endfield 时 ef.stock.tophone 停在手机页）",
+     [("tab", "终末地"), tap(EF_MORE)], expect=["~执行周期"])
 step("ef.days", "endfield", "执行周期 → 选择页 周一…周日", [tap("~执行周期")], expect=["周一", "周日"])
 step("ef.days.untick", "endfield", "去掉周日（安卓旧闪退点）→ 不闪退", [tap("周日")], expect=["周日"])
 step("ef.days.none", "endfield", "勾选页六天也去掉 → 页脚「至少要留一个」，✓ 灰着、点了不关页（原来是提示条）",
@@ -301,7 +303,7 @@ step("ef.days.back", "endfield", "勾回周一…周六 → 页脚那句没了",
      expect=["周六"], absent=["至少要留一个"])
 step("ef.days.done", "endfield", "✓ → 回推入页「已选 6/7」「待保存 1 项」",
      [tap(SAVE, region="top")], expect=["~6/7", "~待保存 1 项"])
-step("ef.more.tabpop", "d39", "点「终末地」→ 更多设置页退掉、回根页", [("tab", "终末地")], expect=["库存"], absent=["周日"])
+step("ef.more.tabpop", "d39", "点「终末地」→ 基质刷取设置页退掉、回根页", [("tab", "终末地")], expect=["库存"], absent=["周日"])
 step("ef.mode", "endfield", "刷取设置菜单 → 地区模式 → 待保存 2 项",
      [("tab", "终末地"), tap({"t": ["~刷取设置, ", "~刷取设置、"], "kind": "Button"}, right=60), ("wait", 0.8), tap("~地区模式", last=True)],
      expect=["~待保存 2 项"],
@@ -319,21 +321,21 @@ step("ef.protocol", "endfield", "协议空间 选「武器养成」→ 待保存
                      tap("~武器养成", last=True), ("wait", 0.6), ("discard",)],
               "android": {"do": [tap("~干员养成"), ("wait", 0.8), tap("~武器养成", last=True), ("wait", 0.6),
                                  ("discard",)]}})
-step("ef.collect.more", "endfield", "自动采集 · 更多设置 → 推入页 → 返回",
-     [tap({"t": "更多设置", "after": "~自动采集"}), ("wait", 1.0), ("back",)], expect=[HOME_EF, "~自动采集"],
+step("ef.collect.more", "endfield", "自动采集设置 → 推入页 → 返回",
+     [tap("自动采集设置"), ("wait", 1.0), ("back",)], expect=[HOME_EF, "~自动采集"],
      absent=[BACK_BTN_EF], timeout=10)
-step("ef.ticket.open", "endfield", "再进「更多设置」→ 执行周期「已选 7/7」、使用刻写券关（机器值）",
-     [("tab", "终末地"), ("top", 3), tap("更多设置")], expect=["已选 7/7", "使用刻写券"], switch={"使用刻写券": False})
+step("ef.ticket.open", "endfield", "再进「基质刷取设置」→ 执行周期「已选 7/7」、使用刻写券关（机器值）",
+     [("tab", "终末地"), ("top", 3), tap(EF_MORE)], expect=["已选 7/7", "使用刻写券"], switch={"使用刻写券": False})
 step("ef.ticket.on", "endfield", "打开「使用刻写券」→ 那行出现小字「待保存」",
      [("toggle", "使用刻写券")], expect=["待保存", "~待保存 1 项"], switch={"使用刻写券": True})
 step("ef.ticket.days", "endfield", "执行周期去掉周日 → 「已选 6/7」「待保存 2 项」",
      # 周日 is the first tap on a sheet still sliding up: wait until it stands still (stable), as a lost tap left all
      # seven ticked and ✓ grey (app-r1 fix round 2, final full run step 80)
      [tap("~执行周期"), tap("周日", stable=True), tap(SAVE, region="top")], expect=["~6/7", "~待保存 2 项"])
-step("ef.ticket.discard", "endfield", "保存条 ✕ → 控件回到机器值（7/7、刻写券关），还在更多设置页（e17db83）",
+step("ef.ticket.discard", "endfield", "保存条 ✕ → 控件回到机器值（7/7、刻写券关），还在基质刷取设置页（e17db83）",
      [("discard",)], expect=["已选 7/7", "使用刻写券"], absent=["待保存", "~待保存 2 项", "库存"],
      switch={"使用刻写券": False}, nocmd=2)
-step("ef.loop.x", "endfield", "循环执行改 20（键盘开着）→ 点 ✕ → 回原值、键盘收起、没有待保存、还在更多设置页（0878f3b）",
+step("ef.loop.x", "endfield", "循环执行改 20（键盘开着）→ 点 ✕ → 回原值、键盘收起、没有待保存、还在基质刷取设置页（0878f3b）",
      [("field", "循环执行", "20"), ("wait", 0.6), ("discard",)], keyboard=False,
      expect=[{"t": "99", "kind": ["TextField", "EditText"]}, "循环执行"], absent=["~待保存", "库存"], nocmd=2)
 step("ef.home", "endfield", "回「状态」标签（只跑 endfield 时，收尾的冷启动从状态页开始）", [("tab", "状态")],
