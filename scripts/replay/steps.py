@@ -371,7 +371,8 @@ step("ph.diag.on", "phone", "诊断记录打开 → 分享 / 清空 / 运行自�
      [("toggle", "诊断记录")], expect=["~分享诊断记录", "清空诊断记录", "运行自检", "就是这里"])
 # 自检结果 lists one row per check (「信箱和 PIN  通过」…; app-r1 fix round 2, owner decision P5); the 0.4.4 base says
 # 「通过 N / 6」 in one sentence
-SELFCHECK = ["~信箱和 PIN", "re:通过 \\d+ ?/ ?\\d+"]
+# anchored: the 这台手机 footer also says 「…不用再填信箱和 PIN…」
+SELFCHECK = ["re:^信箱和 PIN", "re:通过 \\d+ ?/ ?\\d+"]
 step("ph.selftest", "phone", "运行自检 → 结果单每项一行（信箱和 PIN …）",
      [tap("运行自检")], expect=[SELFCHECK], timeout=30)
 step("ph.selftest.close", "phone", "关掉自检结果", [CONFIRM_WAIT, tap(["关闭", "好"], last=True)], absent=[SELFCHECK])
