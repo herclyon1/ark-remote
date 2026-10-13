@@ -1,6 +1,7 @@
-// 分享 on the 诊断记录 / 自检结果 sheet with its outcome said, as the web's (view.js showDiagSheet share.onclick):
-// handed over → toast 「已交给分享」, cancelled → toast 「分享已取消」, failed → 「分享没成」 with 「请用「复制」后粘到聊天里」.
-// SwiftUI's ShareLink reports nothing back, so:
+// 分享 on the 诊断记录 / 自检结果 sheet: the system share sheet, and 「分享没成」 with 「请用「复制」后粘到聊天里」 when the
+// phone could not show it (view.js showDiagSheet share.onclick). Handed over or cancelled says nothing: the share sheet
+// itself was the feedback (no toast, Pages/Shell/Feedback.swift; HIG Alerts "Avoid using an alert merely to provide
+// information"). SwiftUI's ShareLink reports no failure back, so:
 //   · iOS: UIActivityViewController, presented from the topmost presented controller (the sheet), whose
 //     completionWithItemsHandler says completed / not completed / an error;
 //   · Android: the system chooser (Android/app/src/main/kotlin/ShareSheet.kt). It reports only the app picked; a
@@ -59,13 +60,9 @@ import UIKit
         let me = shared
         guard me.waiting else { return }
         me.waiting = false
-        switch state {
-        case 0: Relay.shared.showToast("已交给分享")
-        case 1: Relay.shared.showToast("分享已取消")
-        default:
-            let why = message.isEmpty ? "" : "（\(message)）"
-            me.failNote = "手机没给出分享面板\(why)；请用「复制」后粘到聊天里。"
-        }
+        guard state == 2 else { return }   // handed over / cancelled: the share sheet was the feedback
+        let why = message.isEmpty ? "" : "（\(message)）"
+        me.failNote = "手机没给出分享面板\(why)；请用「复制」后粘到聊天里。"
     }
 
     #if !os(Android) && canImport(UIKit)

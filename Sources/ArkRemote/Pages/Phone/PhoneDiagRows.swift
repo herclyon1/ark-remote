@@ -5,11 +5,15 @@ import UIKit
 #endif
 
 /// 诊断记录 switch, 运行自检 and the record sheet, in the 这台手机 section (web: #diagsw, #selfcheck, view.js:600-602, 1310-1322).
+/// The Apple page of the same use: Settings › Privacy & Security › Analytics & Improvements (P13,
+/// evidence/app-pages-1007/apple/P13-设置-分析数据列表.png): a switch that starts recording on this device and the
+/// records to look at and share. The switch is its own feedback (no 「诊断记录已开 / 已关」 toast, shell API id 266; HIG
+/// Alerts: "Avoid using an alert merely to provide information"); 运行自检 shows the system spinner in its row while it
+/// runs, as Settings › General › Software Update does while it checks.
 struct PhoneDiagRows: View {
     var appVersion: String
 
     @State var diagOn = DiagLog.shared.enabled
-    @State var recordShown = false
     /// 「清空诊断记录」 asks first: right under 「分享诊断记录」, one stray tap wiped the record that was to be sent (edge audit 40).
     @State var clearAsk = false
 
@@ -20,20 +24,18 @@ struct PhoneDiagRows: View {
             diagOn = v
             DiagLog.shared.setEnabled(v)
             if v { DiagWatch.start() }
-            Relay.shared.showToast(v ? "诊断记录已开" : "诊断记录已关")   // view.js:1316
         })) {
             PhoneRowLabel(title: "诊断记录", hint: "开着时记下这台手机收发消息、网络通断和机器状态的变化，可复制 / 分享给我们")
         }
         .onAppear { if diagOn { DiagWatch.start(); DiagUI.shared.start() } }
         if diagOn {
-            // the web opens this sheet from a tap on the bottom line (DiagOverlay); this row is the same sheet from the page
-            Button("分享诊断记录（\(count) 条）") {
-                DiagUI.shared.prepareSheet()
-                recordShown = true
-            }
-            .sheet(isPresented: $recordShown) { DiagRecordSheet { recordShown = false } }
+            // the same sheet a tap on the 诊断记录 bar opens (Pages/Shell/DiagAccessory.swift DiagSheet presents it on the
+            // TabView), so the two ways in show one thing and the page's pull to refresh never reaches the sheet's list
+            Button("分享诊断记录（\(count) 条）") { DiagUI.shared.openSheet() }
             Button("清空诊断记录", role: .destructive) { clearAsk = true }
-                .alert("清空诊断记录？", isPresented: $clearAsk) {   // as PhonePage's 「清除密钥？」
+                // as 清除密钥: an action sheet from the button (P10 / N9; HIG Action sheets "Use an action sheet — not
+                // an alert — to offer choices related to an intentional action")
+                .confirmationDialog("清空诊断记录？", isPresented: $clearAsk, titleVisibility: .visible) {
                     Button("清空", role: .destructive) { DiagLog.shared.clear() }
                     Button("取消", role: .cancel) {}
                 } message: {
@@ -43,13 +45,19 @@ struct PhoneDiagRows: View {
             // SelfCheckRun and the sheet is on PhonePage outside its .id(reselect): a reselect of 手机 rebuilds this List
             // on Android (D39), and @State here went back to 「运行自检」 mid-run, the result sheet never coming up.
             let run = SelfCheckRun.shared
-            Button(run.checking ? "正在自检…" : "运行自检") {
+            Button {
                 guard !run.checking else { return }
                 run.checking = true
                 Task {
                     _ = await SelfCheck.run()   // kept in LastSelfCheck; the sheet reads it from there
                     run.checking = false
                     run.shown = true
+                }
+            } label: {
+                if run.checking {
+                    LabeledContent("正在自检…") { ProgressView() }
+                } else {
+                    Text("运行自检")
                 }
             }
             .disabled(run.checking)
@@ -85,7 +93,14 @@ struct DiagRecordSheet: View {
     }
 }
 
-/// index.html #diagsheet: title, message, then 复制 / 分享 / 关闭 in one row.
+/// index.html #diagsheet: title, message, then 复制 / 分享 / 关闭.
+/// The system's sheet as P12 / P13 have it: a navigation bar with the title and the close ✕ leading (HIG Sheets: "the
+/// Cancel button belongs on the leading edge of the top toolbar"), the message and the two actions as list rows. No
+/// detents (the system's full-height sheet, as Passwords' 「New Password」, evidence/app-pages-1007/apple/
+/// P12-密码-新建弹出单.png) and nothing measured: the list scrolls a long 自检结果 by itself, never cut (no lineLimit).
+/// 复制's own label says 「已复制整份记录」 once it took (shell API id 272: "a button whose label turns into 「已复制」"),
+/// no toast; 分享 is the system share sheet (DiagShare), and only its failure is said, in this sheet's own alert
+/// (view.js ask("分享没成", …, "好", false, { single: true })).
 struct DiagSheetBox: View {
     var title: String
     var message: String
@@ -93,142 +108,54 @@ struct DiagSheetBox: View {
     var canShare: Bool
     var close: () -> Void
 
-    #if !os(Android)
-    /// The title + message's own height and the button row's (padding in both), measured to fit the sheet to them.
-    @State private var textHeight: CGFloat = 0
-    @State private var rowHeight: CGFloat = 0
-    #endif
+    @State var copied = false
 
     var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text(verbatim: message)
+                }
+                Section {
+                    Button(copied ? "已复制整份记录" : "复制") {
+                        PhoneLink.copy(json)
+                        copied = true
+                    }
+                    if canShare {
+                        // view.js share.onclick (DiagShare)
+                        Button("分享") { DiagShare.shared.share(json, title: title == "自检结果" ? "自检结果" : "诊断记录") }
+                    }
+                }
+            }
+            .navigationTitle(title)
+            #if !os(macOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    closeButton
+                        .accessibilityLabel("关闭")
+                }
+            }
+        }
+        // a new record (the line's upload moved on, or another 分享诊断记录) is not the one that was copied
+        .onChange(of: json) { _, _ in copied = false }
+        .alert("分享没成", isPresented: Binding(get: { DiagShare.shared.failNote != nil },
+                                                set: { if !$0 { DiagShare.shared.failNote = nil } })) {
+            Button("好") {}
+        } message: {
+            Text(verbatim: DiagShare.shared.failNote ?? "")
+        }
+    }
+
+    /// The system's close ✕ (iOS 26 ButtonRole.close), as SaveBar's ✕; Android: the same glyph, skip has no close role.
+    @ViewBuilder private var closeButton: some View {
         #if os(Android)
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Button("复制") {
-                    PhoneLink.copy(json)
-                    Relay.shared.showToast("已复制整份记录")   // view.js:3074
-                }
-                .frame(maxWidth: .infinity)
-                if canShare {
-                    // view.js share.onclick: every outcome is said (DiagShare)
-                    Button("分享") { DiagShare.shared.share(json, title: title == "自检结果" ? "自检结果" : "诊断记录") }
-                        .frame(maxWidth: .infinity)
-                }
-                Button("关闭") { close() }
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            Spacer(minLength: 0)
-        }
-        .padding(16)
-        // the page's toast layer and alert are under the sheet (a sheet is its own presentation on both platforms):
-        // 「已复制整份记录」 / 「已交给分享」 / 「分享已取消」 show here too (both layers clear the same Relay.toast), and
-        // 「分享没成」 is the sheet's own alert (view.js ask("分享没成", …, "好", false, { single: true }))
-        .overlay { ToastLayer() }
-        .alert("分享没成", isPresented: Binding(get: { DiagShare.shared.failNote != nil },
-                                                set: { if !$0 { DiagShare.shared.failNote = nil } })) {
-            Button("好") {}
-        } message: {
-            Text(verbatim: DiagShare.shared.failNote ?? "")
-        }
+        Button { close() } label: { Image(systemName: "xmark") }
         #else
-        // A sheet with no detents is .large: three lines and a button row came up full screen over a blank page
-        // (sheet06 cell 5). It is fitted to the content instead, .height(_:) from the measured text and row
-        // (developer.apple.com/documentation/swiftui/view/presentationdetents(_:), PresentationDetent.height(_:)).
-        // Short text sits in a plain VStack fitted to it; a long 自检结果 (isLong) scrolls over the pinned row at .medium,
-        // draggable to .large, never cut.
-        Group {
-            if Self.isLong(message) {
-                // a long 自检结果: the text scrolls over the pinned row, the sheet at .medium, draggable to .large
-                ScrollView { textBlock }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .safeAreaInset(edge: .bottom, spacing: 0) { actionRow }
-            } else {
-                // a few lines: no ScrollView (one inside the 自检结果 sheet kept its text scrolled down by about 30 pt,
-                // the title cut at the sheet's top edge over a gap above the buttons, diagsheet frames4 / frames5)
-                VStack(spacing: 0) {
-                    textBlock
-                    actionRow
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
-            }
-        }
-        // as the Android branch: the toast layer and the 「分享没成」 alert ride on the sheet
-        .overlay { ToastLayer() }
-        .alert("分享没成", isPresented: Binding(get: { DiagShare.shared.failNote != nil },
-                                                set: { if !$0 { DiagShare.shared.failNote = nil } })) {
-            Button("好") {}
-        } message: {
-            Text(verbatim: DiagShare.shared.failNote ?? "")
-        }
-        .presentationDetents(detents)
+        Button(role: .close) { close() }
         #endif
     }
-
-    #if !os(Android)
-    /// Past about four lines on a phone the text would not fit a fitted sheet under half the screen: it scrolls instead.
-    /// Decided from the text, not from a measured height, so the layout never flips while it is measured.
-    private static func isLong(_ message: String) -> Bool { message.count > 160 }
-
-    private var textBlock: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)   // its whole height, not what a detent leaves it
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding([.horizontal, .top], 16)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { textHeight = $0 }
-    }
-
-    private var actionRow: some View {
-        actions
-            .padding(.top, 10).padding([.horizontal, .bottom], 16)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowHeight = $0 }
-    }
-
-    private var actions: some View {
-        HStack(spacing: 8) {
-            Button("复制") {
-                PhoneLink.copy(json)
-                Relay.shared.showToast("已复制整份记录")   // view.js:3074
-            }
-            .frame(maxWidth: .infinity)
-            if canShare {
-                // view.js share.onclick: every outcome is said (DiagShare)
-                Button("分享") { DiagShare.shared.share(json, title: title == "自检结果" ? "自检结果" : "诊断记录") }
-                    .frame(maxWidth: .infinity)
-            }
-            Button("关闭") { close() }
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.bordered)
-    }
-
-    /// Until both parts are measured, about the two-line sheet's own height (168 pt measured on the 诊断记录已生成 sheet,
-    /// simulator shots-1006): from .medium it would open at half the screen and then shrink to fit. Then the
-    /// content's height, or .medium / .large when that is over half the screen (the window scene's screen;
-    /// UIScreen.main is deprecated).
-    private static let firstHeight: CGFloat = 168
-
-    private var detents: Set<PresentationDetent> {
-        let fit = textHeight + rowHeight
-        guard textHeight > 0, rowHeight > 0 else { return [.height(Self.firstHeight)] }
-        // UIKit only: the Mac build (swift test) has no UIApplication; the app itself only runs on iOS and Android
-        #if canImport(UIKit)
-        let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.height ?? 0
-        #else
-        let screen: CGFloat = 0
-        #endif
-        if Self.isLong(message) || (screen > 0 && fit > screen / 2) { return [.medium, .large] }
-        return [.height(fit)]
-    }
-    #endif
 }
 
 // The 诊断记录 bar over every tab (DiagOverlay, DiagRoom) is the shell's now: Pages/Shell/DiagAccessory.swift.

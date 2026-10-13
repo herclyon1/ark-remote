@@ -352,19 +352,25 @@ step("ph.selftest", "phone", "运行自检 → 结果单「通过 N / 6」",
      [tap("运行自检")], expect=["re:通过 \\d+ ?/ ?\\d+"], timeout=30)
 step("ph.selftest.close", "phone", "关掉自检结果", [CONFIRM_WAIT, tap(["关闭", "好"], last=True)], absent=["re:通过 \\d+ ?/ ?\\d+"])
 step("ph.clear.ask", "phone", "清空诊断记录 → 弹确认 → 取消", [tap("清空诊断记录"), ("wait", 0.8), tap("取消", last=True)],
-     absent=["清空诊断记录？"])
+     absent=["清空诊断记录？"],
+     # iOS: an action sheet from its button is a popover with no 取消 row; a tap anywhere else cancels it (P10 row,
+     # WWDC25 284 "the cancel action is implicit by tapping anywhere else")
+     ios={"say": "清空诊断记录 → 按钮旁弹确认 → 点外面取消、记录还在",
+          "do": [tap("清空诊断记录"), ("until", "清空诊断记录？", 4), ("wait", 0.8), ("point", 0.5, 0.12), ("wait", 0.8)],
+          "expect": ["~分享诊断记录"]})
 step("ph.share", "phone", "分享诊断记录 → 「诊断记录已生成」单（复制 / 分享 / 关闭）",
      [tap("~分享诊断记录")], expect=["诊断记录已生成", "分享", "关闭"], timeout=10)
 step("ph.share.sys", "phone", "单里「分享」→ 系统分享面板 → 取消 → 不闪退、单还在（62ba009）",
      [tap("分享", last=True), ("wait", 2.5), ("back",), ("wait", 5)], expect=["诊断记录已生成"], timeout=10,
-     ios={"say": "单里「分享」→ 系统分享面板 → 点面板外面 → 「分享已取消」、不闪退、单还在（62ba009）",
+     ios={"say": "单里「分享」→ 系统分享面板 → 点面板外面 → 不闪退、单还在（62ba009；取消不再弹提示，面板本身就是反馈）",
           # while the share panel is up the app's tree hides the 诊断记录 sheet: its title gone = panel up, back = closed
           "do": [CONFIRM_WAIT, tap("分享", last=True), ("gone", "诊断记录已生成", 8), ("wait", 0.8),
                  ("retry", 3, [("point", 0.5, 0.44)], ("until", "诊断记录已生成", 4))],
-          "expect": ["诊断记录已生成", "~分享已取消"]})
+          "expect": ["诊断记录已生成"], "absent": ["~分享已取消"]})
 step("ph.share.close", "phone", "关闭 → 回手机页", [("until", "关闭", 6), tap("关闭", last=True)], absent=["诊断记录已生成"],
      expect=["运行自检"])
-step("ph.copylink", "phone", "复制免输入链接 → 「链接已复制」", [tap("复制免输入链接")], expect=["~链接已复制"], timeout=5)
+step("ph.copylink", "phone", "复制免输入链接 → 按钮自己写「链接已复制」（不弹提示）", [tap("复制免输入链接")], expect=["链接已复制"],
+     absent=["复制免输入链接"], timeout=5)
 step("ph.paste.bad", "phone", "粘贴密钥串 填乱码 → 存 → 「没存上」",
      [tap("粘贴密钥串"), ("wait", 1.0), ("field", {"t": "", "kind": ["TextField", "TextView", "EditText"]}, "zzz"), tap("存")],
      expect=["没存上"], timeout=6,

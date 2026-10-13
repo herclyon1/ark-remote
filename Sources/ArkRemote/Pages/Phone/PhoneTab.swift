@@ -10,19 +10,17 @@ struct PhoneTab: View {
         let stamina = StaminaStore.shared
         // tokens is loaded in StaminaStore.init; reading it here makes the page redraw when it changes
         let status = stamina.tokens == nil ? "" : stamina.status()
-        PhonePage(data: PhonePageData(pageVersion: PhoneLink.appVersion, staminaStatus: status),
+        PhonePage(data: PhonePageData(pageVersion: PhoneLink.appVersion, staminaStatus: status,
+                                      hasConfig: Relay.shared.config != nil),
                   actions: PhonePageActions(
                     pasteTokens: { s in
                         // A 免输入链接 (…#k=…&t=…) pasted here goes the way an opened link goes: on Android a tapped link
                         // opens the browser, not the app (no assetlinks.json), so pasting is the only way in once set up.
                         let str = s.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if str.contains("#"), let u = URL(string: str), PhoneLink.open(u) {
-                            Relay.shared.showToast("密钥已存到这台手机")
-                            return
-                        }
-                        // view.js #tokpaste: fromPaste, then toast and a forced refresh
+                        // No 「密钥已存到这台手机」 toast: the 密钥 row's value (森空岛、库街区) is the state (shell API id 289).
+                        if str.contains("#"), let u = URL(string: str), PhoneLink.open(u) { return }
+                        // view.js #tokpaste: fromPaste, then a forced refresh
                         try stamina.fromPaste(s)
-                        Relay.shared.showToast("密钥已存到这台手机")
                         Task { await stamina.refresh(force: true) }
                     },
                     clearTokens: { stamina.clear() },
@@ -107,7 +105,8 @@ enum PhoneLink {
               let s = pasted()?.trimmingCharacters(in: .whitespacesAndNewlines), s.contains("#k="),
               let u = URL(string: s),
               UserDefaults.standard.string(forKey: takenKey) != linkHash(u) else { return }
-        if open(u) { Relay.shared.showToast("已从剪贴板的链接更新密钥") }
+        // a background event: the status line under the tab title (Pages/Shell/Feedback.swift, shell API id 22)
+        if open(u) { Feedback.status("已从剪贴板的链接更新密钥") }
     }
 
     /// An opened link (.onOpenURL): view.js fromLink() for `#k=` and Stamina.fromLink() for `&t=`.
