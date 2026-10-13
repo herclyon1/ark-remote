@@ -216,12 +216,8 @@ struct ArknightsPage: View {
     var weeklySection: some View {
         listSection("ark-weekly", ifLet: data.annihilationDoneThisWeek) { done in
             Section {
-                HStack {
-                    Text("剿灭")
-                    Spacer()
-                    Text(done ? "本周已打满" : "本周还没打满")
-                        .foregroundStyle(.secondary)
-                }
+                // a read-only value: the system's label + secondary value row
+                LabeledContent("剿灭", value: done ? "本周已打满" : "本周还没打满")
             } header: {
                 Text("明日方舟 · 周常")
             } footer: {
@@ -308,13 +304,19 @@ struct ArknightsTextRow: View {
     let label: String
     @Binding var text: String
 
+    /// One row, name leading and the value trailing, as Shortcuts › an automation's options lay out each setting
+    /// (label left, value right; app-page-references P2) and as the 终末地 / 鸣潮 tabs' text rows already do. The
+    /// system LabeledContent, not an HStack with a fixed-width field: it keeps the row's margins and stacks the two by
+    /// itself at the large accessibility text sizes.
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(verbatim: label)
+        LabeledContent {
             // a stage code (1-7, CE-6): an auto-capital or an autocorrection made it a code the relay's pattern refuses or
             // another stage (edge audit 30); the same input traits as the setup screen's mailbox field
             TextField(label, text: $text)
                 .setupPlainInput()
+                .multilineTextAlignment(.trailing)
+        } label: {
+            Text(verbatim: label)
         }
     }
 }
@@ -325,10 +327,13 @@ struct ArknightsNumberRow: View {
     let label: String
     @Binding var text: String
 
+    /// Name leading, value trailing in one row, as ArknightsTextRow.
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(verbatim: label)
+        LabeledContent {
             numberField
+                .multilineTextAlignment(.trailing)
+        } label: {
+            Text(verbatim: label)
         }
     }
 
