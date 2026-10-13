@@ -54,6 +54,10 @@ PLUS = ["Increment", "增加", "+", "re:, Increment$"]      # iOS 27 Stepper hal
 MINUS = ["Decrement", "减少", "-", "−", "re:, Decrement$"]
 CLEAR = "不等了，清掉"
 TAB_EF = {"t": "终末地", "region": "bottom"}
+# 方舟 field titles come from the machine's own labels (ArknightsPage label(path, default)): the relay now names
+# Info.MedicineNumb 「理智药数量」 and Task.IfFight 「是否理智作战」; the app's fallbacks are 「理智药」 / 「作战开关」
+MEDICINE = ["理智药数量", "理智药"]
+FIGHT = ["是否理智作战", "作战开关"]
 STATUS_ROOT = "现在跑一趟"
 # a tab's root page (title, no back button). 现在跑一趟 is only in the tree near the top of the lazy list
 HOME = {"t": "游戏机遥控", "kind": ["StaticText", "TextView"]}
@@ -217,30 +221,30 @@ step("mc.align.go", "monthcard", "弹窗 · 对准 → 寄出 monthcard left 15�
 step("mc.tabpop", "d39", "点「状态」→ 月卡页退掉、回根页", [("tab", "状态")], expect=[HOME], absent=[BACK_BTN, "终末地月卡"])
 
 # ------------------------------------------------------------------ 方舟
-step("ark.open", "arknights", "方舟标签 → 关卡 / 理智药 / 作战开关", [("tab", "方舟")], expect=["关卡", "理智药", "作战开关"])
+step("ark.open", "arknights", "方舟标签 → 关卡 / 理智药 / 作战开关", [("tab", "方舟")], expect=["关卡", MEDICINE, FIGHT])
 step("ark.sanity.x", "arknights", "理智药改 1000（键盘开着）→ 点 ✕ → 回原值、键盘收起、没有待保存（0878f3b）",
-     [("field", "理智药", "1000"), ("wait", 0.6), tap(DISCARD, region="top")], keyboard=False, absent=["~待保存"],
-     expect=["理智药"], nocmd=2)
+     [("field", MEDICINE, "1000"), ("wait", 0.6), tap(DISCARD, region="top")], keyboard=False, absent=["~待保存"],
+     expect=[MEDICINE], nocmd=2)
 step("ark.sanity.bad", "arknights", "理智药填 1000 → ✓ → 寄出 → 挡下「一项都没寄出」「要填 0–999 的整数」（寄出前校验，什么也不发）",
-     [("field", "理智药", "1000"), ("hidekb",), tap(SAVE, region="top"), ("wait", 1.0), tap(SEND_N)],
+     [("field", MEDICINE, "1000"), ("hidekb",), tap(SAVE, region="top"), ("wait", 1.0), tap(SEND_N)],
      expect=["~一项都没寄出", "~要填 0–999 的整数"], timeout=6, nocmd=2)
 step("ark.sanity.bad.close", "arknights", "好 → 关提示，没寄出", [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.5)],
      absent=["~一项都没寄出"], nocmd=1)
 step("ark.edit4", "arknights", "理智药 2、关卡 CE-6、邮件开关、基建「赤金」→ 待保存 4 项",
-     [("field", "理智药", "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", "领取所有邮件奖励"),
+     [("field", MEDICINE, "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", "领取所有邮件奖励"),
       tap("无人机用在哪"), ("wait", 0.8), tap("~赤金", last=True)],
      expect=["~待保存 4 项"],
-     android={"do": [("field", "理智药", "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", "领取所有邮件奖励"),
+     android={"do": [("field", MEDICINE, "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", "领取所有邮件奖励"),
                      tap("贸易站 · 龙门币"), ("wait", 0.8), tap("~赤金", last=True)]},
-     ios={"do": [("field", "理智药", "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", "领取所有邮件奖励"),
+     ios={"do": [("field", MEDICINE, "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", "领取所有邮件奖励"),
                  tap({"t": "~基建无人机用在哪", "kind": "Button"}, right=60), ("wait", 0.8), tap("~赤金", last=True)]})
 step("ark.review", "arknights", "✓ → 确认单「寄出 4 项」", [tap(SAVE, region="top")], expect=["确认这次修改", "寄出 4 项"])
 step("ark.send", "arknights", "寄出 → set_master 赤金 / 邮件 + set_config 理智药 2 / CE-6",
      [CONFIRM_WAIT, tap("寄出 4 项")], absent=["确认这次修改"],
      cmd=["~PureGold", "~Mail", "~MedicineNumb", "~CE-6"])
 step("ark.battle.discard", "arknights", "作战开关切换 → 待保存 → ✕ 放弃 → 回原值",
-     [tap(CLEAR), ("toggle", "作战开关"), ("wait", 0.6), tap(DISCARD, region="top")], absent=["~待保存"], nocmd=2,
-     offline={"do": [("toggle", "作战开关"), ("wait", 0.6), tap(DISCARD, region="top")]})
+     [tap(CLEAR), ("toggle", FIGHT), ("wait", 0.6), tap(DISCARD, region="top")], absent=["~待保存"], nocmd=2,
+     offline={"do": [("toggle", FIGHT), ("wait", 0.6), tap(DISCARD, region="top")]})
 step("ark.menu.left", "arknights", "菜单行：点行左边的名字不出菜单（照原生，只有右边的值能点；已知存疑 D203 不改）",
      [tap("基建无人机用在哪"), ("wait", 0.8)], absent=["不使用"], on="ios")
 step("d39.ark.top", "d39", "D39：方舟滑到底再点「方舟」→ 回顶",
