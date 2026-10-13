@@ -14,16 +14,39 @@ struct StatusPage: View {
     @State var bossIndex = 1
     @State var echoUntil = "08:30"
     @State var echoNewUntil = ""
-    /// Which time field has the keyboard: leaving it checks the entry (view.js:1235 data-time onchange fires on blur).
-    /// Bumped every 30 s by a local timer so 「X 分钟前」 follows the clock (no network: view.js ago() redrawn on render).
+    /// The question of the command button just pressed, shown as a confirmationDialog drawn from that button (`StatusAsking`;
+    /// reference P10 / N9: Calendar's discard confirmation; HIG Action sheets "Use an action sheet — not an alert — to
+    /// offer choices related to an intentional action").
+    @State var confirm: StatusAsk? = nil
+    /// Android only: bumped every 30 s so 「X 分钟前」 and the 月卡 day count follow the clock (iOS: TimelineView in body).
     @State var tick = 0
+    /// Sizes that follow Dynamic Type (HIG Typography; ScaledMetric): the resource icon of a stamina tile, and the
+    /// Android-only machine dot (no computer symbol in skip-ui's Material table, Components/Image.swift).
+    @ScaledMetric(relativeTo: .title2) var resIcon: CGFloat = 30
+    @ScaledMetric(relativeTo: .body) var dotSide: CGFloat = 10
     /// A reselect of the 状态 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.status }
 
     var body: some View {
+        #if os(Android)
+        // skip-ui's TimelineView is commented out (Animation/Timeline.swift:3) and skip-fuse-ui has none
+        page.task {
+            let wait = 30.0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                tick &+= 1
+            }
+        }
+        #else
+        // 「X 分钟前」 and the 月卡 day count are redrawn every 30 s by the system's schedule, not a timer of ours
+        TimelineView(.periodic(from: .now, by: 30)) { _ in page }
+        #endif
+    }
+
+    private var page: some View {
         let _ = tick
-        List {
+        return List {
             deviceCard
             notices
             // view.js:362: the 月卡 0–5 days reminder card, after the notices and before the tiles (Pages/Status/MonthCard*.swift)
@@ -81,12 +104,6 @@ struct StatusPage: View {
         // (view.js:1235); without this the check waited for a tab switch
         .clearsFocusOnOutsideTap()
         // the title (「游戏机遥控」, or 「待保存 N 项」 while changes wait, view.js:1554) is set by StatusTab's EWSaveBar
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
-                tick &+= 1
-            }
-        }
     }
 
     /// The small line under a switch row (pending.js:50-73; index.html:769-773): grey, red for 没生效, 「再发一次」 in link colour.
@@ -109,23 +126,33 @@ struct StatusPage: View {
         }
     }
 
-    /// pending.js:63 `.posted`: a sent row sits on a light green ground (index.html:768, --ok at 8 %).
-    private func rowGround(_ id: String) -> Color? {
-        (data.switchTags[id]?.posted ?? false) ? Color.green.opacity(0.08) : nil
-    }
-
     // MARK: device card
 
+    /// The machine, as Find My's device card (reference P7 / N7: 原生-P7-查找-卡片-原尺寸.png): the device's symbol, its
+    /// name in bold with the state, the last report under it in grey. The symbol is lit while the machine is on, as
+    /// Home lights an accessory tile that is on (reference 首页机器行: 原生-苹果iOS27手册-家庭-Home标签.png).
     private var deviceCard: some View {
         Section {
-            HStack(spacing: 12) {
-                Circle().fill(data.dotOn ? Color.green : Color.gray.opacity(0.5)).frame(width: 10, height: 10)
+            Label {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(data.deviceHead.isEmpty ? data.deviceName : "\(data.deviceName) · \(data.deviceHead)")
+                    Text(data.deviceHead.isEmpty ? data.deviceName : "\(data.deviceName) · \(data.deviceHead)").font(.headline)
                     Text(data.deviceStatus).font(.footnote).foregroundStyle(.secondary)
                 }
+            } icon: {
+                deviceIcon
             }
         }
+    }
+
+    @ViewBuilder private var deviceIcon: some View {
+        #if os(Android)
+        // desktopcomputer is not in skip-ui's Material table (Components/Image.swift composeSymbolName)
+        Circle().fill(data.dotOn ? Color.green : Color.secondary).frame(width: dotSide, height: dotSide)
+            .accessibilityHidden(true)
+        #else
+        Image(systemName: "desktopcomputer").foregroundStyle(data.dotOn ? Color.green : Color.secondary)
+            .accessibilityHidden(true)   // the text beside says 开机中 / 关机
+        #endif
     }
 
     // MARK: notices
@@ -140,43 +167,52 @@ struct StatusPage: View {
             }
         }
         listSection("status-echofarm", ifLet: data.echoFarm) { ef in
-            Section("刷声骸") {
+            Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("正在刷「\(ef.name)」")
                     // the phone's clock, with the machine's 到 the 改收工 field below uses (审查 B4)
                     Text("刷到 \(ef.untilLocal) 为止（机器时间 \(ef.until)）" + (ef.fromLocal.isEmpty ? "" : "，\(ef.fromLocal) 开始"))
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                Button("改收工时刻") { actions.changeEchoFarmUntil(echoNewUntil.isEmpty ? ef.until : echoNewUntil) }
-                Button("提前收工", role: .destructive) { actions.stopEchoFarm() }
+                Button("改收工时刻") { confirm = actions.changeEchoFarmUntil(newUntil(ef)) }
+                    .disabled(statusTimeHHMM(newUntil(ef)) == nil)
+                    .modifier(StatusAsking(ask: $confirm, anchor: "echo_farm_until", confirm: actions.confirm))
+                Button("提前收工", role: .destructive) { confirm = actions.stopEchoFarm() }
+                    .modifier(StatusAsking(ask: $confirm, anchor: "echo_farm_stop", confirm: actions.confirm))
+            } header: {
+                Text("刷声骸")
+            } footer: {
+                // HIG Entering data: the button is grey until the entry is valid, and this line says why
+                if statusTimeHHMM(newUntil(ef)) == nil { Text("时刻填成 08:30 这种") }
             }
         }
     }
+
+    /// The 收工 time 改收工时刻 sends: the one picked below, else the machine's current 到.
+    private func newUntil(_ ef: StatusEchoFarm) -> String { echoNewUntil.isEmpty ? ef.until : echoNewUntil }
 
     // MARK: action tiles
 
     private var actionTiles: some View {
         Section {
-            Button { actions.runNow() } label: {
+            Button { confirm = actions.runNow() } label: {
                 tileLabel("现在跑一趟", data.currentQueue.isEmpty ? "" :
                           (data.nextAt.isEmpty ? data.currentQueue : "\(data.currentQueue) · 下一趟 \(data.nextAt)"),
                           tint: .blue) { Image(systemName: "play.fill") }
             }
+            .modifier(StatusAsking(ask: $confirm, anchor: "run_now", confirm: actions.confirm))
             Button { actions.refresh() } label: {
                 tileLabel("刷新", data.snapAt.map { ago($0) } ?? data.lastUpdate, tint: .gray, spinning: data.refreshing) {
                     symbol("arrow.clockwise", android: "Icons.Outlined.Refresh")
                 }
             }
-            Button { actions.stopAll() } label: {
+            Button(role: .destructive) { confirm = actions.stopAll() } label: {
                 tileLabel("停止一切", "脚本和游戏", tint: .red) {
-                    // no Material stop icon in skip-ui's table: the filled square drawn on Android
-                    #if os(Android)
-                    RoundedRectangle(cornerRadius: 2).fill(Color.red).frame(width: 14, height: 14)
-                    #else
-                    Image(systemName: "stop.fill")
-                    #endif
+                    // no Material stop icon in skip-ui's table (Components/Image.swift): its close glyph
+                    symbol("stop.fill", android: "Icons.Filled.Close")
                 }
             }
+            .modifier(StatusAsking(ask: $confirm, anchor: "estop", confirm: actions.confirm))
         }
     }
 
@@ -185,24 +221,30 @@ struct StatusPage: View {
         HStack(spacing: 12) {
             // the title beside names the action: the icon is decorative (HIG VoiceOver: "Exclude purely decorative images")
             if spinning { ProgressView() } else { icon().foregroundStyle(tint).accessibilityHidden(true) }
+            // a list row that acts is drawn in the tint (red for the destructive role), its detail in grey, as Find My's
+            // device actions (reference P7) and Settings' 「Sign Out」
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).foregroundStyle(title == "停止一切" ? Color.red : Color.primary)
-                if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(.secondary) }
+                Text(title)
+                if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(Color.secondary) }
             }
         }
     }
 
     // MARK: stamina
 
-    /// view.js numTiles(): three tiles 2 + 1 (the last one spans the row, Reminders' odd smart-list tile), each with the
-    /// resource's own icon (view.js:266 RES → Module.xcassets res-ak / res-ef / res-ww) and its colour; before the first
-    /// reading the tiles show with placeholders and 「正在读取…」 under them (view.js:293-297).
+    /// view.js numTiles(): three tiles 2 + 1 (the last one spans the row), each with the resource's own icon (view.js:266
+    /// RES → Module.xcassets res-ak / res-ef / res-ww). Each tile is a system GroupBox read as Health's Summary card
+    /// (reference P1 / N1: ios27-健康Summary-满数据-1.png): the name in its category colour, the value large and bold in
+    /// the primary colour, the cap and the time it fills small and grey. Before the first reading the tiles show
+    /// redacted placeholders (HIG Loading: "consider showing placeholder text, graphics, or animations as content
+    /// loads") and 「正在读取…」 under them (view.js:293-297).
     @ViewBuilder private var staminaSection: some View {
         listSection("status-stamina", ifLet: data.stamina) { tiles in
+            // placeholder values of a typical length, drawn redacted
             let shown = tiles.isEmpty
-                ? [StatusStamina(label: "明日方舟 理智", value: nil, cap: nil, sub: ""),
-                   StatusStamina(label: "终末地 理智", value: nil, cap: nil, sub: ""),
-                   StatusStamina(label: "鸣潮 波片", value: nil, cap: nil, sub: "")]
+                ? [StatusStamina(label: "明日方舟 理智", value: 100, cap: 135, sub: "今天 00:00 回满"),
+                   StatusStamina(label: "终末地 理智", value: 100, cap: 240, sub: "今天 00:00 回满"),
+                   StatusStamina(label: "鸣潮 波片", value: 100, cap: 240, sub: "今天 00:00 回满")]
                 : tiles
             Section {
                 VStack(spacing: 10) {
@@ -213,7 +255,10 @@ struct StatusPage: View {
                     if shown.count > 2 { staminaTile(shown[2], placeholder: tiles.isEmpty) }
                 }
                 #if !os(Android)
-                .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))   // skip-ui: unavailable on Android
+                // Health's Summary: each card on the grouped page ground, not inside a row (a GroupBox in a row has the
+                // row's own colour in dark mode); skip-ui: listRowInsets unavailable, its GroupBox draws its own ground
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
                 #endif
             } footer: {
                 if tiles.isEmpty { Text("正在读取…") }
@@ -223,40 +268,42 @@ struct StatusPage: View {
     }
 
     private static let staminaIcon = ["明日方舟 理智": "res-ak", "终末地 理智": "res-ef", "鸣潮 波片": "res-ww"]
+    /// The web's three colours are the system blue, orange and teal (index.html #30b0c7 = systemTeal): named, so they
+    /// follow light / dark (HIG Color: "Avoid hard-coding system color values in your app").
     private static let staminaColour: [String: Color] = [
-        "明日方舟 理智": .blue, "终末地 理智": .orange,
-        "鸣潮 波片": Color(red: 0x30 / 255.0, green: 0xb0 / 255.0, blue: 0xc7 / 255.0),
+        "明日方舟 理智": .blue, "终末地 理智": .orange, "鸣潮 波片": .teal,
     ]
 
     private func staminaTile(_ t: StatusStamina, placeholder: Bool) -> some View {
         let icon = Self.staminaIcon[t.label] ?? "res-ak"
         let colour = Self.staminaColour[t.label] ?? Color.blue
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top) {
-                decorativeImage(icon).resizable().scaledToFit().frame(width: 30, height: 30)   // t.label names it
-                Spacer()
-                if placeholder {
-                    RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.2)).frame(width: 56, height: 22)
-                } else if t.error == nil {
-                    HStack(alignment: .firstTextBaseline, spacing: 1) {
-                        Text(t.value.map(String.init) ?? "–").font(.title2).bold().foregroundStyle(colour)
-                        if let cap = t.cap { Text("/\(cap)").font(.footnote).foregroundStyle(colour) }
+        return GroupBox {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .top) {
+                    decorativeImage(icon).resizable().scaledToFit().frame(width: resIcon, height: resIcon)   // t.label names it
+                    Spacer()
+                    if t.error == nil {
+                        HStack(alignment: .firstTextBaseline, spacing: 1) {
+                            Text(t.value.map(String.init) ?? "–").font(.title2).bold().monospacedDigit()
+                            if let cap = t.cap { Text("/\(cap)").font(.footnote).foregroundStyle(.secondary) }
+                        }
+                        .redacted(reason: placeholder ? .placeholder : [])
                     }
                 }
+                Text(t.label).font(.subheadline).bold().foregroundStyle(colour)
+                if let err = t.error {
+                    Text(err).font(.footnote).foregroundStyle(.red)
+                } else if !t.sub.isEmpty {
+                    Text(t.sub).font(.footnote).foregroundStyle(.secondary)
+                        .redacted(reason: placeholder ? .placeholder : [])
+                }
             }
-            Text(t.label).font(.subheadline).bold().foregroundStyle(.secondary)
-            if placeholder {
-                RoundedRectangle(cornerRadius: 3).fill(Color.gray.opacity(0.2)).frame(width: 90, height: 11)
-            } else if let err = t.error {
-                Text(err).font(.footnote).foregroundStyle(.red)
-            } else if !t.sub.isEmpty {
-                Text(t.sub).font(.footnote).foregroundStyle(.secondary)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.gray.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        #if os(iOS)
+        // the colour of a grouped list's cards, so a tile reads as one of Health's Summary cards in light and dark
+        .backgroundStyle(Color(uiColor: .secondarySystemGroupedBackground))
+        #endif
     }
 
     // MARK: plan (这一趟 / 明日安排)
@@ -264,20 +311,25 @@ struct StatusPage: View {
     @ViewBuilder private func planRows(_ blocks: [StatusPlanBlock]) -> some View {
         ForEach(blocks) { b in
             if let q = b.queueName {
+                // Clock's alarm row (reference P6 / N11: mac27-时钟-闹钟-有数据.png, P6-快捷指令-自动化列表.png): the time
+                // large, the name and what happens today small under it, the switch on the right
                 Toggle(isOn: Binding(get: { b.runsToday }, set: { actions.setRunsToday(q, $0) })) {
                     VStack(alignment: .leading, spacing: 2) {
                         // a skipped shift's row has no time (StatusMapping, 审查 B2); the lead time is 东京, as the tile (B4)
-                        Text(b.shownTime.isEmpty ? q : "\(q) · \(b.shownTime)")
-                        Text([b.machineNote, b.runsToday ? "今天照常" : "今天跳过，明天照常", b.after]
+                        if b.shownTime.isEmpty {
+                            Text(q)
+                        } else {
+                            Text(b.shownTime).font(.title2).bold().monospacedDigit()
+                        }
+                        Text([b.shownTime.isEmpty ? "" : q, b.machineNote, b.runsToday ? "今天照常" : "今天跳过，明天照常", b.after]
                                 .filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(.footnote).foregroundStyle(.secondary)
                         tagLine(StatusSwitchID.queue(q))
                     }
                 }
-                .listRowBackground(rowGround(StatusSwitchID.queue(q)))
             } else {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(b.shownTime)
+                    Text(b.shownTime).font(.title2).bold().monospacedDigit()
                     let sub = [b.machineNote, b.after].filter { !$0.isEmpty }.joined(separator: " · ")
                     if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(.secondary) }
                 }
@@ -331,7 +383,7 @@ struct StatusPage: View {
     // MARK: 刷 4C 声骸
 
     private var echoFarmSection: some View {
-        Section("刷 4C 声骸") {
+        Section {
             if let ef = data.echoFarm {
                 // echofarm.py retime (363-384) resolves the time like a start: one already past is tomorrow's (审查 A2: the
                 // old 「已经过了的时刻＝立刻收工」 sent a farm on for another day); stopping now is 「提前收工」. view.js:398 #efnew
@@ -359,8 +411,15 @@ struct StatusPage: View {
                     DatePicker("刷到几点", selection: hhmmBinding($echoUntil, else: "08:30"), displayedComponents: .hourAndMinute)
                         .labelsHidden()
                 }
-                Button("开始刷") { actions.startEchoFarm(bossIndex, echoUntil) }
+                Button("开始刷") { confirm = actions.startEchoFarm(bossIndex, echoUntil) }
+                    .disabled(StatusCommands.echoFarmProblem(boss: bossIndex, until: echoUntil) != nil)
+                    .modifier(StatusAsking(ask: $confirm, anchor: "echo_farm", confirm: actions.confirm))
             }
+        } header: {
+            Text("刷 4C 声骸")
+        } footer: {
+            // HIG Entering data: 开始刷 is grey until a boss and a time are there, and this line says why
+            if data.echoFarm == nil, let why = StatusCommands.echoFarmProblem(boss: bossIndex, until: echoUntil) { Text(why) }
         }
     }
 
@@ -403,7 +462,6 @@ struct StatusPage: View {
                     tagLine(StatusSwitchID.skipShutdown)
                 }
             }
-            .listRowBackground(rowGround(StatusSwitchID.skipShutdown))
             Toggle(isOn: Binding(get: { data.debugModeUntil != nil }, set: { actions.setDebugMode($0) })) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("调试模式")
@@ -412,7 +470,6 @@ struct StatusPage: View {
                     tagLine(StatusSwitchID.debugMode)
                 }
             }
-            .listRowBackground(rowGround(StatusSwitchID.debugMode))
         } header: {
             Text("机器")
         } footer: {
@@ -469,6 +526,34 @@ private struct StatusPlanGameRow: Identifiable {
     var id: String { block + "/" + game.id }
 }
 
+/// The confirmation of one command button, drawn from that button: SwiftUI's confirmationDialog attached to the button
+/// that asks, as its documentation's example does ("In regular size classes in iOS, the system renders confirmation
+/// dialogs as a popover"); reference P10 / N9 (P10-日历-放弃确认.png). One `confirm` state per page, keyed by the
+/// request's action (StatusAsk.anchor), so only the pressed button's dialog shows (7b6a3f1).
+struct StatusAsking: ViewModifier {
+    @Binding var ask: StatusAsk?
+    var anchor: String
+    var confirm: (StatusAsk) -> Void
+
+    /// The last question shown, so the title stays while the dialog animates away after `ask` went nil.
+    @State var last: StatusAsk? = nil
+
+    func body(content: Content) -> some View {
+        let mine = ask?.anchor == anchor ? ask : nil
+        content
+            .onChange(of: mine) { _, v in if let v { last = v } }
+            .confirmationDialog((mine ?? last)?.title ?? "",
+                                isPresented: Binding(get: { ask?.anchor == anchor },
+                                                     set: { if !$0, ask?.anchor == anchor { ask = nil } }),
+                                titleVisibility: .visible, presenting: mine ?? last) { a in
+                Button(a.ok, role: a.destructive ? .destructive : nil) { confirm(a) }
+                Button("取消", role: .cancel) {}
+            } message: { a in
+                Text(a.message)
+            }
+    }
+}
+
 /// A receipt shows its whole text, wrapping onto as many lines as it needs (user, 10-02 20:49: a cut-off receipt, with
 /// or without an ellipsis, hides the information). The web row is one line with an ellipsis (view.js:449-451,
 /// index.html:392); the App does not follow it here. The icon and the time keep their width (time never wraps, as
@@ -513,19 +598,8 @@ func todayActualRow(_ actual: String) -> some View {
         // "a view that doesn't display text, like an icon")
         Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.green).accessibilityLabel("成功")
     } else {
-        // no Material cancel icon in skip-ui's table: a red disc with the mapped xmark on Android
-        #if os(Android)
-        // sized to the Material CheckCircle beside it: a 13 pt disc in a 16 pt box (measured on the emulator)
-        ZStack {
-            Circle().fill(Color.red).frame(width: 13, height: 13)
-            Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(Color.white)
-                .accessibilityHidden(true)
-        }
-        .frame(width: 16, height: 16)
-        .accessibilityLabel("失败")
-        #else
-        Image(systemName: "xmark.circle.fill").foregroundStyle(Color.red).accessibilityLabel("失败")
-        #endif
+        // no Material cancel icon in skip-ui's table (Components/Image.swift): its close glyph, in red
+        symbol("xmark.circle.fill", android: "Icons.Filled.Close").foregroundStyle(Color.red).accessibilityLabel("失败")
     }
 }
 

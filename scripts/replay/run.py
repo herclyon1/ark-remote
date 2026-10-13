@@ -521,6 +521,13 @@ class Runner:
                     time.sleep(0.8)
                     break
             else:
+                # iOS 27 draws a confirmationDialog attached to its button as a popover with no 取消 ("the cancel action
+                # is implicit by tapping anywhere else", WWDC25 284): tap the right margin, outside the popover and the rows
+                if self.drv.platform == "ios" and any(n.get("id") == "PopoverDismissRegion" or n["kind"] == "Popover"
+                                                      for n in dump["nodes"]):
+                    self.drv.tap(self.drv.size[0] - 6, self.drv.size[1] // 2)
+                    time.sleep(0.8)
+                    continue
                 hits = self.find(DISCARD_SEL, dump, "top")
                 if hits:
                     self.drv.tap(hits[0]["x"], hits[0]["y"])

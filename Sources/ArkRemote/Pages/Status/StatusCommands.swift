@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// A command waiting for the user's yes in the page's alert (view.js ask() before oneShot / the save flow).
+/// A command waiting for the user's yes (view.js ask() before oneShot / the save flow): a confirmationDialog anchored to
+/// the button that asked (StatusPage `StatusAsking`, keyed by `anchor`), or, for `single`, the one-button alert of StatusTab.
 struct StatusAsk: Equatable {
     var title: String
     var message: String
@@ -14,6 +15,8 @@ struct StatusAsk: Equatable {
     var isEstop = false
     /// view.js ask(…, { single: true }): one 「好」 button, nothing is sent.
     var single = false
+    /// The button the confirmation belongs to (the request's action): its dialog is drawn from that button.
+    var anchor = ""
 
     /// A one-button notice in the same alert (view.js ask(title, text, "好", false, { single: true })).
     static func notice(_ title: String, _ message: String) -> StatusAsk {
@@ -25,7 +28,8 @@ struct StatusAsk: Equatable {
 @MainActor
 enum StatusCommands {
     /// view.js oneShot(body, okText), plus Pending.add for switches (the save flow's `pending[id] = {...}`).
-    /// Success is the web's short toast as is; a failure comes back as the reason, which the caller shows in the
+    /// Success goes to the status line under the title (Feedback.status, HIG Feedback "Consider integrating status
+    /// feedback into your interface"); a failure comes back as the reason, which the caller shows in the
     /// 「发不出去」 one-button alert (view.js:1570 `ask("发不出去", e.message, "好", false, { single: true })`).
     static func send(_ a: StatusAsk) async -> String? {
         let relay = Relay.shared
@@ -35,7 +39,7 @@ enum StatusCommands {
                 e.sentAt = nowSec()
                 Pending.shared.add(k, e)
             }
-            relay.showToast(a.okText)
+            Feedback.status(a.okText)
             return nil
         } catch {
             return Live.why(error)
@@ -44,22 +48,21 @@ enum StatusCommands {
 
     static func actions(_ data: StatusData, ask: Binding<StatusAsk?>, storedQueue: Binding<String>,
                         edits: Binding<[String: EWEdit]>) -> StatusActions {
-        let relay = Relay.shared
         let queue = data.currentQueue.isEmpty ? "早班" : data.currentQueue   // view.js theQueue(): curQueue || "早班"
         var a = StatusActions()
         a.runNow = {
             // sending while a run is on makes AUTO-MAS and the manual run fight (view.js:1209: a one-button alert)
             if !data.busy.isEmpty {
                 ask.wrappedValue = StatusAsk.notice("正在跑别的", "现在正在跑 \(data.busy.joined(separator: "、"))，跑完再派。硬要派会和它打架。")
-                return
+                return nil
             }
-            ask.wrappedValue = StatusAsk(
+            return StatusAsk(
                 title: "现在跑一趟？", message: "让「\(queue)」现在多跑一趟。会真的花掉理智／波片；机器关着的话，12 小时内开机才会跑，再晚就作废。",
                 ok: "跑一趟",
                 body: .object(["action": .string("run_now"), "confirmed": .bool(true), "queue": .string(queue)]),
                 // the mailbox keeps a message 12 hours (ntfy.sh's cache; Pending.swift isStale) and nothing tracks a one-shot
                 // order: 「下次开机跑」 promised a run that a machine off longer never got (edge audit 23)
-                okText: "已派：现在跑一趟")   // view.js:1215: one line, the confirm before it already says what happens when off
+                okText: "已派：现在跑一趟", anchor: "run_now")   // view.js:1215: one line, the confirm before it already says what happens when off
         }
         a.refresh = { Task { await Live.shared.ping() } }
         a.stopAll = {
@@ -67,13 +70,13 @@ enum StatusCommands {
             // machine is off it never runs, and the page waited 6 h for its receipt (审查 B8)
             if data.machineOff {
                 ask.wrappedValue = StatusAsk.notice("机器关着", "现在没有在跑的东西。关机时按的「停止一切」开机后也不会执行，所以这次没有发。")
-                return
+                return nil
             }
-            ask.wrappedValue = StatusAsk(
+            return StatusAsk(
                 title: "停止一切？", message: "停掉现在在跑的：队列、脚本和游戏。不动排班、不动任何设置，下一趟照常。回执会告诉你停干净没有。",
                 ok: "停止", destructive: true,
                 body: .object(["action": .string("estop"), "confirmed": .bool(true)]),
-                okText: "已下令停止一切", isEstop: true)   // view.js:1263
+                okText: "已下令停止一切", isEstop: true, anchor: "estop")   // view.js:1263
         }
         a.selectQueue = { storedQueue.wrappedValue = $0 }
         a.setRunsToday = { name, on in
@@ -85,54 +88,69 @@ enum StatusCommands {
             note(edits, StatusSwitchID.queue(name), label: label, on: on, body: body)
         }
         a.startEchoFarm = { boss, until in
-            guard boss > 0 else {
-                relay.showToast("先选 boss 再填时刻")   // view.js:1228
-                return
-            }
-            // a boss picked and a time like 25:00 was told to pick a boss (edge audit 38): the time's own words, as 改收工时刻
-            guard let t = statusTimeHHMM(until) else {
-                relay.showToast("时刻填成 08:30 这种")   // view.js:1239
-                return
-            }
+            // 开始刷 stays disabled until both are valid, with the reason under the section (echoFarmProblem); this guard
+            // only keeps a stray call from sending (view.js:1228 / :1239 said it in a toast)
+            guard echoFarmProblem(boss: boss, until: until) == nil, let t = statusTimeHHMM(until) else { return nil }
             let nm = statusBosses.first(where: { $0.index == boss })?.name ?? "第 \(boss) 个"
             // sent while the machine is off it ran at the next boot, with the time resolved at that moment: 08:30 asked at
             // 23:00 became the next day's 08:30, a farm of ~24 h over the morning shift (审查 A3; boot_stages.py:692-694,
             // echofarm.py:329 → 114-124). The relay is to refuse a stale one; the App does not send it at all.
             if data.machineOff {
                 ask.wrappedValue = StatusAsk.notice("机器关着", "刷声骸要机器开着才能开始：关机时发出的要等开机才执行，所以这次没有发。开机后再按。")
-                return
+                return nil
             }
-            ask.wrappedValue = StatusAsk(
+            return StatusAsk(
                 // the relay holds no queue back for a farm (审查 B14: echofarm is read only by commands / engine tick / shutdown /
                 // phone, relay grep): a shift that comes due runs as usual
                 title: "开始刷？", message: "刷「\(nm)」到机器时间 \(t) 为止？期间脚本会一直在打；到点的班次照常跑，可能和它抢游戏。", ok: "开始刷",
                 body: .object(["action": .string("echo_farm"), "confirmed": .bool(true), "boss": .int(boss),
                                "until": .string(t), "name": .string(nm)]),
-                okText: "已派：刷到 \(t)")   // view.js:1230
+                okText: "已派：刷到 \(t)", anchor: "echo_farm")   // view.js:1230
         }
         a.changeEchoFarmUntil = { until in
-            guard let v = statusTimeHHMM(until) else {
-                relay.showToast("时刻填成 08:30 这种")   // view.js:1239
-                return
-            }
+            // 改收工时刻 is disabled while the time is not a valid one (the reason is under the 刷声骸 section)
+            guard let v = statusTimeHHMM(until) else { return nil }
             // echofarm.py retime → resolve_until (114-124): a time not after the machine's clock now is tomorrow's (审查 A2)
             let past = v <= machineNowHHMM()
-            ask.wrappedValue = StatusAsk(
+            return StatusAsk(
                 title: "改收工时刻？",
                 message: past ? "机器时间现在已过 \(v)，会算成明天 \(v) 才收工。要马上停，按「提前收工」。"
                     : "把收工时刻改成 \(v)（机器时间）？",
                 ok: "改",
-                body: .object(["action": .string("echo_farm_until"), "until": .string(v)]), okText: "收工时刻已改")
+                body: .object(["action": .string("echo_farm_until"), "until": .string(v)]), okText: "收工时刻已改",
+                anchor: "echo_farm_until")
         }
         a.stopEchoFarm = {
-            ask.wrappedValue = StatusAsk(
+            StatusAsk(
                 title: "现在收工？", message: "会关掉脚本和游戏，配置还原成你原来那份。", ok: "收工", destructive: true,
-                body: .object(["action": .string("echo_farm_stop")]), okText: "已收工")   // view.js:1246
+                body: .object(["action": .string("echo_farm_stop")]), okText: "已收工", anchor: "echo_farm_stop")   // view.js:1246
+        }
+        a.confirm = { q in
+            let pressed = nowSec()
+            Task {
+                if let why = await send(q) {
+                    // view.js oneShot: the 「发不出去」 alert with the reason, StatusTab's one-button alert (125)
+                    ask.wrappedValue = StatusAsk.notice("发不出去", why)
+                } else if q.isEstop {
+                    // only an order that went out waits for its receipt: written before the send, a failed one still read
+                    // 「已下令停止 · 等机器回执」 for 6 hours (edge audit 4, 审查 B8). StatusTab reads it through @AppStorage
+                    // (iOS observes UserDefaults; skip-ui registers a SharedPreferences listener, AppStorage.swift:84)
+                    UserDefaults.standard.set(pressed, forKey: "ark-remote-estop")
+                }
+            }
         }
         a.setSkipShutdown = { on in relaySwitch(edits, StatusSwitchID.skipShutdown, on: on) }
         a.setDebugMode = { on in relaySwitch(edits, StatusSwitchID.debugMode, on: on) }
         a.resend = { id in Task { await Pending.shared.resend(id) } }   // pending.js [data-again] → resend(key)
         return a
+    }
+
+    /// Why 开始刷 cannot be pressed yet, or nil (view.js:1228 / :1239 said these in a toast; HIG Entering data: "make the
+    /// button available only after people enter the data you require").
+    static func echoFarmProblem(boss: Int, until: String) -> String? {
+        if boss <= 0 { return "先选 boss 再填时刻" }
+        if statusTimeHHMM(until) == nil { return "时刻填成 08:30 这种" }
+        return nil
     }
 
     /// A schema.js RELAY_SWITCHES row flipped: the change waits in 「待保存」 (sw.on / sw.off is what 保存 sends).

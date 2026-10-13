@@ -77,7 +77,10 @@ struct MonthCardRows: View {
 }
 
 /// The pushed page of one game (monthcard.js pageHtml() / open()): what is registered, 「登记充值」 with a stepper and
-/// 「按游戏里的天数对准」 with the day count the game shows; each asks before it registers.
+/// 「按游戏里的天数对准」 with the day count the game shows; each asks before it registers. Read as Apple's Edit
+/// Subscription page (reference P9 / N6: P9-苹果订阅-4-manage.png): the first group is the subscription card, the
+/// days left large and bold with the last day under it in grey; the asks are confirmationDialogs from their buttons
+/// (reference P10).
 struct MonthCardPage: View {
     var game: String
 
@@ -94,18 +97,15 @@ struct MonthCardPage: View {
         List {
             Section {
                 if let e {
-                    HStack {
-                        Text("最后一次领取")
-                        Spacer()
-                        Text(MonthCardStore.md(e.last)).foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("还剩")
-                        Spacer()
-                        Text(e.expired ? "已过期" : "\(e.left) 天").foregroundStyle(monthCardTone(e))
-                    }
-                    if e.local {
-                        Text(MonthCardStore.syncNote).font(.footnote).foregroundStyle(.secondary)
+                    // the subscription card: 「还剩 N 天」 as its title (orange from 5 days left, red once lapsed, else the
+                    // primary colour), 「最后一次领取 X月X日」 as its grey line, the sync note under them
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(e.expired ? "已过期" : "还剩 \(e.left) 天").font(.title).bold()
+                            .foregroundStyle(e.expired || e.left <= 5 ? monthCardTone(e) : Color.primary)
+                        Text("最后一次领取 \(MonthCardStore.md(e.last))").foregroundStyle(.secondary)
+                        if e.local {
+                            Text(MonthCardStore.syncNote).font(.footnote).foregroundStyle(.secondary)
+                        }
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 2) {
@@ -128,41 +128,44 @@ struct MonthCardPage: View {
                                        message: "\(game)月卡加 \(MonthCardStore.days * n) 天，最后一次领取改到 \(MonthCardStore.md(to))。",
                                        ok: "登记", add: n, left: nil, last: to)
                 }
+                .modifier(MonthCardAsking(ask: $ask, kind: "add", confirm: register))
             } header: {
                 Text("登记充值")
             } footer: {
                 Text("付完钱在这里登记。买一次加 \(MonthCardStore.days) 天，接在最后一次领取日后面；已经过期的从登记当天算第 1 天。")
             }
             Section {
+                // Health's Add Data row: the name on the left, the number field taking the rest, right-aligned
                 HStack(spacing: 6) {
-                    Text("游戏里显示还剩").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("游戏里显示还剩")
                     dayField
                     Text("天").foregroundStyle(.secondary)
                 }
                 Button("对准") { setLeft() }
+                    .disabled(leftValue == nil)
+                    .modifier(MonthCardAsking(ask: $ask, kind: "left", confirm: register))
             } header: {
                 Text("按游戏里的天数对准")
             } footer: {
-                Text("第一次用或者日期对不上时，照游戏里显示的「还剩 X 天」填。")
+                // HIG Entering data: 对准 is grey until the field holds a day count; a wrong entry is said here (monthcard.js
+                // #mcset said it in a toast)
+                Text((leftText.isEmpty || leftValue != nil ? "" : "填 0–\(MonthCardStore.maxLeft) 的整数。")
+                     + "第一次用或者日期对不上时，照游戏里显示的「还剩 X 天」填。")
             }
         }
         .clearsFocusOnOutsideTap()
         .keyboardDone()
         .navigationTitle("\(game)月卡")
-        .alert(ask?.title ?? "", isPresented: Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })) {
-            if let a = ask {
-                Button(a.ok) {
-                    let g = game
-                    Task {
-                        await MonthCardStore.shared.register(g, add: a.add, left: a.left, last: a.last)
-                    }
-                    if a.add != nil { count = 1 } else { leftText = ""; leftFocus = false }
-                }
-                Button("取消", role: .cancel) {}
-            }
-        } message: {
-            Text(ask?.message ?? "")
+    }
+
+    /// The yes of a registration: the rows show the new date and days at once (no toast; HIG Alerts "Avoid using an
+    /// alert merely to provide information").
+    private func register(_ a: MonthCardAsk) {
+        let g = game
+        Task {
+            await MonthCardStore.shared.register(g, add: a.add, left: a.left, last: a.last)
         }
+        if a.add != nil { count = 1 } else { leftText = ""; leftFocus = false }
     }
 
     /// index.html .row input.short with inputmode="numeric", placeholder 「天数」, 64–80 px wide.
@@ -171,7 +174,6 @@ struct MonthCardPage: View {
             .focused($leftFocus)
             .multilineTextAlignment(.trailing)
             .autocorrectionDisabled()
-            .frame(width: 72)
         #if os(macOS)
         field
         #else
@@ -179,8 +181,8 @@ struct MonthCardPage: View {
         #endif
     }
 
-    /// monthcard.js #mcset: full-width digits count, 0–400 only, else a toast and the field keeps the keyboard.
-    private func setLeft() {
+    /// monthcard.js #mcset: full-width digits count, 0–400 only; nil while the field holds anything else.
+    private var leftValue: Int? {
         var s = ""
         for u in leftText.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars {
             if u.value >= 0xFF10 && u.value <= 0xFF19, let a = Unicode.Scalar(u.value - 0xFEE0) {
@@ -190,13 +192,42 @@ struct MonthCardPage: View {
             }
         }
         guard (1...3).contains(s.count), s.allSatisfy({ $0.isASCII && $0.isNumber }), let x = Int(s), x <= MonthCardStore.maxLeft else {
-            Relay.shared.showToast("填 0–\(MonthCardStore.maxLeft) 的整数")
-            leftFocus = true
-            return
+            return nil
         }
+        return x
+    }
+
+    private func setLeft() {
+        guard let x = leftValue else { return }
         let to = MonthCardStore.plus(MonthCardStore.today(), x)
         ask = MonthCardAsk(title: "对准为还剩 \(x) 天？", message: "\(game)月卡最后一次领取改到 \(MonthCardStore.md(to))。",
                            ok: "对准", add: nil, left: x, last: to)
+    }
+}
+
+/// The confirmation of 登记 (kind "add") or 对准 (kind "left"), drawn from its button (as StatusPage's `StatusAsking`).
+struct MonthCardAsking: ViewModifier {
+    @Binding var ask: MonthCardAsk?
+    var kind: String
+    var confirm: (MonthCardAsk) -> Void
+
+    private func mine(_ a: MonthCardAsk?) -> Bool { (a?.add != nil ? "add" : a == nil ? "" : "left") == kind }
+
+    /// The last question shown, so the title stays while the dialog animates away after `ask` went nil.
+    @State var last: MonthCardAsk? = nil
+
+    func body(content: Content) -> some View {
+        let shown = mine(ask) ? ask : nil
+        content
+            .onChange(of: shown) { _, v in if let v { last = v } }
+            .confirmationDialog((shown ?? last)?.title ?? "",
+                                isPresented: Binding(get: { mine(ask) }, set: { if !$0, mine(ask) { ask = nil } }),
+                                titleVisibility: .visible, presenting: shown ?? last) { a in
+                Button(a.ok) { confirm(a) }
+                Button("取消", role: .cancel) {}
+            } message: { a in
+                Text(a.message)
+            }
     }
 }
 
