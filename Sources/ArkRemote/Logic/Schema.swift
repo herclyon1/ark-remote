@@ -248,7 +248,7 @@ let schema: [SchemaSection] = [
         SchemaField(path: "DailyTask.json/Which Tacet Suppression to Farm", type: "icons", label: "无音区打哪个", tacet: tacet,
                     hint: "按想要的声骸套装挑。只在上面选「无音区」时才有用"),
         SchemaField(path: "NightmareNestTask.json/Only Farm These Nests", type: "text", label: "残象聚落点位", ro: true,
-                    hint: "这是定好的，要换点位在电脑上改。"),
+                    hint: "只刷列表里的前两个聚落，这是定好的，要换在电脑上改。"),
     ]),
 ]
 

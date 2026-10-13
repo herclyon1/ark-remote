@@ -59,21 +59,23 @@ enum WuwaSchema {
         EWChoice("15 · 佩枪（告解海渊）", "15"),
     ]
 
-    /// Footer cuts only (app-1013 review 鸣潮 1): no hint that repeats the row's name (体力刷什么), none that says a row
-    /// only counts for one choice (those rows are hidden for the others, `hidden(_:)`).
+    /// Each hint says what the row does, shortened in place (design rule 8; BOARD/App-待他定项-从记录定-1014.md W4): no
+    /// 「只在上面选…时才有用」, since those rows are hidden for the other choices (`hidden(_:)`).
     static let group = EWGroupSpec(title: "鸣潮", fields: [
-        EWFieldSpec(path: "DailyTask.json/Which to Farm", type: .text, label: "体力刷什么"),
-        EWFieldSpec(path: "DailyTask.json/Material Selection", type: .text, label: "刷哪种材料"),
+        EWFieldSpec(path: "DailyTask.json/Which to Farm", type: .text, label: "体力刷什么",
+                    hint: "每天的体力花在哪一类。"),
+        EWFieldSpec(path: "DailyTask.json/Material Selection", type: .text, label: "刷哪种材料",
+                    hint: "模拟领域刷的材料。"),
         EWFieldSpec(path: "DailyTask.json/Which Forgery Challenge to Farm", type: .select, label: "凝素领域打哪个",
                     hint: "按想要的武器材料挑。", choices: forge),
         // our own name: OK-WW's 「刷第几个无音区 (F2列表)」 wrapped the name and the value onto two lines each (review 鸣潮 2)
         EWFieldSpec(path: "DailyTask.json/Which Tacet Suppression to Farm", type: .icons, name: "无音区打哪个",
                     hint: "按想要的声骸套装挑。",
                     choices: tacet.map { EWChoice($0.names.joined(separator: " ＋ "), String($0.value)) }),
-        // the relay holds both nests (mastercfg_okww.py ONLY_NESTS 梦枢天罗、落渊南丘); the row shows them, so the hint
-        // no longer names one
+        // the first two settlements (his 10-12 11:17 「我要的就是要刷前两个残像聚落，第2个就是落渊南丘」; the relay's
+        // mastercfg_okww.py ONLY_NESTS 梦枢天罗、落渊南丘); the old 「只刷落渊南丘」 was out of date
         EWFieldSpec(path: "NightmareNestTask.json/Only Farm These Nests", type: .text, label: "残象聚落点位",
-                    hint: "这是定好的，要换点位在电脑上改。", readOnly: true),
+                    hint: "只刷列表里的前两个聚落，这是定好的，要换在电脑上改。", readOnly: true),
     ])
 }
 
@@ -228,7 +230,7 @@ struct WuwaPage: View {
             // view.js:976-995; the row name is taken without its <small> (「周本」, not 「周本 战歌重奏」)
             Text(verbatim: ewFoot([EWFootItem(label: "周常乐园", hint: "不花体力。做完就停到下周一"),
                                    EWFootItem(label: "周本", hint: "花体力。一周领 3 次奖励，领满就停到下周一"),
-                                   EWFootItem(label: "周本打第几个", hint: "游戏里按 F2 打开周本列表，从上往下数，第一个填 1。新 Boss 上线顺序会变，换本时记得来改")],
+                                   EWFootItem(label: "周本打第几个", hint: "游戏里按 F2 打开周本列表，从上往下数，第一个是 1。新 Boss 上线顺序会变，换本时记得来改")],
                                   rows: 3))
         }
     }
