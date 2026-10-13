@@ -1,8 +1,19 @@
 {
   "images": [
     {
-      "filename": "tab-status.png",
-      "idiom": "universal"
+      "filename": "tab-status@1x.png",
+      "idiom": "universal",
+      "scale": "1x"
+    },
+    {
+      "filename": "tab-status@2x.png",
+      "idiom": "universal",
+      "scale": "2x"
+    },
+    {
+      "filename": "tab-status@3x.png",
+      "idiom": "universal",
+      "scale": "3x"
     }
   ],
   "info": {

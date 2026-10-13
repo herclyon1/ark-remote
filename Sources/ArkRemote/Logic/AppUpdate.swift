@@ -134,8 +134,8 @@ import SwiftUI
 /// https://m2.material.io/components/banners). Placed above the whole TabView they doubled the status-bar inset:
 /// SkipUI's top app bar adds the status bar's window insets whenever the top system bar is there (Navigation.swift
 /// hasAbsoluteTopSystemBar → TopAppBarDefaults.windowInsets), so a strip of empty space opened under the banner.
-/// iOS: a top safe-area inset with the bar material, so the list stays the scroll view the navigation bar tracks
-/// (its large title still collapses) and scrolls under the line instead of through it.
+/// iOS: the pending line (or the last status note) is the navigation bar's subtitle item under the large title, as Mail
+/// shows 「Undo Send」 (Pages/Shell/PendingBarView.swift); no bar of our own over the list.
 extension View {
     func topNotices() -> some View { TopNotices(content: self) }
 }
@@ -150,18 +150,24 @@ struct TopNotices<Content: View>: View {
         #if os(Android)
         VStack(spacing: 0) {
             if AppUpdate.shared.showsBanner { UpdateBanner() }
-            if let bar = Pending.shared.bar { PendingBarView(bar: bar) }
+            if let bar = Pending.shared.bar {
+                PendingBarView(bar: bar)
+            } else if let note = Feedback.shared.note {
+                StatusNoteRow(note: note)   // the last status line (Pages/Shell/Feedback.swift)
+            }
             content
         }
-        #else
-        content.safeAreaInset(edge: .top, spacing: 0) {
-            if let bar = Pending.shared.bar {
-                // ignoresSafeAreaEdges: [] — a ShapeStyle background spreads into the safe area by default
-                // (background(_:ignoresSafeAreaEdges: .all)), so the material ran up over the navigation bar and blurred
-                // out the large title on every tab while the line showed (test pass 1, 问题 2: i18 vs i26)
-                PendingBarView(bar: bar).background(.bar, ignoresSafeAreaEdges: [])
+        #elseif os(iOS)
+        // P15: the line under the large title, Mail's 「Undo Send」 place, and under the small title once the list has
+        // scrolled and the title has collapsed (.largeSubtitle alone left it out then) (Pages/Shell/PendingBarView.swift)
+        content.toolbar {
+            if Pending.shared.bar != nil || Feedback.shared.note != nil {
+                ToolbarItem(placement: .largeSubtitle) { SubtitleLine() }
+                ToolbarItem(placement: .subtitle) { SubtitleLine(large: false) }
             }
         }
+        #else
+        content
         #endif
     }
 }

@@ -1,7 +1,11 @@
 import SwiftUI
 
 /// 「第一次使用」: shown instead of the tabs until the mailbox and PIN are saved (web/view.js setupScreen).
-/// Same words as the web page. The topic field takes no auto-capitalisation or auto-correction: the topic is
+/// Same words as the web page. P16 (BOARD/app-page-references.txt; no usable Apple image, judged by HIG text): one
+/// short step, nothing optional in it, so it stays the two groups it was. HIG Onboarding: "design a flow that's fast,
+/// fun, and optional"; HIG Entering data: "if you include a Next or Continue button after a set of text fields, make
+/// the button available only after people enter the data you require" — 开始使用 is disabled until both are filled and
+/// the footer says so (the web's toast 「两样都要填」). The topic field takes no auto-capitalisation or auto-correction: the topic is
 /// case-sensitive and iOS capitalising its first letter silently broke it (view.js note, simulator 2026-09-14).
 struct SetupScreen: View {
     @State var topic = ""
@@ -23,18 +27,14 @@ struct SetupScreen: View {
                             .setupNumberInput()
                     }
                     Button("开始使用") {
-                        let t = topic.trimmingCharacters(in: .whitespacesAndNewlines)   // case kept: ntfy topics are case-sensitive (Relay.saveConfig)
-                        let p = pin.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if t.isEmpty || p.isEmpty {
-                            Relay.shared.showToast("两样都要填")   // view.js:126 toast, not an alert
-                            return
-                        }
                         // view.js: cfg = {topic, pin}; localStorage; boot(). ContentView switches to the tabs on the
                         // config appearing, and AppShell starts Live on that change (Logic/AppGlue.swift).
-                        Relay.shared.saveConfig(topic: t, pin: p)
+                        Relay.shared.saveConfig(topic: trimmedTopic, pin: trimmedPin)
                     }
+                    .disabled(!filled)
                 } footer: {
-                    Text("填一次就好，之后不再问。这两样只存在这台手机里。")
+                    // view.js:126 「两样都要填」 while one is empty
+                    Text(filled ? Self.footNote : "两样都要填。" + Self.footNote)
                 }
                 // The web page is entered with the 免输入链接 (#k=…); on Android that link opens the browser, not the app
                 // (no assetlinks.json on herclyon1.github.io), so the app takes the same link from the clipboard instead.
@@ -57,9 +57,13 @@ struct SetupScreen: View {
             // a link already copied: take it on open, no tap needed
             .onAppear { Self.takeLinkOnOpen() }
         }
-        // view.js toast(): ContentView draws the toast layer over the tabs only, and this screen stands in for them
-        .overlay { ToastLayer() }
     }
+
+    static let footNote = "填一次就好，之后不再问。这两样只存在这台手机里。"
+    /// case kept: ntfy topics are case-sensitive (Relay.saveConfig)
+    private var trimmedTopic: String { topic.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedPin: String { pin.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var filled: Bool { !trimmedTopic.isEmpty && !trimmedPin.isEmpty }
 }
 
 extension SetupScreen {

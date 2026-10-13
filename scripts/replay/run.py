@@ -42,6 +42,9 @@ class Abort(Exception):
 
 
 DISCARD_SEL = ["放弃", "xmark"]       # the save bar's ✕ (steps.DISCARD)
+DISCARD_OK = "放弃改动"                # its confirmation (Pages/Shell/SaveBar.swift)
+CLEAR_SEL = "不等了，清掉"             # steps.CLEAR
+PENDING_LINE = "re:项改动"             # the pending line under the title, iOS (Pages/Shell/PendingBarView.swift)
 
 
 # ---------------------------------------------------------------- selectors
@@ -227,6 +230,35 @@ class Runner:
             if opts.get("right"):
                 x = n["x"] + n["w"] // 2 - opts["right"]
             self.drv.tap(x, y, opts.get("hold", 50))
+        elif kind == "discard":
+            # the save bar's ✕ asks first (Pages/Shell/SaveBar.swift: 「放弃这 N 项改动？」 → 放弃改动)
+            self.act(("tap", DISCARD_SEL, {"region": "top"}), step)
+            # the action sheet takes no touch while it is still coming up (UIKit): tap 放弃改动 until the sheet is gone
+            for _ in range(3):
+                if not self.wait_for(DISCARD_OK, 4):
+                    raise StepFail(f"找不到「{DISCARD_OK}」")
+                time.sleep(0.5)
+                self.act(("tap", DISCARD_OK, {"last": True}), step)
+                if self.wait_for(DISCARD_OK, 3, gone=True):
+                    break
+            else:
+                raise StepFail(f"「{DISCARD_OK}」点了没关")
+        elif kind == "clear":
+            # 「不等了，清掉」: iOS asks from the pending line under the title (Pages/Shell/PendingBarView.swift
+            # SubtitleLine); Android keeps the button on the row
+            if self.drv.platform == "ios":
+                self.act(("tap", PENDING_LINE), step)
+                for _ in range(3):
+                    if not self.wait_for(CLEAR_SEL, 4):
+                        raise StepFail(f"找不到「{CLEAR_SEL}」")
+                    time.sleep(0.5)
+                    self.act(("tap", CLEAR_SEL, {"last": True}), step)
+                    if self.wait_for(CLEAR_SEL, 3, gone=True):
+                        break
+                else:
+                    raise StepFail(f"「{CLEAR_SEL}」点了没关")
+            else:
+                self.act(("tap", CLEAR_SEL), step)
         elif kind == "tab":
             hits = self.find({"t": rest[0], "region": "bottom"}, self.dump(self.cache is None))
             if not hits:
@@ -482,7 +514,7 @@ class Runner:
         throw the edits away (✕), so the next step starts from the page as it was."""
         for _ in range(4):
             dump = self.dump(True)
-            for sel in ("再想想", "取消", "好"):
+            for sel in ("放弃改动", "再想想", "取消", "好"):
                 hits = [h for h in self.find(sel, dump) if self.on_screen(h)]
                 if hits:
                     self.drv.tap(hits[-1]["x"], hits[-1]["y"])
@@ -995,7 +1027,7 @@ class Runner:
 
 ACTIONS = {"bottom", "until", "gone", "nokb", "retry", "tap", "tab", "toggle", "field", "type", "enter", "hidekb", "swipe", "top", "back", "wait", "relaunch", "state",
            "receipt", "clear_receipts", "hb", "remember", "gate", "gate_trials", "app_posts", "shot", "clipboard", "forget_config", "restore_config", "fluency",
-           "dismiss", "pick", "tapout", "time", "see", "point", "allow_paste"}
+           "dismiss", "discard", "clear", "pick", "tapout", "time", "see", "point", "allow_paste"}
 STEP_KEYS = {"id", "page", "say", "do", "on", "expect", "absent", "visible", "keyboard", "cmd", "nocmd", "timeout", "cmd_timeout",
              "ios", "android", "always", "settle", "pause", "relaunch_on_crash", "switch", "offline",
              "skip", "nojudge", "nojudge_fail", "below", "last_above", "last_bottom"}

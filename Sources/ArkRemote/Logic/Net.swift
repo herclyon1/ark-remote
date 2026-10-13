@@ -263,13 +263,6 @@ struct RelayConfig: Codable, Sendable, Equatable {
     var pin: String
 }
 
-/// A transient message (view.js toast): text, how long to show it, when it was raised (ms).
-struct Toast: Sendable, Equatable {
-    let text: String
-    let ms: Int
-    let at: Double
-}
-
 /// view.js ask(title, msg, "好", false, { single: true }): an alert with one 「好」 (a reason is a sentence, not a toast).
 struct AlertNote: Sendable, Equatable {
     let title: String
@@ -296,8 +289,6 @@ struct PinScan: Sendable, Equatable {
     /// view.js setStatus(text, state): the status line and its dot ("on" / "off" / "").
     var statusText = ""
     var statusState = ""
-    /// view.js toast(text, ms): the last transient message for the page to show.
-    var toast: Toast?
     /// view.js ask(..., { single: true }): the alert for the page to present; nil when none is up.
     var alert: AlertNote?
     /// net.js pinScan.
@@ -381,8 +372,11 @@ struct PinScan: Sendable, Equatable {
         if statusState != state { statusState = state }
     }
 
+    /// The web page's toast. There is no toast in the App: the text goes to the status line under the tab titles
+    /// (Feedback.status). Each remaining call picks its native pattern instead (Pages/Shell/Feedback.swift).
+    @available(*, deprecated, message: "no toasts: Feedback.status, a disabled button with its footer, ShareLink, or the control's own state (Pages/Shell/Feedback.swift)")
     func showToast(_ text: String, ms: Int = 2600) {
-        toast = Toast(text: text, ms: ms, at: nowMs())
+        Feedback.status(text)
     }
 
     /// view.js ask(title, msg, "好", false, { single: true }). One alert at a time (view.js:46, UIAlertController presents

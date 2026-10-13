@@ -88,9 +88,12 @@ func listSection<Value, Content: View>(_ id: String, ifLet value: Value?, @ViewB
 /// index.html:957-963; view.js:1458 openPicker, sheet.js) is a page sheet over the tab, not a pushed page. Used as
 /// `NavigationLink` is: `SheetLink { EWChoiceList(…) } label: { … }`.
 ///
-/// The sheet has its own navigation bar as #picker's .pnav: 「返回」 (chevron, view.js:1484 `.pback` = close, nothing
-/// applied) on the left, the page's title small in the middle, and the page's own ✓ (完成, `.pdone`) on the right. A
-/// swipe down closes it the same way (sheet.js drag-to-dismiss). The row keeps the disclosure chevron the pushed row
+/// The sheet has its own navigation bar as #picker's .pnav: 「返回」 (view.js:1484 `.pback` = close, nothing applied) on
+/// the left, the page's title small in the middle, and the page's own ✓ (完成, `.pdone`) on the right. A swipe down
+/// closes it the same way (sheet.js drag-to-dismiss). 「返回」 is the system's cancel button of a sheet (iOS 26
+/// `Button(role: .cancel)`, drawn as ✕), not a hand-made back chevron: HIG Sheets "The Cancel (or Close) button
+/// dismisses a sheet without saving any changes" and "the Cancel button belongs on the leading edge of the top
+/// toolbar"; a back arrow belongs to a pushed page. The row keeps the disclosure chevron the pushed row
 /// had (the web value row reads 「已选 N/M ›」).
 struct SheetLink<Destination: View, Label: View>: View {
     let destination: () -> Destination
@@ -131,16 +134,20 @@ struct SheetLink<Destination: View, Label: View>: View {
                     #endif
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
-                            Button { shown = false } label: { Image(systemName: "chevron.left") }
+                            sheetCancel
                                 .accessibilityLabel("返回")   // index.html:960 .pback aria-label 返回
                         }
                     }
             }
-            // the tab's toast layer is under the sheet (a sheet is its own presentation on both platforms); the web's
-            // .toast sits over #picker, so 「至少要留一个…」 (EWChoiceList.done) shows here too. Both layers clear the same
-            // Relay.toast by its `at`, so two of them never fight.
-            .overlay { ToastLayer() }
         }
+    }
+
+    @ViewBuilder private var sheetCancel: some View {
+        #if os(Android)
+        Button { shown = false } label: { Image(systemName: "xmark") }   // a Material full-screen dialog's close
+        #else
+        Button(role: .cancel) { shown = false }
+        #endif
     }
 }
 
@@ -189,6 +196,12 @@ private struct KeyboardDoneBar: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { note in
                 KeyboardRowReveal.shown(note)
             }
+            // the List's own scroll to the field can still follow keyboardDidShow (seen: the row still at its old place
+            // then) and stop with the row under the capsule: look again when that scroll has come to rest
+            // (onScrollPhaseChange, iOS 18), instead of after a guessed 0.4 s
+            .onScrollPhaseChange { _, phase in
+                if phase == .idle, keyboardUp { KeyboardRowReveal.reveal() }
+            }
             // the first keystroke adds the row's 「待保存」 line and the row grows downwards
             .onReceive(NotificationCenter.default.publisher(for: UITextField.textDidChangeNotification)) { _ in
                 DispatchQueue.main.async { KeyboardRowReveal.reveal() }
@@ -219,10 +232,7 @@ private struct KeyboardDoneBar: ViewModifier {
     static func shown(_ note: Notification) {
         guard let kb = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         keyboardTop = kb.minY
-        reveal()
-        // the List's own scroll to the field can still follow keyboardDidShow (seen: the row still at its old place
-        // then) and stop with the row under the capsule; look again once it is done
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { reveal() }
+        reveal()   // a later system scroll is caught when it comes to rest (KeyboardDoneBar's onScrollPhaseChange)
     }
 
     static func reveal() {

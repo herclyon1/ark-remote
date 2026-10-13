@@ -1,7 +1,4 @@
 import SwiftUI
-#if !os(Android) && canImport(UIKit)
-import UIKit
-#endif
 
 /// The five tabs, in the web page's order (maa-automation web/view.js TABS: 状态 / 方舟 / 终末地 / 鸣潮 / 手机).
 enum ContentTab: String, Hashable {
@@ -14,6 +11,7 @@ struct ContentView: View {
     @AppStorage("tab") var tab = ContentTab.status
     /// The shift picked on the 状态 tab (view.js curQueue, localStorage "ark-remote-cfg-queue").
     @AppStorage("ark-remote-cfg-queue") var storedQueue = ""
+    @Environment(\.scenePhase) var scenePhase
 
     /// view.js:317-327 inShift: only the games of the shown shift (the picked one, else the first queue) have a tab;
     /// no queue or an empty script list means every game is in. A tab whose game is out goes with its page
@@ -132,7 +130,7 @@ struct ContentView: View {
                 StatusTab().noticed()
             }
             .expandsTopBarOnReselect(.status)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
-            .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
+            .modifier(DiagRoom())   // Android: the 诊断记录 bar under the tab's pages (Pages/Shell/DiagAccessory.swift)
             .tabItem { Label { Text("状态") } icon: { tabIcon("tab-status") } }
             .tag(ContentTab.status)
 
@@ -141,7 +139,7 @@ struct ContentView: View {
                 ArknightsTab().noticed()
             }
             .expandsTopBarOnReselect(.arknights)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
-            .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
+            .modifier(DiagRoom())   // Android: the 诊断记录 bar under the tab's pages (Pages/Shell/DiagAccessory.swift)
             .tabItem { Label { Text("方舟") } icon: { tabIcon("tab-arknights") } }
             .tag(ContentTab.arknights)
             }
@@ -151,7 +149,7 @@ struct ContentView: View {
                 EndfieldTab().noticed()
             }
             .expandsTopBarOnReselect(.endfield)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
-            .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
+            .modifier(DiagRoom())   // Android: the 诊断记录 bar under the tab's pages (Pages/Shell/DiagAccessory.swift)
             .tabItem { Label { Text("终末地") } icon: { tabIcon("tab-endfield") } }
             .tag(ContentTab.endfield)
             }
@@ -161,7 +159,7 @@ struct ContentView: View {
                 WuwaTab().noticed()
             }
             .expandsTopBarOnReselect(.wuwa)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
-            .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
+            .modifier(DiagRoom())   // Android: the 诊断记录 bar under the tab's pages (Pages/Shell/DiagAccessory.swift)
             .tabItem { Label { Text("鸣潮") } icon: { tabIcon("tab-wuwa") } }
             .tag(ContentTab.wuwa)
             }
@@ -176,7 +174,7 @@ struct ContentView: View {
                     .noticed()
             }
             .expandsTopBarOnReselect(.phone)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
-            .modifier(DiagRoom())   // bottom room for DiagOverlay while 诊断记录 is on (Pages/Phone/PhoneDiagRows.swift)
+            .modifier(DiagRoom())   // Android: the 诊断记录 bar under the tab's pages (Pages/Shell/DiagAccessory.swift)
             .tabItem { Label { Text("手机") } icon: { tabIcon("tab-phone") } }
             .tag(ContentTab.phone)
         }
@@ -188,10 +186,13 @@ struct ContentView: View {
         #endif
         // on a shift change, and once at the start for a stored tab that is already out of the shift (view.js:998)
         .onChange(of: shiftTabs, initial: true) { dropGoneTabs() }
-        .overlay { DiagOverlay() }   // seg-frames-logger.js #diagmark / #diagline over every tab (Pages/Phone/PhoneDiagRows.swift)
-        .overlay { ToastLayer() }   // view.js toast(): one layer over all five tabs (Pages/Shell/ToastLayer.swift)
-        // view.js ask(title, why, "好", false, { single: true }) for a note raised outside a page's own flow:
-        // Pending.resend's 「发不出去」 (pending.js:118). One alert at a time (Relay.showAlert).
+        // seg-frames-logger.js #diagline / #diagmark on every tab: iOS the tab view's bottom accessory, Android a row
+        // under each tab's pages (Pages/Shell/DiagAccessory.swift)
+        .modifier(DiagBottomAccessory())
+        // the last status line under the tab titles is news only until the App is left (Pages/Shell/Feedback.swift)
+        .onChange(of: scenePhase) { _, phase in if phase == .background { Feedback.clear() } }
+        // view.js ask(title, why, "好", false, { single: true }) for a failure raised outside a page's own flow:
+        // Pending.resend's 「发不出去」 (pending.js:118), Feedback.alert. One alert at a time (Relay.showAlert).
         .alert(Relay.shared.alert?.title ?? "", isPresented: Binding(get: { Relay.shared.alert != nil },
                                                                      set: { if !$0 { Relay.shared.alert = nil } })) {
             Button("好") {}
@@ -208,41 +209,23 @@ private extension View {
     }
 }
 
-/// A tab image (Resources/Module.xcassets) sized for the tab icon slot.
+/// A tab image (Resources/Module.xcassets): view.js TAB_ICONS / TAB_IMAGES, the game icons in their own colours
+/// (rendering intent original) and tab-status / tab-phone as templates.
 ///
-/// Android: resizable + scaledToFit in a fixed 24 pt box (the Material navigation bar icon size): skip-ui's TabView
-/// icon slot (Containers/TabView.swift RenderImage) does not bound a resizable image's height, and an unbounded one
-/// stretched the bar over the whole screen.
+/// iOS: the imagesets carry 1x / 2x / 3x renditions 28 pt on the long edge (the iOS 27 UI Kit Tab Bar Button's 28 pt
+/// symbol line, 5735:65307), so the tab bar takes the image at its point size as it is; the bar ignores SwiftUI's
+/// resizable / frame. HIG Tab bars: "If you’re creating custom tab bar icons, see Apple Design Resources for tab bar
+/// icon dimensions."
 ///
-/// iOS: UIKit's tab bar takes the image at its point size and ignores SwiftUI's resizable / frame, and the assets are
-/// single 1x images (tab-arknights is 132 px, so 132 pt): every icon covered the bar and pushed its label down. So the
-/// image is redrawn first, fitted into a 28 pt box (the long edge 28: iOS 27 UI Kit Tab Bar Button 5735:65307,
-/// "28 symbol line", hig-kit/NUMBERS.md "Tab bar (maa)"). A redrawn image is .automatic, which the tab bar would tint
-/// like a template, so the mode is set again: tab-status / tab-phone (template-rendering-intent template) stay
-/// templates and the game icons keep their colors.
+/// Android: resizable + scaledToFit in a 24 dp box, the Material navigation bar icon size. skip-ui's TabView icon slot
+/// does not bound a resizable image (an unbounded one stretched the bar over the screen), and a fixed one is drawn at
+/// its file's pixel count in dp, whatever the imageset's scale: Image.swift:66 `let scale = 1.0`, :440
+/// `size(intrinsicSize / scale)`, with the 3x file picked (:958-960 "load the highest-resolution image").
 @ViewBuilder
 private func tabIcon(_ name: String) -> some View {
     #if os(Android)
     Image(name, bundle: assetBundle).resizable().scaledToFit().frame(width: 24, height: 24)
-    #elseif canImport(UIKit)
-    if let source = UIImage(named: name, in: assetBundle, with: nil) {
-        Image(uiImage: tabBarImage(source, side: 28))
-    } else {
-        Image(name, bundle: assetBundle)
-    }
     #else
-    Image(name, bundle: assetBundle).resizable().scaledToFit()
+    Image(name, bundle: assetBundle)
     #endif
 }
-
-#if !os(Android) && canImport(UIKit)
-/// `source` drawn at its aspect ratio with the long edge `side` pt, keeping template vs original rendering.
-private func tabBarImage(_ source: UIImage, side: CGFloat) -> UIImage {
-    let long = max(source.size.width, source.size.height)
-    guard long > 0 else { return source }
-    let k = side / long
-    let size = CGSize(width: (source.size.width * k).rounded(), height: (source.size.height * k).rounded())
-    let drawn = UIGraphicsImageRenderer(size: size).image { _ in source.draw(in: CGRect(origin: .zero, size: size)) }
-    return drawn.withRenderingMode(source.renderingMode == .alwaysTemplate ? .alwaysTemplate : .alwaysOriginal)
-}
-#endif

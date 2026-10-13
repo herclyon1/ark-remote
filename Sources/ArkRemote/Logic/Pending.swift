@@ -275,9 +275,9 @@ struct PendingBar: Sendable, Equatable {
                 changed = true
                 acked[key] = AckedEdit(at: at, label: p.label)
                 saveAcked()
-                // pending.js:101: one line ≤ 13 at 28 pt (the native HUD never wraps); the value is on the row
-                let t = "「\(p.label)」已生效"
-                relay.showToast(t.count <= 13 ? t : "改动已生效")
+                // pending.js:101 「「X」已生效」: the status line under the tab titles (Pages/Shell/Feedback.swift); the row
+                // itself says 「已应用 HH:MM」
+                Feedback.status("「\(p.label)」已生效")
             } else if p.mismatchAt != at && machineActed(on: p) {
                 items[key]?.mismatchAt = at
                 items[key]?.elsewhere = p.from.map { !Self.sameVal(live, $0) }
@@ -352,7 +352,7 @@ struct PendingBar: Sendable, Equatable {
            day != statusBeijingToday() {
             items[key] = nil
             savePending()
-            relay.showAlert("不再发", "这是 \(day) 那天的跳过，那天已经过了，机器不会再收。要跳过今天，重新关一次开关再保存。")
+            Feedback.alert("不再发", "这是 \(day) 那天的跳过，那天已经过了，机器不会再收。要跳过今天，重新关一次开关再保存。")
             return
         }
         resending.insert(key)
@@ -374,10 +374,10 @@ struct PendingBar: Sendable, Equatable {
             items[key]?.mismatchAt = nil
             items[key]?.elsewhere = nil
             savePending()
-            relay.showToast("又发了一次")   // pending.js:117
+            Feedback.status("又发了一次")   // pending.js:117; the row's own line says 「已寄出 HH:MM」 again
         } catch {
             // pending.js:118: a reason is a sentence: alert, not the one-line HUD
-            relay.showAlert("发不出去", Live.why(error))
+            Feedback.alert("发不出去", Live.why(error))
         }
     }
 
