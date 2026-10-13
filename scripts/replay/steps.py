@@ -263,7 +263,8 @@ step("ef.stock.tophone", "endfield", "库存页「去手机页」→ 跳到手�
 step("ef.stock.popped", "d39", "回终末地 → 库存页已退掉", [("tab", "终末地")], expect=["库存", "更多设置"])
 step("ef.stock.tabpop", "d39", "再进库存 → 点「终末地」→ 回根页",
      [tap("库存"), ("wait", 1.0), ("tab", "终末地")], expect=["库存", "更多设置"], absent=["~去手机页"])
-step("ef.more", "endfield", "更多设置 → 推入页「执行周期」", [tap("更多设置")], expect=["~执行周期"])
+step("ef.more", "endfield", "更多设置 → 推入页「执行周期」（先点「终末地」：只跑 endfield 时 ef.stock.tophone 停在手机页）",
+     [("tab", "终末地"), tap("更多设置")], expect=["~执行周期"])
 step("ef.days", "endfield", "执行周期 → 选择页 周一…周日", [tap("~执行周期")], expect=["周一", "周日"])
 step("ef.days.untick", "endfield", "去掉周日（安卓旧闪退点）→ 不闪退", [tap("周日")], expect=["周日"])
 step("ef.days.none", "endfield", "勾选页六天也去掉 → 页脚「至少要留一个」，✓ 灰着、点了不关页（原来是提示条）",
@@ -276,8 +277,9 @@ step("ef.days.done", "endfield", "✓ → 回推入页「已选 6/7」「待保�
      [tap(SAVE, region="top")], expect=["~6/7", "~待保存 1 项"])
 step("ef.more.tabpop", "d39", "点「终末地」→ 更多设置页退掉、回根页", [("tab", "终末地")], expect=["库存"], absent=["周日"])
 step("ef.mode", "endfield", "刷取设置菜单 → 地区模式 → 待保存 2 项",
-     [tap({"t": "~刷取设置, ", "kind": "Button"}, right=60), ("wait", 0.8), tap("~地区模式", last=True)],
-     expect=["~待保存 2 项"], android={"do": [tap("随机模式"), ("wait", 0.8), tap("~地区模式", last=True)]})
+     [("tab", "终末地"), tap({"t": "~刷取设置, ", "kind": "Button"}, right=60), ("wait", 0.8), tap("~地区模式", last=True)],
+     expect=["~待保存 2 项"],
+     android={"do": [("tab", "终末地"), tap("随机模式"), ("wait", 0.8), tap("~地区模式", last=True)]})
 step("ef.review", "endfield", "✓ → 确认单「寄出 2 项」", [tap(SAVE, region="top")], expect=["确认这次修改", "寄出 2 项"])
 step("ef.send", "endfield", "寄出 → set_master 执行周期 / 刷取设置",
      [CONFIRM_WAIT, tap("寄出 2 项")], absent=["确认这次修改"], cmd=["~AutoEssence"])
@@ -306,6 +308,8 @@ step("ef.ticket.discard", "endfield", "保存条 ✕ → 控件回到机器值�
 step("ef.loop.x", "endfield", "循环执行改 20（键盘开着）→ 点 ✕ → 回原值、键盘收起、没有待保存、还在更多设置页（0878f3b）",
      [("field", "循环执行", "20"), ("wait", 0.6), ("discard",)], keyboard=False,
      expect=[{"t": "99", "kind": ["TextField", "EditText"]}, "循环执行"], absent=["~待保存", "库存"], nocmd=2)
+step("ef.home", "endfield", "回「状态」标签（只跑 endfield 时，收尾的冷启动从状态页开始）", [("tab", "状态")],
+     expect=[[STATUS_ROOT, "~明日安排", "~查看全部"]])   # any of them: the 状态 page may be scrolled down (d39 runs before)
 step("d39.ef.top", "d39", "D39：终末地根页滑到底再点「终末地」→ 回顶",
      [("tab", "终末地"), ("wait", 0.8), ("swipe", "up", 4), ("tab", "终末地"), ("wait", 1.2)], visible=["库存"])
 
