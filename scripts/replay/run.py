@@ -1332,6 +1332,11 @@ def main():
             drv.terminate()
         except Exception:
             pass
+        try:   # 复制免输入链接 leaves this run's throwaway link on the clipboard and the app takes a #k= link on its next
+            # cold start: on ark37 10-14 an arkremote://link intent opened after a full run was overridden by it
+            drv.clear_clipboard()
+        except Exception as e:
+            print("剪贴板没清掉：", e)
         if prefs_saved:
             try:
                 drv.prefs_restore(prefs_saved, launch=False)
