@@ -319,7 +319,9 @@ step("ef.ticket.open", "endfield", "再进「更多设置」→ 执行周期「�
 step("ef.ticket.on", "endfield", "打开「使用刻写券」→ 那行出现小字「待保存」",
      [("toggle", "使用刻写券")], expect=["待保存", "~待保存 1 项"], switch={"使用刻写券": True})
 step("ef.ticket.days", "endfield", "执行周期去掉周日 → 「已选 6/7」「待保存 2 项」",
-     [tap("~执行周期"), tap("周日"), tap(SAVE, region="top")], expect=["~6/7", "~待保存 2 项"])
+     # 周日 is the first tap on a sheet still sliding up: wait until it stands still (stable), as a lost tap left all
+     # seven ticked and ✓ grey (app-r1 fix round 2, final full run step 80)
+     [tap("~执行周期"), tap("周日", stable=True), tap(SAVE, region="top")], expect=["~6/7", "~待保存 2 项"])
 step("ef.ticket.discard", "endfield", "保存条 ✕ → 控件回到机器值（7/7、刻写券关），还在更多设置页（e17db83）",
      [("discard",)], expect=["已选 7/7", "使用刻写券"], absent=["待保存", "~待保存 2 项", "库存"],
      switch={"使用刻写券": False}, nocmd=2)
