@@ -178,8 +178,9 @@ step("gate.diag.off", "gate", "手机 · 诊断记录关掉 → 回状态",
 # ------------------------------------------------------------------ heartbeat / machine off
 step("status.off", "status", "心跳过期 → 设备卡「关机」",
      # Live.hbWindowMs(): max(90 s, every × 2 s + 30 s), so a machine whose last beat said 「hb 1」 reads 「关机」 90 s
-     # after that beat (Logic/Live.swift hbFreshMs, since 7fecbfc); 33 s was the second term alone
-     [("hb", 1), ("wait", 60), ("top", 5)], expect=["~关机"], timeout=45,
+     # after that beat (Logic/Live.swift hbFreshMs, since 7fecbfc); 33 s was the second term alone. The timeout counts
+     # from the step's start, so it covers the wait too
+     [("hb", 1), ("wait", 60), ("top", 5)], expect=["~关机"], timeout=110,
      offline={"say": "没有心跳 → 设备卡「关机」（离线：一次性信箱没有心跳）", "do": [("top", 5)]})
 step("status.off.stop", "status", "关机时按停止一切 → 提示「所以这次没有发」，没寄出",
      [tap("停止一切")], expect=[OFF_NOTE], nocmd=2)
