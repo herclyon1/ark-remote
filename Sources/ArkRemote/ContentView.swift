@@ -124,14 +124,14 @@ struct ContentView: View {
 
     private var tabs: some View {
         // Tab images are view.js TAB_ICONS / TAB_IMAGES exported as-is (Resources/Module.xcassets): the game icons keep
-        // their colors; tab-status / tab-phone are template images. tabIcon() sizes them for the tab icon slot.
+        // their colors; 状态 / 手机 are live SF Symbols on iOS (tabSymbol). tabIcon() sizes the images for the tab icon slot.
         TabView(selection: selection) {
             NavigationStack(path: $statusPath) {
                 StatusTab().noticed()
             }
             .expandsTopBarOnReselect(.status)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
             .modifier(DiagRoom())   // Android: the 诊断记录 bar under the tab's pages (Pages/Shell/DiagAccessory.swift)
-            .tabItem { Label { Text("状态") } icon: { tabIcon("tab-status") } }
+            .tabItem { Label { Text("状态") } icon: { tabSymbol("gauge.with.dots.needle.67percent", else: "tab-status") } }
             .tag(ContentTab.status)
 
             if inShift("MAA") {
@@ -175,7 +175,7 @@ struct ContentView: View {
             }
             .expandsTopBarOnReselect(.phone)   // D39 on Android: the large title opens on a reselect (SkipFixes.swift)
             .modifier(DiagRoom())   // Android: the 诊断记录 bar under the tab's pages (Pages/Shell/DiagAccessory.swift)
-            .tabItem { Label { Text("手机") } icon: { tabIcon("tab-phone") } }
+            .tabItem { Label { Text("手机") } icon: { tabSymbol("iphone", else: "tab-phone") } }
             .tag(ContentTab.phone)
         }
         #if os(Android)
@@ -221,6 +221,19 @@ private extension View {
 /// does not bound a resizable image (an unbounded one stretched the bar over the screen), and a fixed one is drawn at
 /// its file's pixel count in dp, whatever the imageset's scale: Image.swift:66 `let scale = 1.0`, :440
 /// `size(intrinsicSize / scale)`, with the 3x file picked (:958-960 "load the highest-resolution image").
+/// 状态 and 手机: the system's own SF Symbols, the same glyphs the web page exported (view.js:918
+/// gauge.with.dots.needle.67percent, iphone), drawn live so they follow the tab bar's weight and the text size (his 09-14
+/// 20:58 「SF Symbols 图标。就用苹果官方提供的就行」). Android: the exported image, as skip-ui has no Material icon for
+/// either symbol (Components/Image.swift table).
+@ViewBuilder
+private func tabSymbol(_ symbol: String, else asset: String) -> some View {
+    #if os(Android)
+    tabIcon(asset)
+    #else
+    Image(systemName: symbol)
+    #endif
+}
+
 @ViewBuilder
 private func tabIcon(_ name: String) -> some View {
     #if os(Android)
