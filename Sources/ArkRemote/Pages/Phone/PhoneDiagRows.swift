@@ -106,6 +106,7 @@ struct DiagRecordSheet: View {
 /// The system's sheet as P12 / P13 have it: a navigation bar with the title and the close ✕ leading (HIG Sheets: "the
 /// Cancel button belongs on the leading edge of the top toolbar"), the message as the grey text over the two actions
 /// (P13 puts its explanation above the rows, not in a card), the sheet at half height first and pulled up for more
+/// (自检结果, whose rows would hide 复制 / 分享, opens at full height)
 /// (HIG Sheets: "In an iPhone app, consider supporting the medium detent to allow progressive disclosure of the
 /// sheet's content."). Nothing measured: the list scrolls a long 自检结果 by itself, never cut (no lineLimit).
 /// 复制's own label says 「已复制整份记录」 once it took (shell API id 272: "a button whose label turns into 「已复制」"),
@@ -121,6 +122,24 @@ struct DiagSheetBox: View {
     var close: () -> Void
 
     @State var copied = false
+    #if !os(Android)
+    /// 自检结果 opens at full height: its rows fill the half-height sheet and pushed 复制 / 分享, its only actions, below
+    /// the fold (HIG review 1014). 诊断记录 has no rows and opens at half height.
+    @State var detent: PresentationDetent
+    #endif
+
+    init(title: String, message: String, json: String, canShare: Bool, checks: [SelfCheckItem] = [],
+         close: @escaping () -> Void) {
+        self.title = title
+        self.message = message
+        self.json = json
+        self.canShare = canShare
+        self.checks = checks
+        self.close = close
+        #if !os(Android)
+        _detent = State(initialValue: checks.isEmpty ? .medium : .large)
+        #endif
+    }
 
     var body: some View {
         NavigationStack {
@@ -154,7 +173,11 @@ struct DiagSheetBox: View {
                 }
             }
         }
+        #if os(Android)
         .presentationDetents([.medium, .large])
+        #else
+        .presentationDetents([.medium, .large], selection: $detent)
+        #endif
         // a new record (the line's upload moved on, or another 分享诊断记录) is not the one that was copied
         .onChange(of: json) { _, _ in copied = false }
         .alert("分享没成", isPresented: Binding(get: { DiagShare.shared.failNote != nil },
