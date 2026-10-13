@@ -134,12 +134,14 @@ step("status.echo.go", "status", "弹窗 · 开始刷（等过 400 ms 门）→ 
      [CONFIRM_WAIT, tap("开始刷", last=True)], absent=["开始刷？"], cmd={"action": "echo_farm", "boss": 3, "until": "00:05"},
      offline={"say": "提示 · 好 → 关掉", "do": [CONFIRM_WAIT, tap("好", last=True)], "absent": [OFF_NOTE]})
 step("status.keepon.discard", "status", "下次跑完不关机 打开 → 待保存 1 项 → ✕ 放弃 → 回原样、没寄出",
-     [("retry", 2, [("toggle", "下次跑完不关机")], ("until", DISCARD, 5, {"region": "top"})), ("discard",)],
+     [("retry", 2, [("toggle", "下次跑完不关机")], ("until", DISCARD, 5, {"region": "top"})), ("discard",),
+      ("see", "下次跑完不关机")],   # the list can sit elsewhere after ✕ (iOS app-r1 10-14 run 2): read the row where it is
      absent=["~待保存"], nocmd=2, switch={"下次跑完不关机": False})
 step("status.keepon.think", "status", "下次跑完不关机 打开 → ✓ → 确认单 → 再想想 → ✕ → 开关回到关",
      [("retry", 2, [("toggle", "下次跑完不关机")], ("until", SAVE, 5, {"region": "top"})), tap(SAVE, region="top"),
       ("until", "再想想", 6), CONFIRM_WAIT, tap("再想想"), ("gone", "确认这次修改", 6),
-      ("discard",)], absent=["~待保存", "确认这次修改"], switch={"下次跑完不关机": False}, nocmd=2)
+      ("discard",), ("see", "下次跑完不关机")], absent=["~待保存", "确认这次修改"], switch={"下次跑完不关机": False},
+     nocmd=2)
 step("status.two.pending", "status", "下次跑完不关机 + 调试模式 打开 → 标题「待保存 2 项」",
      [("toggle", "下次跑完不关机"), ("toggle", "调试模式")], expect=["~待保存 2 项"])
 step("status.two.review", "status", "✓ → 确认单两行、「寄出 2 项」",
@@ -251,7 +253,8 @@ step("ark.sanity.x", "arknights", "理智药改 1000（键盘开着）→ 点 �
      expect=[MEDICINE], nocmd=2)
 step("ark.sanity.bad", "arknights", "理智药填 1000 → ✓ → 寄出 → 挡下「一项都没寄出」「要填 0–999 的整数」（寄出前校验，什么也不发）",
      [("field", MEDICINE, "1000"), ("hidekb",), tap(SAVE, region="top"), ("wait", 1.0), tap(SEND_N)],
-     expect=["~一项都没寄出", "~要填 0–999 的整数"], timeout=6, nocmd=2)
+     # timeout counts from the step's first tap: under a gradle build the taps + alert took 8.5 s (iOS app-r1 10-14 run 1; the alert is in its screenshot)
+     expect=["~一项都没寄出", "~要填 0–999 的整数"], timeout=10, nocmd=2)
 step("ark.sanity.bad.close", "arknights", "好 → 关提示，没寄出", [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.5)],
      absent=["~一项都没寄出"], nocmd=1)
 step("ark.edit4", "arknights", "理智药 2、关卡 CE-6、邮件开关、基建「赤金」→ 待保存 4 项",
