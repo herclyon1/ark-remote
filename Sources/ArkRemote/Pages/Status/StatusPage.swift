@@ -613,9 +613,11 @@ func todayActualRow(_ actual: String) -> some View {
 /// Only a command the machine did not carry out is marked (the red ✗; his 10-10 16:58: the phone must say plainly when a
 /// change failed). A receipt that went through has no icon, as Health's day list marks nothing on a normal row (P8;
 /// design rule 5: stress only what went wrong).
+/// The slot is kept on every row (the symbol hidden), as Mail keeps its unread-dot column, so every row's text starts at
+/// the same left edge.
 @ViewBuilder private func receiptIcon(_ r: StatusReceipt) -> some View {
     if r.ok || r.note != nil {
-        EmptyView()
+        symbol("xmark.circle.fill", android: "Icons.Filled.Close").hidden().accessibilityHidden(true)
     } else {
         // no Material cancel icon in skip-ui's table (Components/Image.swift): its close glyph, in red
         symbol("xmark.circle.fill", android: "Icons.Filled.Close").foregroundStyle(Color.red).accessibilityLabel("失败")

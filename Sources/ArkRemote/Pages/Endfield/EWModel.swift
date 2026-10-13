@@ -117,11 +117,15 @@ struct EWMaster: Sendable, Decodable {
         values = (try? c.decode([String: EWValue].self, forKey: .values)) ?? [:]
         // per key: one malformed list (a pair missing its value) failed the whole dictionary and emptied every picker of the
         // game (edge audit 34); now only that list is left out
-        options = (try? c.decode([String: EWLossy<[EWChoice]>].self, forKey: .options))?.compactMapValues { $0.value } ?? [:]
-        labels = (try? c.decode([String: String].self, forKey: .labels)) ?? [:]
+        options = ((try? c.decode([String: EWLossy<[EWChoice]>].self, forKey: .options))?.compactMapValues { $0.value } ?? [:])
+            .mapValues { $0.map { EWChoice(ewDisplayLabel($0.label), $0.value) } }
+        // the names are for showing only (a change is sent by path and value, Pending.swift set_master), so the machine's
+        // decorative emoji go here, once, for every place a name is drawn (ewDisplayLabel)
+        labels = ((try? c.decode([String: String].self, forKey: .labels)) ?? [:]).mapValues(ewDisplayLabel)
         roots = (try? c.decode([String: [String]].self, forKey: .roots)) ?? [:]
         children = (try? c.decode([String: [String: [String]]].self, forKey: .children)) ?? [:]
-        inputs = (try? c.decode([String: EWLossy<[EWChoice]>].self, forKey: .inputs))?.compactMapValues { $0.value } ?? [:]
+        inputs = ((try? c.decode([String: EWLossy<[EWChoice]>].self, forKey: .inputs))?.compactMapValues { $0.value } ?? [:])
+            .mapValues { $0.map { EWChoice(ewDisplayLabel($0.label), $0.value) } }
         readonly = (try? c.decode([String: EWValue].self, forKey: .readonly)) ?? [:]
         subs = (try? c.decode([String: [String]].self, forKey: .subs)) ?? [:]
         untranslated = (try? c.decode([String].self, forKey: .untranslated)) ?? []
@@ -129,6 +133,22 @@ struct EWMaster: Sendable, Decodable {
     }
 
     var isEmpty: Bool { values.isEmpty && readonly.isEmpty }
+}
+
+/// A machine name as the App shows it: without the decorative emoji MaaEnd puts in front of its names (「🎱基质刷取」,
+/// 「⚔️协议空间」, 「🧺自动采集」, 「🟨无瑕基质」, 「🟪高纯基质」). They sat flush against the words with no icon column and
+/// added colours of no Apple page (design rule 6; BOARD/App-待他定项-从记录定-1014.md E5); the words say the same.
+/// ★ (the game's rarity, 「★6 黯色火炬」), CJK and ASCII stay. Display only: the label is never sent.
+func ewDisplayLabel(_ s: String) -> String {
+    var out = String.UnicodeScalarView()
+    for u in s.unicodeScalars {
+        let v = u.value
+        if v == 0xFE0F || v == 0x200D || (0x1F3FB...0x1F3FF).contains(v) { continue }   // variation selector, joiner, skin tone
+        if v == 0x2605 || v == 0x2606 { out.append(u); continue }                      // ★ ☆
+        if u.properties.isEmojiPresentation || (u.properties.isEmoji && v >= 0x2100) { continue }
+        out.append(u)
+    }
+    return String(out).trimmingCharacters(in: .whitespaces)
 }
 
 /// How a field is drawn (schema.js `type`, or derived from the value as treeFields does).

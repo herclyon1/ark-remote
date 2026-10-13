@@ -317,10 +317,8 @@ extension StatusData {
         // 刷 4C 声骸 boss list
         d.bosses = statusBosses
 
-        // receipts group-header note
-        let today = snap?["今天"]
-        d.todayLast = today?["最近"]?.jsString ?? ""
-        d.todayFailed = Int(today?["失败"]?.number ?? 0)
+        // 今天.最近 / 今天.失败 (how the machine's runs went) are not read: that is the daily report's (his 10-07 17:56,
+        // design rule 7, regression #26; replay step status.noresult)
         return d
     }
 
@@ -360,8 +358,10 @@ let statusBosses: [StatusBoss] = bosses.map { StatusBoss(index: $0.index, name: 
 
 /// A plan line from the machine (plan.py) in Chinese typography: a half-width comma or bracket next to Chinese turns
 /// full-width (「梦枢天罗,落渊南丘」 → 「梦枢天罗、落渊南丘」), and a space between two Chinese characters goes
-/// (「剿灭 本周已打满」 → 「剿灭本周已打满」). Spaces next to Latin letters or digits stay (「理智 YW-4」). Nothing is cut.
-func statusTidyHint(_ line: String) -> String {
+/// (「剿灭 本周已打满」 → 「剿灭本周已打满」). Spaces next to Latin letters or digits stay (「理智 YW-4」). Nothing is cut;
+/// the machine's decorative emoji go (ewDisplayLabel).
+func statusTidyHint(_ raw: String) -> String {
+    let line = ewDisplayLabel(raw)   // and without the machine's decorative emoji (「🎱基质刷取」)
     func cjk(_ c: Character?) -> Bool {
         guard let v = c?.unicodeScalars.first?.value else { return false }
         return (0x4E00...0x9FFF).contains(v) || (0x3000...0x303F).contains(v) || (0xFF00...0xFFEF).contains(v)

@@ -154,8 +154,6 @@ struct StatusData {
     var planFoot: [String] = []
     // Receipts (newest first) and the group-header note.
     var receipts: [StatusReceipt] = []
-    var todayLast = ""                        // 今天.最近
-    var todayFailed = 0                       // 今天.失败
     /// view.js nowRow 「今天实际」: 「早班 照常 · 晚班 跳过」 while a skip is in play today, else nil.
     var todayActual: String? = nil
     var receiptsToday = ""                    // today "MM-DD" on the phone's clock: the 回执 page puts 今天实际 in that day's group
@@ -214,7 +212,6 @@ extension StatusData {
                       StatusReceipt(ok: true, text: "现在跑一趟", at: "10-02 05:31"),
                       StatusReceipt(ok: false, text: "刷声骸：游戏没开", at: "10-01 22:10"),
                       StatusReceipt(ok: true, text: "调试模式 90 分钟", at: "10-01 21:00")]
-        d.todayLast = "早班"
         return d
     }
 }
