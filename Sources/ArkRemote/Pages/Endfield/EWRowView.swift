@@ -117,6 +117,7 @@ struct EWRowView: View {
                     Spacer()
                     Text(value == .null ? "（空）" : pick(value)).foregroundStyle(.secondary)   // view.js:545 fmt(null)
                 }
+                .foregroundStyle(Color.primary)   // see sheetRowColour
             }
         case .pills:
             SheetLink {   // the 37b / 38 pick page as a sheet (SkipFixes.swift)
@@ -129,6 +130,10 @@ struct EWRowView: View {
                     Text("已选 \(row.choices.filter { value.items.contains($0.value) }.count)/\(row.choices.count)")
                         .foregroundStyle(.secondary)
                 }
+                // sheetRowColour: the name in the label colour and 「已选 N/M」 grey, as Calendar › Repeat's row. The
+                // row is a Button (SheetLink), whose label takes the accent colour; `.primary` / `.secondary` are
+                // hierarchical styles of that accent, so only a Color resets it (the name and value were drawn blue)
+                .foregroundStyle(Color.primary)
             }
         case .boxesHeader:
             HStack {
@@ -273,7 +278,7 @@ struct EWChoiceList: View {
                             }
                             // P4 (快捷指令 › Custom 选周几, 日历 › Repeat): the option in the label colour, only the
                             // checkmark in the accent colour; a bare Button label in a List took the accent colour
-                            Text(c.label).foregroundStyle(.primary)
+                            Text(c.label).foregroundStyle(Color.primary)   // a Color: `.primary` is the accent's own level
                             Spacer()
                             if draft.contains(c.value) {
                                 Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityHidden(true)
