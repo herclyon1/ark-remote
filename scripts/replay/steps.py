@@ -66,6 +66,8 @@ FIGHT = ["是否理智作战", "作战开关"]
 MAIL = ["邮件", "领取所有邮件奖励"]
 DRONES = ["无人机用途", "基建无人机用在哪"]
 STATUS_ROOT = "现在跑一趟"
+# the 手机 tab's version row: 「版本」 since app-r1 fix round 2 (BOARD/App-待他定项-从记录定-1014.md P2), 「页面版本」 on the base
+VERSION = ["版本", "页面版本"]
 # a tab's root page (title, no back button). 现在跑一趟 is only in the tree near the top of the lazy list
 # the 状态 root's title is the tab's own name (Pages/Shell/StatusTab.swift EWSaveBar(title:)); "upper" leaves out the
 # tab bar's label of the same name; while changes wait the title is 「待保存 N 项」 on every tab (SaveBar.swift)
@@ -205,6 +207,9 @@ step("shift.night", "shift", "班次切「晚班」→ 只剩明日方舟，底�
 step("shift.morning", "shift", "切回「早班」→ 五个标签回来", [tap("早班", region="content")], expect=[TAB_EF])
 
 # ------------------------------------------------------------------ receipts + D39 on 状态
+# regression #26 (his 10-07 17:56, design rule 7): the 状态 page says nothing of how the machine's runs went
+step("status.noresult", "receipts", "状态页回执段：组头只有「机器最近的回执」，没有「最近一趟」「失败 N 趟」（回归 #26），正常回执不打勾",
+     [("bottom", 8)], expect=["~查看全部", "机器最近的回执"], absent=["~最近一趟", "re:失败 \\d+ 趟", "成功"])
 step("receipts.open", "receipts", "查看全部 → 回执页",
      [tap("~查看全部")], expect=["回执"], absent=[STATUS_ROOT])
 step("receipts.tabpop", "d39", "D39：在回执页再点「状态」→ 回到状态根页",
@@ -272,7 +277,7 @@ step("ef.title", "endfield", "卡片标题是「另一个任务」（不带「�
      [("swipe", "up", 3)], expect=["另一个任务"], absent=["~另外两个任务", "~终末地 · "])
 step("ef.stock", "endfield", "库存 → 推入库存页（没配森空岛）",
      [("top", 4), tap("库存")], expect=["~森空岛"], timeout=10)
-step("ef.stock.tophone", "endfield", "库存页「去手机页」→ 跳到手机标签", [tap("~去手机页")], expect=["页面版本"])
+step("ef.stock.tophone", "endfield", "库存页「去手机页」→ 跳到手机标签", [tap("~去手机页")], expect=[VERSION])
 step("ef.stock.popped", "d39", "回终末地 → 库存页已退掉", [("tab", "终末地")], expect=["库存", "更多设置"])
 step("ef.stock.tabpop", "d39", "再进库存 → 点「终末地」→ 回根页",
      [tap("库存"), ("wait", 1.0), ("tab", "终末地")], expect=["库存", "更多设置"], absent=["~去手机页"])
@@ -357,10 +362,10 @@ step("d39.ww.top", "d39", "D39：鸣潮滑到底再点「鸣潮」→ 回顶",
      [("swipe", "up", 4), ("tab", "鸣潮"), ("wait", 1.2)], visible=["~无音区"])
 
 # ------------------------------------------------------------------ 手机
-step("ph.open", "phone", "手机标签 → 页面版本 / 诊断记录 / 「密钥」行",
-     [("tab", "手机")], expect=["页面版本", "诊断记录", "复制免输入链接", "密钥"], absent=["已配置"],
-     ios={"say": "手机标签 → 页面版本「x.y.z (n)」/ 诊断记录（说明写「收发消息、网络通断和机器状态」）/ 「密钥」行",
-          "expect": ["页面版本", "re:^\\d+\\.\\d+\\.\\d+ \\(\\d+\\)$", "诊断记录", "~收发消息、网络通断和机器状态",
+step("ph.open", "phone", "手机标签 → 版本 / 诊断记录 / 「密钥」行",
+     [("tab", "手机")], expect=[VERSION, "诊断记录", "复制免输入链接", "密钥"], absent=["已配置"],
+     ios={"say": "手机标签 → 版本「x.y.z (n)」/ 诊断记录（说明写「收发消息、网络通断和机器状态」）/ 「密钥」行",
+          "expect": [VERSION, "re:^\\d+\\.\\d+\\.\\d+ \\(\\d+\\)$", "诊断记录", "~收发消息、网络通断和机器状态",
                      "复制免输入链接", "密钥"]})
 step("ph.diag.on", "phone", "诊断记录打开 → 分享 / 清空 / 运行自检 / 就是这里",
      [("toggle", "诊断记录")], expect=["~分享诊断记录", "清空诊断记录", "运行自检", "就是这里"])
@@ -399,7 +404,7 @@ step("ph.paste.bad", "phone", "粘贴密钥串 填乱码 → 存 → 「没存�
      # Android: an empty-text selector with kind TextView matches the sheet's 「取消」 first and closes the sheet
      android={"do": [tap("粘贴密钥串"), ("wait", 1.0), ("field", {"t": "", "kind": "EditText"}, "zzz"), tap("存")]})
 step("ph.paste.close", "phone", "好 → 提示和粘贴单一起关掉，回手机页",
-     [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.8)], expect=["页面版本"], absent=["没存上"])
+     [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.8)], expect=[VERSION], absent=["没存上"])
 DIAG_BTN = "就是这里"
 step("diag.bottom.phone", "diag", "诊断开 · 手机页滑到底 → 最后一行在红钮「就是这里」上面（ce8ebc3）",
      [("bottom", 4)], last_above=DIAG_BTN, on="ios")
@@ -427,7 +432,7 @@ step("diag.off.ark", "diag", "诊断关 · 方舟滑到底 → 最后一行贴�
 step("diag.off.ef", "diag", "诊断关 · 终末地根页滑到底 → 最后一行贴着底栏",
      [("tab", "终末地"), ("wait", 0.8), ("bottom", 8)], last_bottom=[860, 880], on="ios")
 step("d39.ph.top", "d39", "D39：手机页滑到底再点「手机」→ 回顶",
-     [("tab", "手机"), ("wait", 0.8), ("swipe", "up", 4), ("tab", "手机"), ("wait", 1.2)], visible=["页面版本"])
+     [("tab", "手机"), ("wait", 0.8), ("swipe", "up", 4), ("tab", "手机"), ("wait", 1.2)], visible=[VERSION])
 
 # ------------------------------------------------------------------ shift change while on a gone tab (pass-1 item 6, fix 5)
 step("noef.jump", "layout", "人在终末地，机器发来早班不含终末地的状态（实时分片，不刷新）→ 终末地标签消失、跳到状态",

@@ -515,8 +515,6 @@ struct StatusPage: View {
 
     @ViewBuilder private var receiptsSection: some View {
         listSection("status-receipts", if: !data.receipts.isEmpty) {
-            let note = [data.todayLast.isEmpty ? "" : "最近一趟 \(data.todayLast)",
-                        data.todayFailed > 0 ? "失败 \(data.todayFailed) 趟" : ""].filter { !$0.isEmpty }.joined(separator: " · ")
             Section {
                 // view.js:458 nowRow sits above the newest three
                 if let actual = data.todayActual { todayActualRow(actual) }
@@ -532,8 +530,9 @@ struct StatusPage: View {
                     }
                 }
             } header: {
-                // one line in the header's own type (Health's 「Steps」 header is one text; view.js:449 had a smaller second part)
-                Text(note.isEmpty ? "机器最近的回执" : "机器最近的回执 · \(note)")
+                // the header alone, one text as Health's 「Steps」. No 「最近一趟 X」 / 「失败 N 趟」 (view.js:449): how the
+                // machine's runs went is the daily report's, not the App's (his 10-07 17:56, design rule 7, regression #26)
+                Text("机器最近的回执")
                     .frame(maxWidth: .infinity, alignment: .leading)   // Android centred a bare header in the slot
             }
         }
@@ -611,16 +610,12 @@ func todayActualRow(_ actual: String) -> some View {
     }
 }
 
+/// Only a command the machine did not carry out is marked (the red ✗; his 10-10 16:58: the phone must say plainly when a
+/// change failed). A receipt that went through has no icon, as Health's day list marks nothing on a normal row (P8;
+/// design rule 5: stress only what went wrong).
 @ViewBuilder private func receiptIcon(_ r: StatusReceipt) -> some View {
-    if r.note != nil {
-        // a stale skip receipt: the icon goes dim with its row (index.html:377 .sf.stale{background:var(--dim)});
-        // only successful receipts get a note, so it is always the check
-        Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.gray).accessibilityLabel("成功")
-    } else if r.ok {
-        // the receipt text does not say whether it went through: the icon carries it, so it is named (accessibilityLabel docs:
-        // "a view that doesn't display text, like an icon"). Grey: a run that went fine is not stressed (design rule 5),
-        // only the red ✗ stands out
-        Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.gray).accessibilityLabel("成功")
+    if r.ok || r.note != nil {
+        EmptyView()
     } else {
         // no Material cancel icon in skip-ui's table (Components/Image.swift): its close glyph, in red
         symbol("xmark.circle.fill", android: "Icons.Filled.Close").foregroundStyle(Color.red).accessibilityLabel("失败")

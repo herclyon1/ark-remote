@@ -57,9 +57,10 @@ enum StatusCommands {
                 return nil
             }
             // each confirmation says one sentence (HIG Action sheets: "Provide a message only if necessary"; reference P10,
-            // Calendar's discard confirmation): what the press costs or changes; the 12-hour mailbox rule is the receipt's to tell
+            // Calendar's discard confirmation) that keeps what the press really does: it spends sanity, and the mailbox
+            // holds the order 12 hours (S5 in BOARD/App-待他定项-从记录定-1014.md)
             return StatusAsk(
-                title: "现在跑一趟？", message: "「\(queue)」多跑一趟，会花掉理智和波片。",
+                title: "现在跑一趟？", message: "「\(queue)」多跑一趟，会真的花掉理智和波片；机器 12 小时内没开机就作废。",
                 ok: "跑一趟",
                 body: .object(["action": .string("run_now"), "confirmed": .bool(true), "queue": .string(queue)]),
                 // the mailbox keeps a message 12 hours (ntfy.sh's cache; Pending.swift isStale) and nothing tracks a one-shot
@@ -75,7 +76,7 @@ enum StatusCommands {
                 return nil
             }
             return StatusAsk(
-                title: "停止一切？", message: "停掉在跑的脚本和游戏，下一趟照常。",
+                title: "停止一切？", message: "停掉在跑的队列、脚本和游戏，排班和设置都不动，下一趟照常。",
                 ok: "停止", destructive: true,
                 body: .object(["action": .string("estop"), "confirmed": .bool(true)]),
                 okText: "已下令停止一切", isEstop: true, anchor: "estop")   // view.js:1263
