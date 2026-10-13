@@ -22,7 +22,15 @@ struct DiagMarkMenu: View {
             Button("直接发（不选词）") { DiagUI.shared.mark(nil) }
         } label: {
             // skip-ui has no flag: Material's Feedback icon ("report an issue") on Android
-            Label { Text("就是这里") } icon: { symbol("flag", android: "Icons.Outlined.Feedback") }
+            Label { Text("就是这里") } icon: {
+                symbol("flag", android: "Icons.Outlined.Feedback")
+                #if os(Android)
+                    // .iconOnly drops the title on Android, and skip-ui gives a Material icon its own name as the
+                    // content description (Image.swift Icon(contentDescription: name)): TalkBack read
+                    // 「Icons.Outlined.Feedback」 (uiautomator tree, ark37 10-14). iOS names it by the Label's title.
+                    .accessibilityLabel("就是这里")
+                #endif
+            }
         }
     }
 }

@@ -8,6 +8,7 @@ import html
 import json
 import os
 import re
+import shlex
 import subprocess
 import threading
 import time
@@ -149,6 +150,9 @@ class AndroidDriver:
         if not getattr(self, "activity", None):
             lines = [l.strip() for l in self.sh(f"cmd package resolve-activity --brief {PKG}").splitlines() if "/" in l]
             self.activity = lines[-1] if lines else f"{PKG}/ark.remote.MainActivity"
+        # a notification shade left open (a swipe that started at the top edge) covers the app and takes the focus:
+        # the run's first step then saw only the shade (ark37 10-14, step 1 「缺 现在跑一趟」 with Quick Settings open)
+        self.sh("cmd statusbar collapse")
         self.sh(f"am start -n {self.activity}")
         for _ in range(40):
             p = self.sh(f"pidof {PKG}").strip()
@@ -157,6 +161,17 @@ class AndroidDriver:
                 return
             time.sleep(0.25)
         raise RuntimeError("the app did not start")
+
+    def collapse_shade(self):
+        # a notification shade left pulled down (by an earlier run or a swipe that started on the status bar) sits
+        # over the app: the cold start then sees no app at all (run5 step 1: every 状态 label missing, the shot is the
+        # shade). `cmd statusbar collapse` takes about a second, so wait until the shade no longer has the focus.
+        self.sh("cmd statusbar collapse")
+        for _ in range(20):
+            if "NotificationShade" not in self.sh("dumpsys window | grep -m1 mCurrentFocus"):
+                return
+            time.sleep(0.25)
+        raise RuntimeError("the notification shade did not close")
 
     def current_pid(self):
         return self.sh(f"pidof {PKG}").strip() or None
@@ -167,10 +182,32 @@ class AndroidDriver:
 
     def clear_clipboard(self):
         # the app takes a #k= link copied in the last 10 minutes; make sure the clipboard holds nothing like that
-        self.sh("cmd clipboard set-text ark-replay 2>/dev/null || true")
+        self.set_clipboard("ark-replay")
 
     def set_clipboard(self, text):
-        self.sh(f"cmd clipboard set-text '{text}' 2>/dev/null || true")
+        # `cmd clipboard` has no shell implementation on ark37 (API 37: "No shell command implementation."), so the
+        # old `cmd clipboard set-text ... || true` did nothing: a 免输入链接 the app copied in one run (手机 · 复制免输入链接)
+        # was still there at the next run's cold start, the app took it and the guard aborted (other mailbox). The clip
+        # is set through dumper/ReplayClip.java and read back; a clip that did not land fails the run here.
+        got = self._clip(text)
+        if got != " ".join(text.split()):
+            raise RuntimeError(f"clipboard: set {text[:40]!r}, read back {got[:40]!r}")
+
+    CLIP_DEX = "/data/local/tmp/replay-clip.dex"
+
+    def _clip(self, text):
+        """Set the clip to text with ReplayClip, then read it back (as the shell user: the service hands root no clip)."""
+        if not getattr(self, "_clip_pushed", False):
+            self.adb("push", self.DUMPER_DEX, self.CLIP_DEX, timeout=30)
+            self._clip_pushed = True
+        run = f"CLASSPATH={self.CLIP_DEX} app_process /system/bin ReplayClip"
+        cmd = f"{run} {shlex.quote(text)} && {run} --get"
+        root = self.sh("id -u").strip() == "0"
+        out = self.sh(f"su 2000 sh -c {shlex.quote(cmd)}" if root else cmd)
+        oks = re.findall(r"<<REPLAY-CLIP ok ?(.*?)>>", out)
+        if len(oks) != 2:
+            raise RuntimeError("clipboard: " + out.strip()[-200:])
+        return oks[1]
 
     # ---- SharedPreferences (app must be stopped while writing)
     def _prefs(self):
