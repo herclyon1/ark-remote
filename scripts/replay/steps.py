@@ -340,7 +340,12 @@ step("ph.selftest", "phone", "运行自检 → 结果单「通过 N / 6」",
      [tap("运行自检")], expect=["re:通过 \\d+ ?/ ?\\d+"], timeout=30)
 step("ph.selftest.close", "phone", "关掉自检结果", [CONFIRM_WAIT, tap(["关闭", "好"], last=True)], absent=["re:通过 \\d+ ?/ ?\\d+"])
 step("ph.clear.ask", "phone", "清空诊断记录 → 弹确认 → 取消", [tap("清空诊断记录"), ("wait", 0.8), tap("取消", last=True)],
-     absent=["清空诊断记录？"])
+     absent=["清空诊断记录？"],
+     # iOS: an action sheet from its button is a popover with no 取消 row; a tap anywhere else cancels it (P10 row,
+     # WWDC25 284 "the cancel action is implicit by tapping anywhere else")
+     ios={"say": "清空诊断记录 → 按钮旁弹确认 → 点外面取消、记录还在",
+          "do": [tap("清空诊断记录"), ("until", "清空诊断记录？", 4), ("wait", 0.8), ("point", 0.5, 0.12), ("wait", 0.8)],
+          "expect": ["~分享诊断记录"]})
 step("ph.share", "phone", "分享诊断记录 → 「诊断记录已生成」单（复制 / 分享 / 关闭）",
      [tap("~分享诊断记录")], expect=["诊断记录已生成", "分享", "关闭"], timeout=10)
 step("ph.share.sys", "phone", "单里「分享」→ 系统分享面板 → 取消 → 不闪退、单还在（62ba009）",

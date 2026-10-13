@@ -30,7 +30,7 @@ enum PhoneCopyResult {
 
 /// The 手机 tab: 0.4.4's two groups in their order, each part fitted to the Apple page of the same use
 /// (BOARD/app-page-references.txt):
-/// - rows: system LabeledContent, the value on the right (P11 row's component conclusion);
+/// - rows: the value on the right of its row, grey (P11 row's component conclusion);
 /// - 粘贴密钥串: Passwords' 「New Password」 sheet, ✕ leading and ✓ trailing (P12, evidence/app-pages-1007/apple/
 ///   P12-密码-新建弹出单.png). HIG Sheets: "A sheet is useful for requesting specific information from people or
 ///   presenting a simple task that they can complete before returning to the parent view."
@@ -228,17 +228,20 @@ struct PhoneRowLabel: View {
     }
 }
 
-/// A read-only value on the right of a row (the web's .ro.short): the system LabeledContent, value trailing and grey.
+/// A read-only value on the right of a row (the web's .ro.short), as 0.4.4 drew it. Not LabeledContent: with the
+/// two-line hint its adaptive layout put the value under the label (密钥 「没有」 dropped to a third line, replay
+/// shot after-light-04, 10-13), moving a value the owner reads on the right.
 struct PhoneValueRow: View {
     var title: String
     var hint: String
     var value: String
 
     var body: some View {
-        LabeledContent {
-            Text(value)
-        } label: {
+        HStack {
             PhoneRowLabel(title: title, hint: hint)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
         }
     }
 }
