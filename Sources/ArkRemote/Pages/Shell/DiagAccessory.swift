@@ -58,9 +58,13 @@ struct DiagAccessory: View {
                 .font(.footnote)
             }
             .buttonStyle(.plain)
-            DiagMarkMenu()
-                .labelStyle(.iconOnly)
-                .font(.title3)   // MiniPlayer's buttons are the row's largest glyphs (imageScale is not in skip-fuse-ui)
+            // the line tells people to press 「就是这里」: its name stays beside the flag while the bar has the room;
+            // beside the minimised tab bar the flag alone, as MiniPlayer's inline row
+            if inline {
+                DiagMarkMenu().labelStyle(.iconOnly)
+            } else {
+                DiagMarkMenu().labelStyle(.titleAndIcon)
+            }
         }
         .padding(.horizontal)
     }
