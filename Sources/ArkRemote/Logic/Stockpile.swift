@@ -45,6 +45,8 @@ struct StockRow: Identifiable, Sendable, Equatable {
     let origin: String?
     /// Right value: 「2.6 人份」 / 「差 12」 / 「剩 2 个」, or nil.
     let value: String?
+    /// Not enough for one build (the value reads 「差 N」): the page draws the value orange (app-page-references P5).
+    var short = false
 }
 
 struct StockSection: Identifiable, Sendable, Equatable {
@@ -191,7 +193,8 @@ enum StockpileEmptyAction: Sendable, Equatable {
         let servings = r["servings"].flatMap { $0.isNull ? nil : $0.number }
         let v: String? = servings == nil ? nil : short > 0 ? "差 \(nf.num(short))" : mult(servings ?? 0)
         return StockRow(id: r["id"]?.jsString ?? "", name: r["name"]?.jsString ?? "", icon: iconOf(r),
-                        subtitle: sub, origin: from.isEmpty ? nil : " · \(from)", value: v)
+                        subtitle: sub, origin: from.isEmpty ? nil : " · \(from)", value: v,
+                        short: servings != nil && short > 0)
     }
 
     /// M4i (user 09-23 09:20 「资源箱为什么也要算人数」): the box is no one's need, only what it was turned into.
