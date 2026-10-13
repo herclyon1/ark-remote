@@ -413,7 +413,7 @@ struct StatusPage: View {
                 // the picker beside the title, labels hidden: as its label, the two-line hint pushed iOS's time capsule
                 // under it, at the left (test pass 7)
                 HStack(spacing: 12) {
-                    rowTitle("改成刷到几点（机器时间）", "提前或延后都行。已经过了的时刻算明天；要马上停按「提前收工」")
+                    rowTitle("改成刷到几点（机器时间）", "已过算明天；马上停按「提前收工」")
                     DatePicker("改成刷到几点", selection: hhmmBinding($echoNewUntil, else: ef.until), displayedComponents: .hourAndMinute)
                         .labelsHidden()
                 }
@@ -427,9 +427,11 @@ struct StatusPage: View {
                 }
                 .pickerStyle(.menu)
                 .menuValueGrey()
-                // view.js:174-176 echoFarmBlock: title + explanation left, the time right of them; picked, not typed
+                // view.js:174-176 echoFarmBlock: title + explanation left, the time right of them; picked, not typed. The
+                // hint is the one fact the name does not give, in one short clause (HIG Lists and tables: "Keep item text
+                // succinct"; 到点收工 is the row name itself)
                 HStack(spacing: 12) {
-                    rowTitle("刷到几点（机器时间）", "已过就算明天。到点自动收工、配置还原")
+                    rowTitle("刷到几点（机器时间）", "已过算明天")
                     DatePicker("刷到几点", selection: hhmmBinding($echoUntil, else: "08:30"), displayedComponents: .hourAndMinute)
                         .labelsHidden()
                 }
