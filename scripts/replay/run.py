@@ -504,7 +504,18 @@ class Runner:
                 hits = [h for h in self.find(sel, dump) if self.on_screen(h)]
                 if hits:
                     self.drv.tap(hits[-1]["x"], hits[-1]["y"])
-                    time.sleep(0.8)
+                    # wait until it is really gone before looking again: a closing popover still lists 放弃改动 for a
+                    # moment, and SwiftUI runs the button's action only after the close, so the ✕ also stays up till
+                    # then. A second tap at that place went to the 状态 page under it, the 开始刷 row (y 146 pt), and
+                    # brought the 「机器关着」 notice back (simulator video of the app-r1 offline run, 100.0-102.5 s:
+                    # 放弃改动 tapped, popover gone at 101.5 with 待保存 2 项 still shown, edits gone and the notice up
+                    # at 102.5)
+                    self.invalidate()
+                    if not self.wait_for(sel, 4, gone=True):
+                        break
+                    if sel == "放弃改动":
+                        self.wait_for(DISCARD_SEL, 4, gone=True, region="top")
+                    time.sleep(0.3)
                     break
             else:
                 # iOS 27 draws a confirmationDialog attached to its button as a popover with no 取消 ("the cancel action
@@ -723,10 +734,8 @@ class Runner:
     def tap_until_gone(self, sel, step):
         """Tap a confirmation's button (放弃改动 / 不等了，清掉) until its sheet is gone. A sheet that comes up takes no
         touch for a moment (UIKit), so a first tap can be lost; but a sheet that is only closing slowly (a loaded Mac)
-        still lists its button for a while, and a second tap at that place then lands on the page under it: on 状态
-        the iOS popover's 放弃改动 (y 146 pt) lies over the 开始刷 row once the list is scrolled there, and the stray
-        tap brought the 「机器关着」 notice back with the edit gone (status worker's open item 1, app-r1 offline run
-        21-30). So the button is tapped again only when the sheet is still up well after the last tap."""
+        still lists its button for a while, and a second tap at that place lands on the page under it (see dismiss()).
+        So the button is tapped again only when the sheet is still up well after the last tap."""
         for _ in range(3):
             if not self.wait_for(sel, 4):
                 raise StepFail(f"找不到「{sel}」")

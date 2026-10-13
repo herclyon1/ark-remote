@@ -116,7 +116,13 @@ struct SheetLink<Destination: View, Label: View>: View {
                 #else
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
+                    #if os(iOS)
+                    // the disclosure indicator's own colour (UITableViewCell's chevron is tertiaryLabel). `.tertiary`
+                    // is a level of the Button's accent here and drew the chevron light blue (鸣潮 无音区 row, app-r1)
+                    .foregroundStyle(Color(uiColor: .tertiaryLabel))
+                    #else
                     .foregroundStyle(.tertiary)
+                    #endif
                     .accessibilityHidden(true)
                 #endif
             }
