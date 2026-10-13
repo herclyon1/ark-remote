@@ -3,7 +3,7 @@ import SwiftUI
 /// The 手机 tab, carried over from the web page (maa-automation web/view.js, the 「这台手机」 and 「游戏账号」 sections;
 /// the tab takes the sections whose title matches /^这台手机|^游戏账号/, view.js TABS). PhoneTab fills it from the stores.
 struct PhonePageData {
-    /// 页面版本: the web page shows view.js's ?v= stamp; the app shows its own version.
+    /// 版本 (the web's 页面版本): the web page shows view.js's ?v= stamp; the app shows its own version.
     var pageVersion: String = ""
     /// 游戏账号 · 已配置: Stamina.status() on the web; empty = 「没有」, and the 清除密钥 button is hidden.
     var staminaStatus: String = ""
@@ -67,7 +67,7 @@ struct PhonePage: View {
         List {
             Section {
                 // a name and a value, no hint under them (HIG Lists: "Keep item text succinct"; P13's rows)
-                PhoneValueRow(title: "页面版本", value: data.pageVersion)
+                PhoneValueRow(title: "版本", value: data.pageVersion)
                 PhoneDiagRows(appVersion: data.pageVersion)
                 Button(linkCopied ? "链接已复制" : "复制免输入链接") {
                     // view.js #mklink; prompt("长按复制这条链接：", url) when the clipboard refuses
@@ -111,7 +111,7 @@ struct PhonePage: View {
             } footer: {
                 // plain words, no paths or file names (HIG Writing: "Choose simple, plain language … avoiding jargon");
                 // what to paste is the paste field's own prompt now
-                Text("密钥只存在这台手机里；免输入链接会带上它，换手机打开一次就全有。")
+                Text("森空岛的密钥由游戏机交过来，库街区的点「粘贴密钥串」填；密钥只存在这台手机里，免输入链接会把它一起带上。")
             }
         }
         // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at

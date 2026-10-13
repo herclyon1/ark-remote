@@ -44,7 +44,7 @@ struct PhoneDiagRows: View {
                 } message: {
                     // no count: the record keeps growing while the dialog is up, and a number frozen in it did not
                     // match the row behind (HIG Action sheets: "Provide a message only if necessary.")
-                    Text("还没分享的会找不回来。")
+                    Text("记下的都会删掉，还没分享的找不回来。")
                 }
             // view.js:602 #selfcheck is hidden while 诊断记录 is off. The running flag and the result sheet live in
             // SelfCheckRun and the sheet is on PhonePage outside its .id(reselect): a reselect of 手机 rebuilds this List
