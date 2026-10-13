@@ -2,6 +2,10 @@
 // the 「鸣潮」 card (schema.js:220-239) with the relay's 无音区结算截图 switch at its end (RELAY_SWITCHES, view.js:514),
 // then 「鸣潮 · 周常」 (view.js:524-535). 刷 4C 声骸 is not here: its header matches no tab, so the web page puts it on 状态.
 // Data, saving and the tab bar are wired by 验收 once the logic layer lands; this page only draws and reports edits.
+// Apple counterpart by purpose (BOARD/app-page-references.txt P2): Shortcuts › Automation › an automation's editor, which
+// sets what a job that runs by itself on a schedule does (menu values, switches, label + value rows in a grouped list);
+// not Settings, which changes this phone at once. The 无音区 pick sheet follows P4 (Shortcuts › Weekly days, one row per
+// choice with a checkmark). Changes still wait for 保存 → 确认 → 寄出 (EWSaveBar).
 
 import SwiftUI
 
@@ -98,7 +102,7 @@ struct WuwaPage: View {
 
     @State var values: [String: EWValue]
     @State var tacetShots: Bool
-    @State var bossIndex: String
+    @State var bossIndex: Int
     /// A reselect of the 鸣潮 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.wuwa }
@@ -115,7 +119,7 @@ struct WuwaPage: View {
         self.onResend = onResend
         _values = State(initialValue: ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:])
         _tacetShots = State(initialValue: data.tacetShots)
-        _bossIndex = State(initialValue: String(data.weeklyBossIndex))
+        _bossIndex = State(initialValue: data.weeklyBossIndex)
     }
 
     var body: some View {
@@ -132,7 +136,7 @@ struct WuwaPage: View {
             values = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:]
         }
         .onChange(of: data.tacetShots) { _, v in tacetShots = v }
-        .onChange(of: data.weeklyBossIndex) { _, v in bossIndex = String(v) }
+        .onChange(of: data.weeklyBossIndex) { _, v in bossIndex = v }
     }
 
     /// OK-WW declares which sub-items belong to which 「体力刷什么」 choice (sub_configs); the others are hidden (view.js:436-443).
@@ -183,34 +187,32 @@ struct WuwaPage: View {
             + ewRows(WuwaSchema.group, m, values: values, hidden: hidden(m))
     }
 
+    /// The relay's range for 周本打第几个 (weeklyboss.py:219; the same check before sending, Logic/Edits.swift problem()).
+    static let bossRange = 1...20
+
     /// Weekly items: done this week stops them, Monday 04:00 brings them back (view.js:510-535).
+    /// Read-only lines are the system label + value row (LabeledContent: the name leading, the value trailing in the
+    /// secondary colour), as Shortcuts' automation editor shows 「Event  Time of Day」 (reference P2).
     private var weeklyCard: some View {
         Section {
-            HStack {
-                EWRowTitle(label: "周常乐园", hint: nil)
-                Spacer()
-                Text(data.parkDone ? "本周已完成" : "本周还没做").foregroundStyle(.secondary)
+            LabeledContent("周常乐园") {
+                Text(data.parkDone ? "本周已完成" : "本周还没做").foregroundStyle(.secondary)   // Android: LabeledContent does not grey its value
             }
-            HStack {
-                EWRowTitle(label: "周本 战歌重奏", hint: nil)
-                Spacer()
+            LabeledContent("周本 战歌重奏") {
                 Text(data.weeklyBossDone ? "本周已领满" : "本周还没领满").foregroundStyle(.secondary)
             }
+            // A small whole number in a fixed range is a stepper with its value beside it (HIG Steppers: "Make the value
+            // that a stepper affects obvious."; the App's own 充值了 N 次, MonthCardRows.swift). − is off at 1, + at 20,
+            // so a value the relay refuses can no longer be entered (it was typed, then refused at 寄出 with 「要填 1–20」).
             tagged("wb|OK-WW|第几个周本") {
-            HStack {
-                EWRowTitle(label: "周本打第几个", hint: nil)
-                Spacer()
-                TextField("1", text: Binding(get: { bossIndex }, set: { v in
-                    bossIndex = v
-                    let n = Int(v) ?? 0   // view.js:1083 `Number(el.value) || 1`: emptied or 0 is 1
-                    onWeeklyBossIndex(n == 0 ? 1 : n)
-                }))
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 60)
-                #if !os(macOS)
-                .keyboardType(.numberPad)
-                #endif
-            }
+                Stepper(value: Binding(get: { bossIndex }, set: { n in
+                    bossIndex = n
+                    onWeeklyBossIndex(n)
+                }), in: Self.bossRange) {
+                    LabeledContent("周本打第几个") {
+                        Text(verbatim: String(bossIndex)).foregroundStyle(.secondary)
+                    }
+                }
             }
         } header: {
             Text("鸣潮 · 周常")
@@ -223,7 +225,7 @@ struct WuwaPage: View {
         }
     }
 
-    /// A row with its small lines under it, same as the config rows (EWRowView); one shape either way so the 周本 field keeps focus.
+    /// A row with its small lines under it, same as the config rows (EWRowView): one shape with or without them.
     private func tagged<Row: View>(_ key: String, @ViewBuilder _ row: () -> Row) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             row()

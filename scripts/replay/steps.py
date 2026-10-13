@@ -322,17 +322,20 @@ step("ww.what.same", "wuwa", "选回「无音区」→ 菜单收起、没有待�
 step("ww.tacet", "wuwa", "刷第几个无音区（安卓旧闪退点）→ 选择页 7 行", [tap("~刷第几个无音区")], expect=["~雪落无声之愿", "~长路启航之星"])
 step("ww.tacet.pick", "wuwa", "选第 5 个 → ✓ → 待保存 1 项",
      [tap("~雪落无声之愿"), ("wait", 0.4), tap(SAVE, region="top")], expect=["~待保存 1 项"])
-step("ww.boss.bad", "wuwa", "周本填 251 → ✓ → 寄出 → 挡下「要填 1–20」（寄出前校验，什么也不发）",
-     [("field", "周本打第几个", "251"), ("nokb", 5), tap(SAVE, region="top"), ("until", SEND_N, 6), CONFIRM_WAIT, tap(SEND_N)],
-     expect=["~要填 1–20", "~一项都没寄出"], timeout=6, nocmd=2)
-step("ww.boss.fix", "wuwa", "好 → 周本改 13 → 待保存 2 项",
-     [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.5), ("field", "周本打第几个", "13"), ("hidekb",)], expect=["~待保存 2 项"])
+# 周本打第几个 is a Stepper 1–20 (WuwaPage.swift bossRange): a value the relay refuses cannot be entered any more, so the
+# old 「填 251 → 要填 1–20」 step is gone; Logic/Edits.swift problem() still checks it before sending.
+step("ww.boss.plus", "wuwa", "周本打第几个 ＋ → 待保存 2 项",
+     [tap(PLUS), ("wait", 0.5)], expect=["周本打第几个", "~待保存 2 项"], keyboard=False)
+step("ww.boss.back", "wuwa", "－ → 回到机器的值、这一项撤销，待保存 1 项",
+     [tap(MINUS), ("wait", 0.5)], expect=["~待保存 1 项"], absent=["~待保存 2 项"], nocmd=2)
+step("ww.boss.fix", "wuwa", "＋ → 待保存 2 项",
+     [tap(PLUS), ("wait", 0.5)], expect=["~待保存 2 项"])
 step("ww.review", "wuwa", "✓ → 确认单「寄出 2 项」", [tap(SAVE, region="top")], expect=["确认这次修改", "寄出 2 项"])
-step("ww.send", "wuwa", "寄出 → set_master 无音区 + weekly_boss 13",
+step("ww.send", "wuwa", "寄出 → set_master 无音区 + weekly_boss（机器的值 ＋1）",
      [CONFIRM_WAIT, tap("寄出 2 项")], absent=["确认这次修改"], cmd=[{"action": "weekly_boss"}, {"action": "set_master"}])
 step("ww.clear", "wuwa", "不等了，清掉", [("clear",)], absent=[CLEAR], offline={"do": [], "absent": [], "skip": "额度"})
-step("ww.boss.x", "wuwa", "周本打第几个改 31（键盘开着）→ 点 ✕ → 回原值、键盘收起、没有待保存（0878f3b）",
-     [("field", "周本打第几个", "31"), ("wait", 0.6), ("discard",)], keyboard=False,
+step("ww.boss.x", "wuwa", "周本打第几个 ＋ → 点 ✕ → 回原值、没有待保存（0878f3b）",
+     [tap(PLUS), ("wait", 0.6), ("discard",)], keyboard=False,
      absent=["~待保存"], nocmd=2)
 step("d39.ww.top", "d39", "D39：鸣潮滑到底再点「鸣潮」→ 回顶",
      [("swipe", "up", 4), ("tab", "鸣潮"), ("wait", 1.2)], visible=["~无音区"])
