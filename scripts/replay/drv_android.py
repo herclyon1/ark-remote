@@ -150,6 +150,9 @@ class AndroidDriver:
         if not getattr(self, "activity", None):
             lines = [l.strip() for l in self.sh(f"cmd package resolve-activity --brief {PKG}").splitlines() if "/" in l]
             self.activity = lines[-1] if lines else f"{PKG}/ark.remote.MainActivity"
+        # a notification shade left open (a swipe that started at the top edge) covers the app and takes the focus:
+        # the run's first step then saw only the shade (ark37 10-14, step 1 「缺 现在跑一趟」 with Quick Settings open)
+        self.sh("cmd statusbar collapse")
         self.sh(f"am start -n {self.activity}")
         for _ in range(40):
             p = self.sh(f"pidof {PKG}").strip()
@@ -158,6 +161,17 @@ class AndroidDriver:
                 return
             time.sleep(0.25)
         raise RuntimeError("the app did not start")
+
+    def collapse_shade(self):
+        # a notification shade left pulled down (by an earlier run or a swipe that started on the status bar) sits
+        # over the app: the cold start then sees no app at all (run5 step 1: every 状态 label missing, the shot is the
+        # shade). `cmd statusbar collapse` takes about a second, so wait until the shade no longer has the focus.
+        self.sh("cmd statusbar collapse")
+        for _ in range(20):
+            if "NotificationShade" not in self.sh("dumpsys window | grep -m1 mCurrentFocus"):
+                return
+            time.sleep(0.25)
+        raise RuntimeError("the notification shade did not close")
 
     def current_pid(self):
         return self.sh(f"pidof {PKG}").strip() or None
