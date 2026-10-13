@@ -20,6 +20,10 @@ final class StatusTextTests: XCTestCase {
         XCTAssertEqual(ewDisplayLabel("🎱基质刷取"), "基质刷取")
         XCTAssertEqual(ewDisplayLabel("⚔️协议空间"), "协议空间")
         XCTAssertEqual(ewDisplayLabel("🧺自动采集"), "自动采集")
+        // HIG review 1014: the machine's half-width brackets beside the App's full-width punctuation
+        XCTAssertEqual(ewDisplayLabel("执行周期(游戏时间)"), "执行周期（游戏时间）")
+        XCTAssertEqual(ewDisplayLabel("刷第几个无音区 (F2列表)"), "刷第几个无音区（F2列表）")
+        XCTAssertEqual(ewDisplayLabel("Level (1-5)"), "Level (1-5)")
         XCTAssertEqual(ewDisplayLabel("🟨无瑕基质"), "无瑕基质")
         XCTAssertEqual(ewDisplayLabel("🟪高纯基质"), "高纯基质")
         XCTAssertEqual(ewDisplayLabel("★6 黯色火炬"), "★6 黯色火炬")

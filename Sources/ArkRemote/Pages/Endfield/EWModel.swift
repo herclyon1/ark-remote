@@ -138,8 +138,22 @@ struct EWMaster: Sendable, Decodable {
 /// A machine name as the App shows it: without the decorative emoji MaaEnd puts in front of its names (「🎱基质刷取」,
 /// 「⚔️协议空间」, 「🧺自动采集」, 「🟨无瑕基质」, 「🟪高纯基质」). They sat flush against the words with no icon column and
 /// added colours of no Apple page (design rule 6; BOARD/App-待他定项-从记录定-1014.md E5); the words say the same.
-/// ★ (the game's rarity, 「★6 黯色火炬」), CJK and ASCII stay. Display only: the label is never sent.
+/// ★ (the game's rarity, 「★6 黯色火炬」), CJK and ASCII stay. A Chinese name's half-width brackets become the full-width
+/// ones the rest of the App writes (「执行周期(游戏时间)」 → 「执行周期（游戏时间）」; HIG Writing: "use it consistently
+/// throughout your app"). Display only: the label is never sent.
 func ewDisplayLabel(_ s: String) -> String {
+    ewFullWidthBrackets(ewWithoutEmoji(s))
+}
+
+/// 「(」 / 「)」 → 「（」 / 「）」 in a name with Chinese in it, the space before 「(」 dropped (「刷第几个无音区 (F2列表)」 →
+/// 「刷第几个无音区（F2列表）」). An all-ASCII name keeps its brackets.
+func ewFullWidthBrackets(_ s: String) -> String {
+    guard s.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) else { return s }
+    return s.replacingOccurrences(of: " (", with: "（").replacingOccurrences(of: "(", with: "（")
+        .replacingOccurrences(of: ")", with: "）")
+}
+
+private func ewWithoutEmoji(_ s: String) -> String {
     var out = String.UnicodeScalarView()
     for u in s.unicodeScalars {
         let v = u.value
