@@ -330,7 +330,9 @@ step("ww.what", "wuwa", "刷什么（点右边的值）→ 菜单 无音区 / �
      android={"do": [tap("无音区")]})
 step("ww.what.same", "wuwa", "选回「无音区」→ 菜单收起、没有待保存",
      [tap("无音区", last=True), ("wait", 0.6)], absent=["凝素领域", "~待保存"])
-step("ww.tacet", "wuwa", "刷第几个无音区（安卓旧闪退点）→ 选择页 7 行", [tap("~刷第几个无音区")], expect=["~雪落无声之愿", "~长路启航之星"])
+# the row's name is the app's own 「无音区打哪个」 (WuwaSchema name); OK-WW's 「刷第几个无音区 (F2列表)」 on the 0.4.4 base
+TACET_ROW = ["~无音区打哪个", "~刷第几个无音区"]
+step("ww.tacet", "wuwa", "无音区打哪个（安卓旧闪退点）→ 选择页 7 行", [tap(TACET_ROW)], expect=["~雪落无声之愿", "~长路启航之星"])
 step("ww.tacet.pick", "wuwa", "选第 5 个 → ✓ → 待保存 1 项",
      [tap("~雪落无声之愿"), ("wait", 0.4), tap(SAVE, region="top")], expect=["~待保存 1 项"])
 # 周本打第几个 is a Stepper 1–20 (WuwaPage.swift bossRange): a value the relay refuses cannot be entered any more, so the

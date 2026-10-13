@@ -248,7 +248,7 @@ let schema: [SchemaSection] = [
         SchemaField(path: "DailyTask.json/Which Tacet Suppression to Farm", type: "icons", label: "无音区打哪个", tacet: tacet,
                     hint: "按想要的声骸套装挑。只在上面选「无音区」时才有用"),
         SchemaField(path: "NightmareNestTask.json/Only Farm These Nests", type: "text", label: "残象聚落点位", ro: true,
-                    hint: "只刷落渊南丘，这是定好的。要换点位在电脑上改"),
+                    hint: "这是定好的，要换点位在电脑上改。"),
     ]),
 ]
 
@@ -292,7 +292,7 @@ let relaySwitches: [RelaySwitch] = [
                 off: .object(["action": .string("debug_mode"), "off": .bool(true), "confirmed": .bool(true)]),
                 hintOn: { v in "开着，到 \(v)——这期间跑完不关机" }),
     RelaySwitch(id: "relay|tacet_shots", key: "无音区截图", tab: "OK-WW", label: "无音区结算截图",
-                hint: "开着：日报后面带上无音区打完的两张结算图",
+                hint: tacetShotsHint,
                 on: .object(["action": .string("tacet_shots"), "on": .bool(true)]),
                 off: .object(["action": .string("tacet_shots"), "on": .bool(false)])),
 ]

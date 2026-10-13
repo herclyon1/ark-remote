@@ -1,6 +1,6 @@
 // The 鸣潮 (OK-WW) tab. Same cards and rows as the web page's 鸣潮 tab (view.js:754 TABS /^鸣潮/):
 // the 「鸣潮」 card (schema.js:220-239) with the relay's 无音区结算截图 switch at its end (RELAY_SWITCHES, view.js:514),
-// then 「鸣潮 · 周常」 (view.js:524-535). 刷 4C 声骸 is not here: its header matches no tab, so the web page puts it on 状态.
+// then the weekly card (view.js:524-535, 「鸣潮 · 周常」 there; 「每天」 / 「每周」 here). 刷 4C 声骸 is not here: its header matches no tab, so the web page puts it on 状态.
 // Data, saving and the tab bar are wired by 验收 once the logic layer lands; this page only draws and reports edits.
 // Apple counterpart by purpose (BOARD/app-page-references.txt P2): Shortcuts › Automation › an automation's editor, which
 // sets what a job that runs by itself on a schedule does (menu values, switches, label + value rows in a grouped list);
@@ -59,18 +59,21 @@ enum WuwaSchema {
         EWChoice("15 · 佩枪（告解海渊）", "15"),
     ]
 
+    /// Footer cuts only (app-1013 review 鸣潮 1): no hint that repeats the row's name (体力刷什么), none that says a row
+    /// only counts for one choice (those rows are hidden for the others, `hidden(_:)`).
     static let group = EWGroupSpec(title: "鸣潮", fields: [
-        EWFieldSpec(path: "DailyTask.json/Which to Farm", type: .text, label: "体力刷什么",
-                    hint: "每天的体力花在哪"),
-        EWFieldSpec(path: "DailyTask.json/Material Selection", type: .text, label: "刷哪种材料",
-                    hint: "只在上面选「模拟领域」时才有用"),
+        EWFieldSpec(path: "DailyTask.json/Which to Farm", type: .text, label: "体力刷什么"),
+        EWFieldSpec(path: "DailyTask.json/Material Selection", type: .text, label: "刷哪种材料"),
         EWFieldSpec(path: "DailyTask.json/Which Forgery Challenge to Farm", type: .select, label: "凝素领域打哪个",
-                    hint: "按想要的武器材料挑。只在上面选「凝素领域」时才有用", choices: forge),
-        EWFieldSpec(path: "DailyTask.json/Which Tacet Suppression to Farm", type: .icons, label: "无音区打哪个",
-                    hint: "按想要的声骸套装挑。只在上面选「无音区」时才有用",
+                    hint: "按想要的武器材料挑。", choices: forge),
+        // our own name: OK-WW's 「刷第几个无音区 (F2列表)」 wrapped the name and the value onto two lines each (review 鸣潮 2)
+        EWFieldSpec(path: "DailyTask.json/Which Tacet Suppression to Farm", type: .icons, name: "无音区打哪个",
+                    hint: "按想要的声骸套装挑。",
                     choices: tacet.map { EWChoice($0.names.joined(separator: " ＋ "), String($0.value)) }),
+        // the relay holds both nests (mastercfg_okww.py ONLY_NESTS 梦枢天罗、落渊南丘); the row shows them, so the hint
+        // no longer names one
         EWFieldSpec(path: "NightmareNestTask.json/Only Farm These Nests", type: .text, label: "残象聚落点位",
-                    hint: "只刷落渊南丘，这是定好的。要换点位在电脑上改", readOnly: true),
+                    hint: "这是定好的，要换点位在电脑上改。", readOnly: true),
     ])
 }
 
@@ -155,7 +158,7 @@ struct WuwaPage: View {
         // Only when the 母本 is readable: otherwise the card is the one warning line.
         let cardRows = rows.filter { $0.kind != .warning }
         let foot = m == nil ? "" : ewFoot(cardRows.map { EWFootItem(label: $0.label, hint: $0.hint) }
-            + [EWFootItem(label: "无音区结算截图", hint: "开着：日报后面带上无音区打完的两张结算图")], rows: cardRows.count + 1)
+            + [EWFootItem(label: "无音区结算截图", hint: tacetShotsHint)], rows: cardRows.count + 1)
         Section {
             if let m {
                 ForEach(rows) { row in
@@ -174,7 +177,8 @@ struct WuwaPage: View {
                     .foregroundStyle(.orange)
             }
         } header: {
-            Text(WuwaSchema.group.title)
+            // the page is 鸣潮 already: the header names the group (review 鸣潮 3; Shortcuts' 「Personal」, P6)
+            Text("每天")
         } footer: {
             if !foot.isEmpty { Text(verbatim: foot) }
         }
@@ -198,8 +202,12 @@ struct WuwaPage: View {
             LabeledContent("周常乐园") {
                 Text(data.parkDone ? "本周已完成" : "本周还没做").foregroundStyle(.secondary)   // Android: LabeledContent does not grey its value
             }
-            LabeledContent("周本 战歌重奏") {
+            // the name, and the boss under it in grey (the system's subtitle in a LabeledContent label)
+            LabeledContent {
                 Text(data.weeklyBossDone ? "本周已领满" : "本周还没领满").foregroundStyle(.secondary)
+            } label: {
+                Text("周本")
+                Text("战歌重奏")
             }
             // A small whole number in a fixed range is a stepper with its value beside it (HIG Steppers: "Make the value
             // that a stepper affects obvious."; the App's own 充值了 N 次, MonthCardRows.swift). − is off at 1, + at 20,
@@ -215,11 +223,11 @@ struct WuwaPage: View {
                 }
             }
         } header: {
-            Text("鸣潮 · 周常")
+            Text("每周")
         } footer: {
             // view.js:976-995; the row name is taken without its <small> (「周本」, not 「周本 战歌重奏」)
             Text(verbatim: ewFoot([EWFootItem(label: "周常乐园", hint: "不花体力。做完就停到下周一"),
-                                   EWFootItem(label: "周本", hint: "花体力。一周领 3 次奖励、每次 60 结晶波片、固定打 90 级，领满就停到下周一"),
+                                   EWFootItem(label: "周本", hint: "花体力。一周领 3 次奖励，领满就停到下周一"),
                                    EWFootItem(label: "周本打第几个", hint: "游戏里按 F2 打开周本列表，从上往下数，第一个填 1。新 Boss 上线顺序会变，换本时记得来改")],
                                   rows: 3))
         }
