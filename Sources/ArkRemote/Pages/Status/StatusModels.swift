@@ -164,15 +164,19 @@ struct StatusData {
 }
 
 /// What the page asks the logic layer to do. Every closure is optional so the page builds on its own.
+/// The commands that act on the other machine return the question to ask (shown by StatusPage as a confirmationDialog
+/// anchored to the button pressed), or nil when nothing is to be confirmed (a one-button notice went up instead, or the
+/// entry is not valid yet). `confirm` sends a question the user said yes to.
 struct StatusActions {
-    var runNow: () -> Void = {}
+    var runNow: () -> StatusAsk? = { nil }
     var refresh: () -> Void = {}
-    var stopAll: () -> Void = {}
+    var stopAll: () -> StatusAsk? = { nil }
     var selectQueue: (String) -> Void = { _ in }
     var setRunsToday: (String, Bool) -> Void = { _, _ in }        // queue name, on
-    var startEchoFarm: (Int, String) -> Void = { _, _ in }        // boss index, until HH:MM
-    var changeEchoFarmUntil: (String) -> Void = { _ in }
-    var stopEchoFarm: () -> Void = {}
+    var startEchoFarm: (Int, String) -> StatusAsk? = { _, _ in nil }   // boss index, until HH:MM
+    var changeEchoFarmUntil: (String) -> StatusAsk? = { _ in nil }
+    var stopEchoFarm: () -> StatusAsk? = { nil }
+    var confirm: (StatusAsk) -> Void = { _ in }
     var setSkipShutdown: (Bool) -> Void = { _ in }
     var setDebugMode: (Bool) -> Void = { _ in }
     var resend: (String) -> Void = { _ in }                       // 「再发一次」 under a row, switch id
