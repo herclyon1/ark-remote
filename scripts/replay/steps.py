@@ -168,7 +168,7 @@ step("status.skip.think", "status", "再想想 → 关单，改动还在",
 # timed against the sheet window's first frame (gate_trials). iOS: 寄出 is .disabled for 400 ms, one early press; a sheet
 # still up afterwards is 对; gone is 「不判（模拟器）」 (the press may have landed after the gate on a slow simulator).
 step("gate.diag.on", "gate", "手机 · 诊断记录打开（门测试用 App 自己的发送记录判断）→ 回状态",
-     [("tab", "手机"), ("toggle", "诊断记录"), ("tab", "状态")], expect=[STATUS_ROOT, "~待保存 1 项"], on="android")
+     [("tab", "手机"), ("toggle", "诊断记录"), ("tab", "状态")], expect=[HOME, "~待保存 1 项"], on="android")
 step("gate.early", "gate", "400 ms 门：✓ 后 150 ms 按下「寄出」按住 0.9 秒 → 不寄出、单子还在",
      [("gate", "save", "send", 150, 900)], expect=["确认这次修改"], nocmd=3, nojudge_fail="模拟器",
      android={"say": "400 ms 门：✓ 后马上按住「寄出」1.5 秒（按下早于门开、松手晚于门开）× 2 → 一次都不寄出",
@@ -185,7 +185,7 @@ step("gate.diag.check", "gate", "App 自己的发送记录（打开分享诊断�
      [("tab", "手机"), tap("~分享诊断记录"), ("wait", 1.5), ("back",), ("app_posts", {"gate.early": 0, "gate.late": 1})],
      expect=["运行自检"], on="android", nojudge="模拟器")
 step("gate.diag.off", "gate", "手机 · 诊断记录关掉 → 回状态",
-     [("toggle", "诊断记录"), ("tab", "状态")], expect=[STATUS_ROOT], on="android")
+     [("toggle", "诊断记录"), ("tab", "状态")], expect=[HOME], on="android")
 
 # ------------------------------------------------------------------ heartbeat / machine off
 step("status.off", "status", "心跳过期 → 设备卡「关机」",
@@ -210,12 +210,15 @@ step("shift.morning", "shift", "切回「早班」→ 五个标签回来", [tap(
 # regression #26 (his 10-07 17:56, design rule 7): the 状态 page says nothing of how the machine's runs went
 step("status.noresult", "receipts", "状态页回执段：组头只有「机器最近的回执」，没有「最近一趟」「失败 N 趟」（回归 #26），正常回执不打勾",
      [("bottom", 8)], expect=["~查看全部", "机器最近的回执"], absent=["~最近一趟", "re:失败 \\d+ 趟", "成功"])
+# Android: back on the 状态 root the list stands a little lower than when 查看全部 was tapped, and a Compose lazy list
+# has no node for a row under the tab bar (ark37 10-14: the receipts' header and lines on screen, 查看全部 just below)
+RECEIPTS_NEAR = ["~查看全部", "机器最近的回执"]
 step("receipts.open", "receipts", "查看全部 → 回执页",
      [tap("~查看全部")], expect=["回执"], absent=[STATUS_ROOT])
 step("receipts.tabpop", "d39", "D39：在回执页再点「状态」→ 回到状态根页",
-     [("tab", "状态")], expect=[HOME, "~查看全部"], absent=[BACK_BTN, "回执"])
+     [("tab", "状态")], expect=[HOME, "~查看全部"], absent=[BACK_BTN, "回执"], android={"expect": [HOME, RECEIPTS_NEAR]})
 step("receipts.back", "receipts", "再进查看全部 → 返回键回来", [tap("~查看全部"), ("wait", 0.8), ("back",)],
-     expect=[HOME, "~查看全部"], absent=[BACK_BTN, "回执"])
+     expect=[HOME, "~查看全部"], absent=[BACK_BTN, "回执"], android={"expect": [HOME, RECEIPTS_NEAR]})
 step("receipts.reenter", "d39", "回来后再进查看全部 → 进得去", [tap("~查看全部")], expect=["回执"], absent=[STATUS_ROOT])
 step("receipts.leave", "receipts", "点「状态」回根页", [("tab", "状态")], expect=[HOME], absent=[BACK_BTN, "回执"])
 step("d39.status.top", "d39", "D39：状态根页滑到底再点「状态」→ 回到顶",
@@ -236,7 +239,9 @@ step("mc.days", "monthcard", "天数填 15 → 收键盘（iOS 完成键）",
 step("mc.align.ask", "monthcard", "对准 → 弹「对准为还剩 15 天？」", [tap("对准", region="content")], expect=["对准为还剩 15 天？"])
 step("mc.align.go", "monthcard", "弹窗 · 对准 → 寄出 monthcard left 15，页面变 15 天",
      [CONFIRM_WAIT, tap("对准", last=True)], expect=["还剩 15 天"], absent=["对准为还剩 15 天？"],
-     cmd={"action": "monthcard", "left": 15, "game": "终末地"})
+     cmd={"action": "monthcard", "left": 15, "game": "终末地"},
+     # Android: the card's 还剩 / 15 / 天 are three texts (MonthCardRows.swift: the one combined label is iOS only)
+     android={"expect": [{"t": "15", "kind": "TextView"}, "还剩"]})
 step("mc.tabpop", "d39", "点「状态」→ 月卡页退掉、回根页", [("tab", "状态")], expect=[HOME], absent=[BACK_BTN, "终末地月卡"])
 
 # ------------------------------------------------------------------ 方舟
@@ -329,7 +334,9 @@ step("ef.loop.x", "endfield", "循环执行改 20（键盘开着）→ 点 ✕ �
      [("field", "循环执行", "20"), ("wait", 0.6), ("discard",)], keyboard=False,
      expect=[{"t": "99", "kind": ["TextField", "EditText"]}, "循环执行"], absent=["~待保存", "库存"], nocmd=2)
 step("ef.home", "endfield", "回「状态」标签（只跑 endfield 时，收尾的冷启动从状态页开始）", [("tab", "状态")],
-     expect=[[STATUS_ROOT, "~明日安排", "~查看全部"]])   # any of them: the 状态 page may be scrolled down (d39 runs before)
+     expect=[[STATUS_ROOT, "~明日安排", "~查看全部"]],   # any of them: the 状态 page may be scrolled down (d39 runs before)
+     # Android: a lazy list has nodes for the rows on screen only; scrolled to the 月卡 rows none of the three is there
+     android={"expect": [HOME], "absent": [BACK_BTN]})
 step("d39.ef.top", "d39", "D39：终末地根页滑到底再点「终末地」→ 回顶",
      [("tab", "终末地"), ("wait", 0.8), ("swipe", "up", 4), ("tab", "终末地"), ("wait", 1.2)], visible=["库存"])
 
@@ -482,7 +489,9 @@ step("farm.done", "farm", "发回原状态 → 「刷到几点」「开始刷」
 TWO_T = "re:\\d\\d:\\d\\d 发出 · .*执行"
 step("times.show", "receipts", "两条测试回执（单时间 / 发出≠执行）→ 状态页两行都在，两段时间那行时间在文字下面、不压字",
      [("state", "times"), ("wait", 1.0), ("see", "~回放两时间回执")],
-     expect=["~回放单时间回执", "~回放两时间回执", TWO_T], below=[["~回放两时间回执", TWO_T]], timeout=30)
+     expect=["~回放单时间回执", "~回放两时间回执", TWO_T], below=[["~回放两时间回执", TWO_T]], timeout=30,
+     # Android: the single-time line is under the two-time one, below the tab bar, so not in the lazy list's tree yet
+     android={"do": [("state", "times"), ("wait", 1.0), ("see", "~回放单时间回执"), ("see", "~回放两时间回执")]})
 step("times.page", "receipts", "查看全部 → 回执页同样两行、时间在文字下面",
      [tap("~查看全部"), ("wait", 1.0), ("see", "~回放两时间回执")],
      expect=["回执", "~回放单时间回执", TWO_T], below=[["~回放两时间回执", TWO_T]], timeout=10)
