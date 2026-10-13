@@ -255,7 +255,10 @@ struct StatusPage: View {
                     if shown.count > 2 { staminaTile(shown[2], placeholder: tiles.isEmpty) }
                 }
                 #if !os(Android)
-                .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))   // skip-ui: unavailable on Android
+                // Health's Summary: each card on the grouped page ground, not inside a row (a GroupBox in a row has the
+                // row's own colour in dark mode); skip-ui: listRowInsets unavailable, its GroupBox draws its own ground
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
                 #endif
             } footer: {
                 if tiles.isEmpty { Text("正在读取…") }
@@ -297,6 +300,10 @@ struct StatusPage: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        #if os(iOS)
+        // the colour of a grouped list's cards, so a tile reads as one of Health's Summary cards in light and dark
+        .backgroundStyle(Color(uiColor: .secondarySystemGroupedBackground))
+        #endif
     }
 
     // MARK: plan (这一趟 / 明日安排)
