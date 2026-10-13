@@ -185,8 +185,12 @@ struct MonthCardPage: View {
                 Text("\(e.left)").font(.largeTitle).bold().foregroundStyle(tone)
                 Text("天").font(.subheadline).foregroundStyle(.secondary)
             }
+            #if !os(Android)
+            // one element read 「还剩 15 天」; skip-fuse-ui marks accessibilityElement(children:) unavailable, so on
+            // Android TalkBack reads the three texts in order, which says the same
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("还剩 \(e.left) 天")
+            #endif
         }
     }
 
