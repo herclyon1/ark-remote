@@ -85,8 +85,9 @@ struct MonthCardEntry: Sendable, Equatable {
 
     /// Today in Asia/Shanghai, "YYYY-MM-DD". Shanghai has kept UTC+8 with no daylight saving since 1991, so a fixed offset
     /// gives the same day as the web's Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).
-    static func today() -> String {
-        isoDay(Int(((nowMs() + 8 * 3600 * 1000) / 86_400_000).rounded(.down)))
+    /// `ms`: the moment to read (tests pass one either side of Shanghai midnight); now by default.
+    static func today(_ ms: Double = nowMs()) -> String {
+        isoDay(Int(((ms + 8 * 3600 * 1000) / 86_400_000).rounded(.down)))
     }
 
     /// `iso` + n days (monthcard.js plus(): setUTCDate).
