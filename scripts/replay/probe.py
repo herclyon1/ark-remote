@@ -96,7 +96,8 @@ def serve(a):
     mb.listen(t0 - 5)
     mb.publish_state("base")
     mb.hb(300)
-    if not drv.current_pid():
+    # iOS: the app was terminated above and IOSDriver has no current_pid(); Android: launch only when not running
+    if a.platform == "ios" or not drv.current_pid():
         drv.launch()
     marker0 = drv.log_marker() if a.platform == "android" else None
     print("probe ready on port", a.port, flush=True)
