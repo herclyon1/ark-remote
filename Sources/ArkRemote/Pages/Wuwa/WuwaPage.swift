@@ -60,22 +60,24 @@ enum WuwaSchema {
     ]
 
     /// Each hint says what the row does, shortened in place (design rule 8; BOARD/App-待他定项-从记录定-1014.md W4): no
-    /// 「只在上面选…时才有用」, since those rows are hidden for the other choices (`hidden(_:)`).
+    /// 「只在上面选…时才有用」, since those rows are hidden for the other choices (`hidden(_:)`). The hints are only read in
+    /// the card's footer, with no 「行名：」 in front (A2/W4), so each names its subject; a row whose name already says
+    /// everything has none (体力刷什么, 刷哪种材料: it is shown only once 模拟领域 is picked).
     static let group = EWGroupSpec(title: "鸣潮", fields: [
         EWFieldSpec(path: "DailyTask.json/Which to Farm", type: .text, label: "体力刷什么",
-                    hint: "每天的体力花在哪一类。"),
+                    hint: nil),
         EWFieldSpec(path: "DailyTask.json/Material Selection", type: .text, label: "刷哪种材料",
-                    hint: "模拟领域刷的材料。"),
+                    hint: nil),
         EWFieldSpec(path: "DailyTask.json/Which Forgery Challenge to Farm", type: .select, label: "凝素领域打哪个",
-                    hint: "按想要的武器材料挑。", choices: forge),
+                    hint: "凝素领域按想要的武器材料挑。", choices: forge),
         // our own name: OK-WW's 「刷第几个无音区 (F2列表)」 wrapped the name and the value onto two lines each (review 鸣潮 2)
         EWFieldSpec(path: "DailyTask.json/Which Tacet Suppression to Farm", type: .icons, name: "无音区打哪个",
-                    hint: "按想要的声骸套装挑。",
+                    hint: "无音区按想要的声骸套装挑。",
                     choices: tacet.map { EWChoice($0.names.joined(separator: " ＋ "), String($0.value)) }),
         // the first two settlements (his 10-12 11:17 「我要的就是要刷前两个残像聚落，第2个就是落渊南丘」; the relay's
         // mastercfg_okww.py ONLY_NESTS 梦枢天罗、落渊南丘); the old 「只刷落渊南丘」 was out of date
         EWFieldSpec(path: "NightmareNestTask.json/Only Farm These Nests", type: .text, label: "残象聚落点位",
-                    hint: "只刷列表里的前两个聚落，这是定好的，要换在电脑上改。", readOnly: true),
+                    hint: "残象聚落只刷列表里的前两个，这是定好的，要换在电脑上改。", readOnly: true),
     ])
 }
 
@@ -156,11 +158,9 @@ struct WuwaPage: View {
     private var gameCard: some View {
         let (m, notes) = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster)
         let rows = gameRows(m, notes)
-        // view.js:976-995: the hints sit under the card, 「行名：」 in front; the 无音区结算截图 switch is one of its rows.
+        // view.js:976-995: the hints sit under the card; the 无音区结算截图 switch is one of its rows.
         // Only when the 母本 is readable: otherwise the card is the one warning line.
-        let cardRows = rows.filter { $0.kind != .warning }
-        let foot = m == nil ? "" : ewFoot(cardRows.map { EWFootItem(label: $0.label, hint: $0.hint) }
-            + [EWFootItem(label: "无音区结算截图", hint: tacetShotsHint)], rows: cardRows.count + 1)
+        let foot = m == nil ? "" : Self.dailyFoot(rows)
         Section {
             if let m {
                 ForEach(rows) { row in
@@ -196,6 +196,20 @@ struct WuwaPage: View {
     /// The relay's range for 周本打第几个 (weeklyboss.py:219; the same check before sending, Logic/Edits.swift problem()).
     static let bossRange = 1...20
 
+    /// The 每天 card's footer: the drawn rows' hints, then the 无音区结算截图 switch's, one sentence a line. No 「行名：」 list in
+    /// front: it repeated every row name right above it (decision A2/W4, BOARD/App-待他定项-从记录定-1014.md).
+    static func dailyFoot(_ rows: [EWRow]) -> String {
+        (rows.filter { $0.kind != .warning }.map(\.hint) + [tacetShotsHint])
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    /// The 每周 card's footer (view.js:976-995), no 「行名：」 list (A2/W4): each sentence names what it is about.
+    static let weeklyFoot = "周常乐园不花体力，做完就停到下周一。\n"
+        + "周本花体力，一周领 3 次奖励，领满就停到下周一。\n"
+        + "周本的序号在游戏里按 F2 打开周本列表从上往下数，第一个是 1。新 Boss 上线顺序会变，换本时记得来改。"
+
     /// Weekly items: done this week stops them, Monday 04:00 brings them back (view.js:510-535).
     /// Read-only lines are the system label + value row (LabeledContent: the name leading, the value trailing in the
     /// secondary colour), as Shortcuts' automation editor shows 「Event  Time of Day」 (reference P2).
@@ -227,11 +241,7 @@ struct WuwaPage: View {
         } header: {
             Text("每周")
         } footer: {
-            // view.js:976-995; the row name is taken without its <small> (「周本」, not 「周本 战歌重奏」)
-            Text(verbatim: ewFoot([EWFootItem(label: "周常乐园", hint: "不花体力。做完就停到下周一"),
-                                   EWFootItem(label: "周本", hint: "花体力。一周领 3 次奖励，领满就停到下周一"),
-                                   EWFootItem(label: "周本打第几个", hint: "游戏里按 F2 打开周本列表，从上往下数，第一个是 1。新 Boss 上线顺序会变，换本时记得来改")],
-                                  rows: 3))
+            Text(verbatim: Self.weeklyFoot)
         }
     }
 
