@@ -201,17 +201,37 @@ class Runner:
 
     def scroll(self, direction, short=False):
         W, H = self.drv.size
-        top, bottom = self.drv.content_box(self.dump(False)["nodes"] if self.cache else [])
+        android = self.drv.platform == "android"
+        nodes = self.dump(False)["nodes"] if (self.cache or android) else []
+        top, bottom = self.drv.content_box(nodes)
         span = (bottom - top) * (0.35 if short else 0.6)
         x = W // 2
         y0 = int(top + (bottom - top) * 0.8)
         if direction == "up":       # content moves up = scroll down the page
+            if android:
+                y0 = self.free_y(nodes, x, y0, -1, top, bottom)
             self.drv.swipe(x, y0, x, int(y0 - span), 300)
         else:
             y1 = int(top + (bottom - top) * 0.2)
+            if android:
+                y1 = self.free_y(nodes, x, y1, 1, top, bottom)
             self.drv.swipe(x, y1, x, int(y1 + span), 300)
         time.sleep(0.6)
         self.invalidate()
+
+    def free_y(self, nodes, x, y, step, top, bottom):
+        """Android: a swipe's start height near y (moving by step toward the middle) that is on no clickable row.
+        An `input swipe` from a row now and then reads as a tap on that row: the ("top", 3) of ef.ticket.open started at
+        0.2 of the content area, on the 终末地 page's 库存 row, and opened 库存 (ark37 10-14, run 7 step 79 and a probe:
+        tab 终末地 + top 3 -> the 库存 page). Containers taller than half the content area (the list itself) are not rows."""
+        rows = [n for n in nodes if n["clickable"] and 0 < n["h"] < (bottom - top) / 2
+                and abs(n["x"] - x) <= n["w"] / 2]
+        lo, hi = top + 20, bottom - 20
+        for i in range(0, int((bottom - top) * 0.4), 12):
+            yy = y + step * i
+            if lo <= yy <= hi and not any(abs(n["y"] - yy) <= n["h"] / 2 + 6 for n in rows):
+                return int(yy)
+        return y
 
     # ---- actions
     def act(self, a, step):
