@@ -101,7 +101,9 @@ struct EndfieldPage: View {
                         .listRowBackground(rowBackground(nil))   // same row shape as the EWRowView rows beside it (SkipFixes.swift)
                     }
                 } header: {
-                    Text(g.title)
+                    // the page is 终末地 already: 「终末地 · 基质刷取」 → 「基质刷取」 (HIG Writing: "Check each word to be
+                    // sure it needs to be there.")
+                    Text(ewCardName(g.title))
                 } footer: {
                     if !foot.isEmpty { Text(verbatim: foot) }
                 }
@@ -112,7 +114,7 @@ struct EndfieldPage: View {
                 warningLabel("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改")
                     .foregroundStyle(.orange)
             } header: {
-                Text(g.title)
+                Text(ewCardName(g.title))
             }
         }
     }
@@ -138,6 +140,10 @@ func ewCard(_ g: EWGroupSpec, _ data: EndfieldPageData, values: [String: EWValue
     let tm = g.tree.map { m.roots[$0] == nil } == true ? (data.lastGoodMaster ?? m) : m
     return (m, notes, ewRows(g, tm, values: values))
 }
+
+/// 「终末地 · 基质刷取」 → 「基质刷取」: a card's name without the game, which the tab already says. The full title stays
+/// the card's key (EndfieldRoute.more, section ids).
+func ewCardName(_ title: String) -> String { title.components(separatedBy: " · ").last ?? title }
 
 /// The warnings as rows; `prefix` keeps their ids apart between pages.
 func ewNoteRows(_ notes: [String], _ prefix: String) -> [EWRow] {
@@ -170,8 +176,7 @@ struct EndfieldMorePage: View {
         _values = State(initialValue: ewEffectiveMaster(d.master, lastGood: d.lastGoodMaster).0?.values ?? [:])
     }
 
-    /// 「终末地 · 基质刷取」 → 「基质刷取」.
-    private var name: String { group.title.components(separatedBy: " · ").last ?? group.title }
+    private var name: String { ewCardName(group.title) }
 
     var body: some View {
         let data = self.data()

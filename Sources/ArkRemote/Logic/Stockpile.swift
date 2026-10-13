@@ -13,7 +13,7 @@
 // rows without a need last (§4.3).
 //
 // M4i (user 2026-09-23 09:20): a row that covers one build drops 「需 N」 from its subtitle; only a short row
-// keeps 「需 N」 and 「差 N」. Numbers from 10,000 up read in thousands, 22,639k (footnote 「k = 千」). The box
+// keeps 「需 N」 and 「差 N」. Numbers are whole, grouped by thousands (22,639,400). The box
 // row is a conversion note, not a 人份: 「133 个 · 换成缺的材料用了 131 个」, 「剩 2 个」.
 //
 // Self-select box (M4g; user 2026-09-23 09:05): Inventory.applyBox tops up the short rows; the right value
@@ -128,7 +128,7 @@ enum StockpileEmptyAction: Sendable, Equatable {
         if let good = lastGood, let gg = good["games"]?[0] {
             content = Self.list(gg, good, err: lastErr)
         } else if err == "没配森空岛" {
-            content = .empty(title: "没配森空岛", text: "库存从森空岛读；在「手机」页填好密钥串再来。", button: "去手机页", action: .phone)
+            content = .empty(title: "没配森空岛", text: "库存从森空岛读，在「手机」页填好密钥串后再来。", button: "去手机页", action: .phone)
         } else {
             content = .empty(title: "读不到库存", text: err, button: "重试", action: .retry)
         }
@@ -136,10 +136,9 @@ enum StockpileEmptyAction: Sendable, Equatable {
 
     // MARK: listHtml
 
-    /// Number formatting for one page: 千分位 1,234 (plan §4.3); M4i: from 10,000 up, rounded to thousands
-    /// with a k, 22,639,400 → 22,639k, and the footnote then says k = 千.
+    /// Number formatting for one page: 千分位 1,234 (plan §4.3), the whole number however large (22,639,400), as Health's
+    /// All Recorded Data writes 14,035: M4i's 「22,639k」 needed a footnote 「k = 千」 to be read (app-1013 review 终末地 11).
     private struct NumFormat {
-        var usedK = false
 
         static func grouped(_ n: Int) -> String {
             let s = String(abs(n))
@@ -153,12 +152,8 @@ enum StockpileEmptyAction: Sendable, Equatable {
 
         mutating func num(_ v: Double?) -> String {
             let x = v ?? 0
-            if abs(x) < 10000 {
-                if x == x.rounded() { return Self.grouped(Int(x)) }
-                return jsNumberString(x)
-            }
-            usedK = true
-            return Self.grouped(Int((x / 1000 + 0.5).rounded(.down))) + "k"   // Math.round
+            if x == x.rounded() && abs(x) < 1e15 { return Self.grouped(Int(x)) }
+            return jsNumberString(x)
         }
     }
 
@@ -252,7 +247,6 @@ enum StockpileEmptyAction: Sendable, Equatable {
         if let c = g["caliber"], c.truthy { foot.append("一人所需 = \(c.jsString)") }
         foot.append("差 N = \(boxed ? "补箱后" : "库存")不够一人份，还差 N（需 − 库存\(boxed ? " − 箱" : "")）")
         if let note = box?["note"], note.truthy { foot.append(note.jsString) }
-        if nf.usedK { foot.append("k = 千") }
         if let lag = g["lagNote"], lag.truthy { foot.append(lag.jsString) }
         return .list(sections: sections, footnote: foot)
     }

@@ -247,11 +247,15 @@ struct EndfieldStockpilePage: View {
                                         Text(r.subtitle + (r.origin ?? "")).font(.caption).foregroundStyle(.secondary)
                                     }
                                 } icon: {
-                                    // stockpile.js:74, 98: the material's picture, fit; a picture that fails leaves the space empty
-                                    AsyncImage(url: r.icon.flatMap { URL(string: $0) }) { img in
-                                        img.resizable().scaledToFit()
-                                    } placeholder: {
-                                        Color.clear
+                                    // stockpile.js:74, 98: the material's picture, fit. One that is not there or does not
+                                    // load is a grey system picture, not an empty space before the name (HIG Lists: "a
+                                    // small image in the leading end of a row"; Health's rows line up with the header)
+                                    AsyncImage(url: r.icon.flatMap { URL(string: $0) }) { phase in
+                                        if let img = phase.image {
+                                            img.resizable().scaledToFit()
+                                        } else {
+                                            missingPicture
+                                        }
                                     }
                                     .frame(width: iconSize, height: iconSize)
                                     .accessibilityHidden(true)   // r.name beside names it (HIG VoiceOver: decorative)
@@ -281,12 +285,32 @@ struct EndfieldStockpilePage: View {
         .navigationTitle(Stockpile.title)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button(Stockpile.refreshLabel) { Task { await s.load(force: true) } }
-                    .disabled(s.busy)
+                // a symbol, named 刷新 for VoiceOver (HIG Toolbars: "Prefer simple, recognizable symbols for items instead
+                // of text"); off while 森空岛 is not set up, when there is nothing it could read
+                Button { Task { await s.load(force: true) } } label: {
+                    symbol("arrow.clockwise", android: "Icons.Outlined.Refresh")
+                }
+                .accessibilityLabel(Stockpile.refreshLabel)
+                .disabled(s.busy || notSetUp)
             }
         }
         .refreshable { await s.load(force: true) }
         .task { await s.open() }
+    }
+
+    /// 森空岛 not set up yet: the empty state that sends to the 手机 tab.
+    private var notSetUp: Bool {
+        if case .empty(_, _, _, let action) = Stockpile.shared.content { return action == .phone }
+        return false
+    }
+
+    /// The stand-in for a material picture that is not there.
+    @ViewBuilder private var missingPicture: some View {
+        #if os(Android)
+        Color.clear   // skip-ui maps no picture symbol to a Material icon (Components/Image.swift table)
+        #else
+        Image(systemName: "photo").resizable().scaledToFit().foregroundStyle(.secondary)
+        #endif
     }
 
     /// No stock to show: the system empty state (ContentUnavailableView) with its one action.

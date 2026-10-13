@@ -68,7 +68,25 @@ struct EWRowView: View {
     }
 
     var body: some View {
-        // One shape with or without a tag: a branch here would rebuild the TextField on the first keystroke (「待保存」 appears) and drop the keyboard.
+        #if os(iOS)
+        if row.kind == .select {
+            // a menu row: the Picker itself is the row, its tag lines inside its label, so the list draws the value grey
+            // with the ⌃⌄ beside it, as Calendar's 「Alert  None」 and Shortcuts' 「Weekly」 (P4); wrapped in a VStack the
+            // Picker was a free-standing menu button, its value in the accent colour (HIG Color: "reserve it for elements
+            // that truly benefit from emphasis"). The kind of a row never changes, so this is still one shape per row.
+            selectRow
+                .listRowBackground(rowBackground(nil))
+        } else {
+            stacked
+        }
+        #else
+        stacked
+        #endif
+    }
+
+    /// The row with its tag lines under it. One shape with or without a tag: a branch here would rebuild the TextField
+    /// on the first keystroke (「待保存」 appears) and drop the keyboard.
+    private var stacked: some View {
         VStack(alignment: .leading, spacing: 4) {
             control
             if let tag, row.kind != .box {
@@ -78,6 +96,33 @@ struct EWRowView: View {
         // no row tint for 待保存 / 已寄出 (the web's accent / green 8 %): a row tinted for long reads as a selection that
         // never cleared (HIG Lists and tables: a list "highlights a row only briefly"); the line under the row says it
         .listRowBackground(rowBackground(nil))   // never nil on Android (SkipFixes.swift)
+    }
+
+    #if os(iOS)
+    private var selectRow: some View {
+        Picker(selection: selectBinding) {
+            choiceItems
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                EWRowTitle(label: row.label, hint: hint)
+                if let tag { EWTagLine(tag: tag, onResend: onResend) }
+            }
+        }
+        .pickerStyle(.menu)
+    }
+    #endif
+
+    private var selectBinding: Binding<String> {
+        Binding(get: { value == .null ? "" : value.key }, set: { setChoice($0) })
+    }
+
+    @ViewBuilder private var choiceItems: some View {
+        if value == .null {
+            Text("未设").tag("")
+        }
+        ForEach(row.choices, id: \.value) { c in
+            Text(c.label).tag(c.value)
+        }
     }
 
     @ViewBuilder
@@ -90,7 +135,8 @@ struct EWRowView: View {
             HStack {
                 EWRowTitle(label: row.label, hint: hint)
                 Spacer()
-                Text(pick(value).isEmpty ? "（空）" : pick(value)).foregroundStyle(.secondary)   // view.js fmt(null)
+                // view.js fmt(null); a machine list 「梦枢天罗,落渊南丘」 in Chinese punctuation (statusTidyHint)
+                Text(pick(value).isEmpty ? "（空）" : statusTidyHint(pick(value))).foregroundStyle(.secondary)
             }
         case .toggle:
             Toggle(isOn: Binding(get: { value.isOn }, set: { set(.bool($0)) })) {
@@ -98,13 +144,8 @@ struct EWRowView: View {
             }
         case .select:
             // menuPicker (SkipFixes.swift): inside this row's VStack a bare Picker loses its title on Android
-            menuPicker(selection: Binding(get: { value == .null ? "" : value.key }, set: { setChoice($0) })) {
-                if value == .null {
-                    Text("未设").tag("")
-                }
-                ForEach(row.choices, id: \.value) { c in
-                    Text(c.label).tag(c.value)
-                }
+            menuPicker(selection: selectBinding) {
+                choiceItems
             } title: {
                 EWRowTitle(label: row.label, hint: hint)
             }
@@ -295,12 +336,27 @@ struct EWChoiceList: View {
         .navigationTitle(title)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button { done() } label: { Image(systemName: "checkmark") }
+                doneButton
                     .accessibilityLabel("完成")   // icon-only: named as EWLive's ✓ (index.html:921 aria-label 完成)
-                    .disabled(blocked)
+                    // grey until something changed, as Shortcuts' 「Done」 (P4); and while nothing is ticked (blocked)
+                    .disabled(blocked || !changed)
             }
         }
     }
+
+    /// ✓ in the prominent confirm style of the save bar's ✓ (SaveBar.swift confirmButton; HIG Toolbars: "Use the
+    /// .prominent style for key actions such as Done or Submit."), as Calendar's and Passwords' filled ✓ (P4, P12).
+    /// Android: the plain checkmark, as the save bar's.
+    @ViewBuilder private var doneButton: some View {
+        #if os(Android)
+        Button { done() } label: { Image(systemName: "checkmark") }
+        #else
+        Button(role: .confirm) { done() }
+        #endif
+    }
+
+    /// The ticks differ from what the row showed when the page opened.
+    private var changed: Bool { Set(draft) != Set(initial) }
 
     /// Nothing ticked on a multi-choice page: MaaEnd ends the task on an empty list, so ✓ cannot write it back.
     private var blocked: Bool { ewChoiceResult(draft: draft, initial: initial, listed: choices.map { $0.value }, multi: multi) == .blocked }

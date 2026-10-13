@@ -1,12 +1,13 @@
-// The three 终末地 cards, copied from maa-automation/web/schema.js:143-218 (titles, paths, names, types, hints verbatim).
+// The three 终末地 cards, from maa-automation/web/schema.js:143-218 (titles, paths, names, types, hints). The hints of the
+// rows on the 终末地 page itself (firstLevel) are one sentence each (app-1013 review 终末地 3, design rule 8).
 // 基质刷取 and 协议空间 are tree groups: the machine sends the whole option tree, these entries only add hint / name / type.
 
 enum EndfieldSchema {
     static let essence = EWGroupSpec(title: "终末地 · 基质刷取", tree: "AutoEssence", fields: [
         EWFieldSpec(path: "AutoEssence/@enabled", type: .bool, label: "跑这个任务",
-                    hint: "关掉后不再刷基质。下面的协议空间也开着时，协议空间先花理智，剩下的才刷基质"),
+                    hint: "关掉后不刷基质；和协议空间都开着时，协议空间先花理智。"),
         EWFieldSpec(path: "AutoEssence/AutoEssenceMenu",
-                    hint: "三种都是刷基质。随机模式＝从勾选的地区里随机挑；地区模式＝固定一个地区并指定词条；目标选择＝按想要的武器找基质"),
+                    hint: "随机模式从勾选的地区里挑，地区模式固定一个地区，目标选择按想要的武器找。"),
         EWFieldSpec(path: "AutoEssence/AutoEssenceDoOverride", type: .bool,
                     hint: "使用刻写券定向刷取词条。需事先在淤积点开始界面选定要刻写的属性；券不足时改为不刻写领取"),
         EWFieldSpec(path: "AutoEssence/AutoEssenceObtainMode", type: .select,
@@ -25,13 +26,14 @@ enum EndfieldSchema {
 
     static let protocolSpace = EWGroupSpec(title: "终末地 · 协议空间", tree: "ProtocolSpace", fields: [
         EWFieldSpec(path: "ProtocolSpace/@enabled", type: .bool, label: "跑这个任务",
-                    hint: "刷折金票、干员养成、武器养成、危境预演都在这里。和上面的基质刷取都开着时，协议空间先花理智，剩下的才刷基质；只想刷这个就把基质那栏关掉"),
+                    hint: "关掉后不刷协议空间；和基质刷取都开着时，这里先花理智。"),
         EWFieldSpec(path: "ProtocolSpace/ProtocolSpaceSchedule", type: .pills,
-                    hint: "只在勾选的星期执行，按游戏里的星期算。没勾的日子这个任务会立即结束"),
+                    hint: "只在勾选的星期跑，按游戏里的星期算。"),
         EWFieldSpec(path: "ProtocolSpace/ProtocolSpaceMode", type: .select,
-                    hint: "按次数刷取＝按下面选的那一类刷；目标库存＝刷到下面「培养道具目标」每一格的数为止"),
-        EWFieldSpec(path: "ProtocolSpace/ProtocolSpaceTab", type: .select,
-                    hint: "刷哪一类。干员养成＝干员经验（作战记录 / 认知载体）、干员进阶（协议圆盘）、钱币收集（折金票）、技能提升（协议棱柱）；武器养成＝武器经验（武器检查套组 / 装置）、武器进阶（强固模具）；危境预演＝高阶培养Ⅰ–Ⅴ（D96钢样品四、超距辉映管、快子遴捡晶格、象限拟合液、三相纳米片）。选了哪类，下面就只出现那一类的选项"),
+                    hint: "按次数刷取刷下面选的那一类，目标库存刷到「培养道具目标」的数为止。"),
+        // our own name: MaaEnd's 「协议空间」 repeated the card's header and its switch row (app-1013 review 终末地 4)
+        EWFieldSpec(path: "ProtocolSpace/ProtocolSpaceTab", type: .select, name: "刷哪一类",
+                    hint: "选了哪一类，更多设置里就只出现那一类的选项。"),
         EWFieldSpec(path: "ProtocolSpace/OperatorProgression", type: .select,
                     hint: "刷折金票选「钱币收集（折金票）」"),
         EWFieldSpec(path: "ProtocolSpace/WeaponProgression", type: .select,
@@ -60,11 +62,11 @@ enum EndfieldSchema {
     // 「另一个任务」: the web's 「另外两个任务」 (schema.js:207) heads one task, 自动采集 (test pass 1, 问题 6)
     static let otherTasks = EWGroupSpec(title: "终末地 · 另一个任务", fields: [
         EWFieldSpec(path: "AutoCollect/@enabled", type: .bool,
-                    hint: "按下面的线路和周期自动采集材料"),
+                    hint: "按更多设置里的线路和周期自动采集材料。"),
         EWFieldSpec(path: "AutoCollect/AutoCollectSchedule", type: .pills,
                     hint: "只在勾选的星期执行。没勾的日子这个任务会立即结束"),
         EWFieldSpec(path: "AutoCollect/AutoCollectMode", type: .select,
-                    hint: "按勾选路线＝下面勾上的都去采；按目标库存＝只采背包里还没攒够的"),
+                    hint: "按勾选路线采勾上的，按目标库存只采还没攒够的。"),
         EWFieldSpec(path: "AutoCollect/AutoCollectValleyIV", type: .bool, label: "四号谷地",
                     hint: "关掉后四号谷地的路线一条都不采"),
         EWFieldSpec(path: "AutoCollect/AutoCollectValleyIVRareRoutes", type: .pills, label: "四号谷地 · 稀有采集物",

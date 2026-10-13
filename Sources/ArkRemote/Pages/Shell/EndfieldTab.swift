@@ -20,11 +20,14 @@ struct EndfieldTab: View {
             ewPutEdit(k, e)   // a row changed again keeps its place in the review order
         }, onResend: { k in Task { await Pending.shared.resend(k) } })
         .modifier(EWSaveBar(title: "终末地"))   // the tab's own name (HIG Toolbars: "Don't title windows with your app name.")
-        // a pull asks the machine to report again and waits for it (view.js:1151 pullRefresh → live.js ping), as the 状态
-        // tab does (StatusTab.swift:23); the state it adopts is then checked against what was sent
+        // a pull asks the machine to report again (view.js:1150 pullRefresh → live.js ping). The control closes once the ask
+        // is out instead of spinning for the up to 11 s the answer takes (as the 方舟 tab, ArknightsTab.swift); the state
+        // it adopts comes back through onChange(of: snapAt) below, and sync() runs again when the ping ends
         .refreshable {
-            await Live.shared.ping()
-            sync()
+            Task { @MainActor in
+                await Live.shared.ping()
+                sync()
+            }
         }
         .task { await load() }
         .onChange(of: relay.snapAt) { _, _ in sync() }
