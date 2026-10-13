@@ -154,7 +154,11 @@ class Mailbox:
         """The base state with the parts the steps depend on put in a known shape: nothing running, no skip,
         no 'keep on', debug off, no echo farming."""
         b = copy.deepcopy(self.base)
-        b["at"] = int(time.time())
+        # strictly newer than the last state of this run: the app adopts only a state whose 「at」 (whole seconds) is
+        # after the one it holds (Net.swift adopt), and status.queued / status.queued.final post two states 0.7 s
+        # apart; in the same second the final one was dropped and 「排队中」 stayed (app-r1 local ntfy run 3, step 19)
+        b["at"] = max(int(time.time()), getattr(self, "_last_at", 0) + 1)
+        self._last_at = b["at"]
         b.setdefault("run", {})["在跑的"] = []
         r = b.setdefault("relay", {})
         r["今天跳过"] = ""
