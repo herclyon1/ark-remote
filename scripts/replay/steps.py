@@ -177,7 +177,9 @@ step("gate.diag.off", "gate", "手机 · 诊断记录关掉 → 回状态",
 
 # ------------------------------------------------------------------ heartbeat / machine off
 step("status.off", "status", "心跳过期 → 设备卡「关机」",
-     [("hb", 1), ("wait", 33), ("top", 5)], expect=["~关机"], timeout=25,
+     # Live.hbWindowMs(): max(90 s, every × 2 s + 30 s), so a machine whose last beat said 「hb 1」 reads 「关机」 90 s
+     # after that beat (Logic/Live.swift hbFreshMs, since 7fecbfc); 33 s was the second term alone
+     [("hb", 1), ("wait", 60), ("top", 5)], expect=["~关机"], timeout=45,
      offline={"say": "没有心跳 → 设备卡「关机」（离线：一次性信箱没有心跳）", "do": [("top", 5)]})
 step("status.off.stop", "status", "关机时按停止一切 → 提示「所以这次没有发」，没寄出",
      [tap("停止一切")], expect=[OFF_NOTE], nocmd=2)
@@ -412,10 +414,13 @@ step("d39.ph.top", "d39", "D39：手机页滑到底再点「手机」→ 回顶"
 
 # ------------------------------------------------------------------ shift change while on a gone tab (pass-1 item 6, fix 5)
 step("noef.jump", "layout", "人在终末地，机器发来早班不含终末地的状态（实时分片，不刷新）→ 终末地标签消失、跳到状态",
-     [("tab", "终末地"), ("wait", 1.0), ("state", "noef")], expect=[STATUS_ROOT], absent=[TAB_EF], timeout=30,
+     # any of them: the 状态 page keeps where it was scrolled (d39 / diag steps scroll it down), and 现在跑一趟 is in the
+     # tree only near the top of the lazy list
+     [("tab", "终末地"), ("wait", 1.0), ("state", "noef")], expect=[[STATUS_ROOT, "~明日安排", "~查看全部"]], absent=[TAB_EF],
+     timeout=30,
      offline={"say": "人在终末地，缓存注入早班不含终末地的状态、冷启动 → 终末地标签没了、停在状态（记住的标签改回状态）"})
 step("noef.back", "layout", "机器发回原状态 → 终末地标签回来，App 留在状态",
-     [("state", "base"), ("wait", 6)], expect=[TAB_EF, STATUS_ROOT], timeout=30)
+     [("state", "base"), ("wait", 6)], expect=[TAB_EF, [STATUS_ROOT, "~明日安排", "~查看全部"]], timeout=30)
 
 # ------------------------------------------------------------------ duplicate receipts (pass-1 item 5, fix 3)
 step("dup.status", "receipts", "同一分钟两条一样的回执 → 状态页两行都在、不崩",

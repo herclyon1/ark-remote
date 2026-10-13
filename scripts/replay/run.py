@@ -239,7 +239,12 @@ class Runner:
             # 「不等了，清掉」: iOS asks from the pending line under the title (Pages/Shell/PendingBarView.swift
             # SubtitleLine); Android keeps the button on the row
             if self.drv.platform == "ios":
-                self.act(("tap", PENDING_LINE), step)
+                # right after a send the review sheet is still closing and a tap on the line can be lost (app-r1 local
+                # ntfy run, step 75 ef.protocol right after ef.send): tap the line again while its sheet is not up
+                for _ in range(3):
+                    self.act(("tap", PENDING_LINE), step)
+                    if self.wait_for(CLEAR_SEL, 4):
+                        break
                 self.tap_until_gone(CLEAR_SEL, step)
             else:
                 self.act(("tap", CLEAR_SEL), step)
