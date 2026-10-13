@@ -56,10 +56,12 @@ PLUS = ["Increment", "增加", "+", "re:, Increment$"]      # iOS 27 Stepper hal
 MINUS = ["Decrement", "减少", "-", "−", "re:, Decrement$"]
 CLEAR = "不等了，清掉"
 TAB_EF = {"t": "终末地", "region": "bottom"}
-# 方舟 field titles come from the machine's own labels (ArknightsPage label(path, default)): the relay now names
-# Info.MedicineNumb 「理智药数量」 and Task.IfFight 「是否理智作战」; the app's fallbacks are 「理智药」 / 「作战开关」
+# 方舟 row names are the app's own short ones (ArknightsPage label(path, ours)): 「理智药」 / 「作战开关」; the machine's
+# 「理智药数量」 / 「是否理智作战」 are kept for a build before app-r1 fix round 2 (the 0.4.4 base)
 MEDICINE = ["理智药数量", "理智药"]
 FIGHT = ["是否理智作战", "作战开关"]
+MAIL = ["邮件", "领取所有邮件奖励"]
+DRONES = ["无人机用途", "基建无人机用在哪"]
 STATUS_ROOT = "现在跑一趟"
 # a tab's root page (title, no back button). 现在跑一趟 is only in the tree near the top of the lazy list
 # the 状态 root's title is the tab's own name (Pages/Shell/StatusTab.swift EWSaveBar(title:)); "upper" leaves out the
@@ -240,13 +242,14 @@ step("ark.sanity.bad", "arknights", "理智药填 1000 → ✓ → 寄出 → �
 step("ark.sanity.bad.close", "arknights", "好 → 关提示，没寄出", [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.5)],
      absent=["~一项都没寄出"], nocmd=1)
 step("ark.edit4", "arknights", "理智药 2、关卡 CE-6、邮件开关、基建「赤金」→ 待保存 4 项",
-     [("field", MEDICINE, "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", "领取所有邮件奖励"),
-      tap("无人机用在哪"), ("wait", 0.8), tap("~赤金", last=True)],
+     [("field", MEDICINE, "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", MAIL),
+      tap(DRONES), ("wait", 0.8), tap("~赤金", last=True)],
      expect=["~待保存 4 项"],
-     android={"do": [("field", MEDICINE, "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", "领取所有邮件奖励"),
+     android={"do": [("field", MEDICINE, "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", MAIL),
                      tap("贸易站 · 龙门币"), ("wait", 0.8), tap("~赤金", last=True)]},
-     ios={"do": [("field", MEDICINE, "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", "领取所有邮件奖励"),
-                 tap({"t": "~基建无人机用在哪", "kind": "Button"}, right=60), ("wait", 0.8), tap("~赤金", last=True)]})
+     ios={"do": [("field", MEDICINE, "2"), ("field", "关卡", "CE-6"), ("hidekb",), ("toggle", MAIL),
+                 tap({"t": ["~无人机用途, ", "~基建无人机用在哪"], "kind": "Button"}, right=60), ("wait", 0.8),
+                 tap("~赤金", last=True)]})
 step("ark.review", "arknights", "✓ → 确认单「寄出 4 项」", [tap(SAVE, region="top")], expect=["确认这次修改", "寄出 4 项"])
 step("ark.send", "arknights", "寄出 → set_master 赤金 / 邮件 + set_config 理智药 2 / CE-6",
      [CONFIRM_WAIT, tap("寄出 4 项")], absent=["确认这次修改"],
@@ -255,7 +258,7 @@ step("ark.battle.discard", "arknights", "作战开关切换 → 待保存 → �
      [("clear",), ("toggle", FIGHT), ("wait", 0.6), ("discard",)], absent=["~待保存"], nocmd=2,
      offline={"do": [("toggle", FIGHT), ("wait", 0.6), ("discard",)]})
 step("ark.menu.left", "arknights", "菜单行：点行左边的名字不出菜单（照原生，只有右边的值能点；已知存疑 D203 不改）",
-     [tap("基建无人机用在哪"), ("wait", 0.8)], absent=["不使用"], on="ios")
+     [tap(DRONES), ("wait", 0.8)], absent=["不使用"], on="ios")
 step("d39.ark.top", "d39", "D39：方舟滑到底再点「方舟」→ 回顶",
      [("swipe", "up", 4), ("tab", "方舟"), ("wait", 1.2)], visible=["关卡"])
 

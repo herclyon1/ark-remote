@@ -40,18 +40,19 @@ struct ArknightsPage: View {
 
     // MARK: 明日方舟 (schema.js:116-127)
 
-    /// Each row's hint, as schema.js:124-133 writes it.
+    /// Each row's hint (schema.js:124-133), one sentence of what the row does, in words rather than 「0＝」 signs (HIG
+    /// Lists: "Keep item text succinct so row content is comfortable to read."; design rule 8).
     private static let hints: [String: String] = [
-        "Info.Stage": "游戏内的关卡号。例如 1-7（常规）、CE-6（龙门币）、AT-4（活动关）",
-        "Info.MedicineNumb": "一趟最多使用几瓶理智药。0＝不使用；999＝不限量",
-        "Task.IfFight": "关掉后不刷关卡，只做基建、公招等日常",
-        "Task.IfActivityFirst": "开着＝有活动就刷活动关，活动结束后自动回到上面那个固定关。开着时下面的序号才生效",
-        "Task.ActivityStageIndex": "刷活动里的第几关，数的是活动关卡列表从上往下的位置，第一关填 1。只在上面那项开着时才有用",
-        "Infrast/UsesOfDrones": "贸易站＝加速龙门币或合成玉订单，制造站＝加速对应产物",
-        "Award/Mail": "开着＝每趟顺手把邮箱里的奖励全收了。关着邮件会一直躺着，到期作废",
-        "Award/Orundum": "开着＝每天去幸运墙领那份合成玉",
-        "Award/Mining": "开着＝有限时开采许可时每天领它的合成玉",
-        "Award/SpecialAccess": "开着＝周年送的月卡每天的那份也领",
+        "Info.Stage": "游戏里的关卡号，如 1-7、CE-6、AT-4。",
+        "Info.MedicineNumb": "一趟最多用几瓶，填 0 不用，填 999 不限。",
+        "Task.IfFight": "关掉后只做基建、公招等日常，不刷关卡。",
+        "Task.IfActivityFirst": "有活动先刷活动关，活动结束后回到上面的关卡。",
+        "Task.ActivityStageIndex": "活动关卡列表从上往下数第几关，活动关优先开着时才用。",
+        "Infrast/UsesOfDrones": "贸易站加速订单，制造站加速产物。",
+        "Award/Mail": "每趟收下邮箱里的奖励，关着的话邮件到期作废。",
+        "Award/Orundum": "每天去幸运墙领合成玉。",
+        "Award/Mining": "有限时开采许可时每天领合成玉。",
+        "Award/SpecialAccess": "周年送的月卡每天也领。",
     ]
 
     /// view.js:978-995 (layoutTabs): the hints leave the rows for a footer under the card, one line each, prefixed with
@@ -116,12 +117,14 @@ struct ArknightsPage: View {
             }
             if data.activityStageIndex != nil {
                 tagged("Task.ActivityStageIndex") {
-                    ArknightsNumberRow(label: label("Task.ActivityStageIndex", "活动关序号"),
-                                       text: binding(\.activityStageIndex, default: ""))
+                    ArknightsStepperRow(label: label("Task.ActivityStageIndex", "活动关序号"),
+                                        text: binding(\.activityStageIndex, default: ""))
                 }
             }
         } header: {
-            Text("明日方舟")
+            // the page is 明日方舟 already: each header names its group only (HIG Writing: "Check each word to be sure
+            // it needs to be there.")
+            Text("作战")
         } footer: {
             hintFooter(stageRows)
         }
@@ -131,7 +134,7 @@ struct ArknightsPage: View {
     // MARK: 明日方舟 · 基建 (schema.js:128-131)
 
     private var infrastRows: [ArknightsHintRow] {
-        data.usesOfDrones != nil ? [ArknightsHintRow(path: "Infrast/UsesOfDrones", name: "无人机用在哪")] : []
+        data.usesOfDrones != nil ? [ArknightsHintRow(path: "Infrast/UsesOfDrones", name: "无人机用途")] : []
     }
 
     /// view.js:973 (layoutTabs): a master section is drawn when its card holds anything — a row or a yellow note.
@@ -146,14 +149,14 @@ struct ArknightsPage: View {
                 masterWarnings
                 if data.usesOfDrones != nil {
                     tagged("Infrast/UsesOfDrones") {
-                        ArknightsPickerRow(label: label("Infrast/UsesOfDrones", "无人机用在哪"),
+                        ArknightsPickerRow(label: label("Infrast/UsesOfDrones", "无人机用途"),
                                            options: data.usesOfDronesOptions,
                                            selection: binding(\.usesOfDrones, default: ""))
                     }
                 }
             }
         } header: {
-            Text("明日方舟 · 基建")
+            Text("基建")
         } footer: {
             hintFooter(data.masterUnreadable ? [] : infrastRows)
         }
@@ -164,10 +167,12 @@ struct ArknightsPage: View {
 
     private var awardRows: [ArknightsHintRow] {
         var out: [ArknightsHintRow] = []
-        if data.awardMail != nil { out.append(ArknightsHintRow(path: "Award/Mail", name: "领取所有邮件奖励")) }
-        if data.awardOrundum != nil { out.append(ArknightsHintRow(path: "Award/Orundum", name: "领取幸运墙的每日合成玉")) }
-        if data.awardMining != nil { out.append(ArknightsHintRow(path: "Award/Mining", name: "领取限时开采许可的合成玉")) }
-        if data.awardSpecialAccess != nil { out.append(ArknightsHintRow(path: "Award/SpecialAccess", name: "领取周年赠送月卡")) }
+        if data.awardMail != nil { out.append(ArknightsHintRow(path: "Award/Mail", name: Self.awardName["Award/Mail"]!)) }
+        if data.awardOrundum != nil { out.append(ArknightsHintRow(path: "Award/Orundum", name: Self.awardName["Award/Orundum"]!)) }
+        if data.awardMining != nil { out.append(ArknightsHintRow(path: "Award/Mining", name: Self.awardName["Award/Mining"]!)) }
+        if data.awardSpecialAccess != nil {
+            out.append(ArknightsHintRow(path: "Award/SpecialAccess", name: Self.awardName["Award/SpecialAccess"]!))
+        }
         return out
     }
 
@@ -180,31 +185,31 @@ struct ArknightsPage: View {
                 masterWarnings
                 if data.awardMail != nil {
                     tagged("Award/Mail") {
-                        ArknightsToggleRow(label: label("Award/Mail", "领取所有邮件奖励"),
+                        ArknightsToggleRow(label: label("Award/Mail", Self.awardName["Award/Mail"]!),
                                            isOn: binding(\.awardMail, default: false))
                     }
                 }
                 if data.awardOrundum != nil {
                     tagged("Award/Orundum") {
-                        ArknightsToggleRow(label: label("Award/Orundum", "领取幸运墙的每日合成玉"),
+                        ArknightsToggleRow(label: label("Award/Orundum", Self.awardName["Award/Orundum"]!),
                                            isOn: binding(\.awardOrundum, default: false))
                     }
                 }
                 if data.awardMining != nil {
                     tagged("Award/Mining") {
-                        ArknightsToggleRow(label: label("Award/Mining", "领取限时开采许可的合成玉"),
+                        ArknightsToggleRow(label: label("Award/Mining", Self.awardName["Award/Mining"]!),
                                            isOn: binding(\.awardMining, default: false))
                     }
                 }
                 if data.awardSpecialAccess != nil {
                     tagged("Award/SpecialAccess") {
-                        ArknightsToggleRow(label: label("Award/SpecialAccess", "领取周年赠送月卡"),
+                        ArknightsToggleRow(label: label("Award/SpecialAccess", Self.awardName["Award/SpecialAccess"]!),
                                            isOn: binding(\.awardSpecialAccess, default: false))
                     }
                 }
             }
         } header: {
-            Text("明日方舟 · 领取奖励")
+            Text("领取奖励")
         } footer: {
             hintFooter(data.masterUnreadable ? [] : awardRows)
         }
@@ -225,7 +230,7 @@ struct ArknightsPage: View {
                     Text("剿灭")
                 }
             } header: {
-                Text("明日方舟 · 周常")
+                Text("周常")
             } footer: {
                 // one row: the hint goes to the footer without the 「剿灭：」 prefix (view.js:989)
                 // annihilation.py:56-65 counts the week from Monday 04:00 Beijing = 05:00 Tokyo (审查 B4)
@@ -245,9 +250,15 @@ struct ArknightsPage: View {
         }
     }
 
-    /// The machine's name for the row (view.js labelOf), else ours.
-    private func label(_ path: String, _ fallback: String) -> String {
-        data.labels[path] ?? fallback
+    /// The 领取奖励 rows' names: the header says 领取奖励, so the rows drop 「领取」 and 「奖励」 (HIG Writing).
+    private static let awardName = ["Award/Mail": "邮件", "Award/Orundum": "幸运墙合成玉",
+                                    "Award/Mining": "开采许可合成玉", "Award/SpecialAccess": "周年月卡"]
+
+    /// Our short name for the row; the machine's own name (view.js labelOf: 「是否理智作战」,
+    /// 「活动期间是否优先刷活动关」) only where we have none. Its long question-form names wrapped the rows (HIG Toggles: "the
+    /// content in the row provides the context"; Calendar's 「Repeat」 / 「All-day」).
+    private func label(_ path: String, _ ours: String) -> String {
+        ours.isEmpty ? (data.labels[path] ?? ours) : ours
     }
 
     /// A row with its 「待保存」 / 「已寄出 / 已应用 / 没生效」 lines under it, drawn by the same EWTagLine as the 终末地 and
@@ -332,6 +343,28 @@ struct ArknightsValueRow<Field: View>: View {
             #endif
             field()
                 .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+/// A small 1-based position (活动关序号) as a stepper with its value beside it, as 鸣潮's 周本打第几个 (HIG Steppers:
+/// "Steppers work well by themselves for making small changes that require a few taps or clicks."). The text stays the
+/// page's value: empty (the machine has null) shows 「未设」 and is only written once a half is pressed, so an
+/// untouched row stays as the machine has it.
+struct ArknightsStepperRow: View {
+    let label: String
+    @Binding var text: String
+
+    /// The relay passes any whole number on (commands.py set_config); 99 is where the stepper stops.
+    static let range = 1...99
+
+    var body: some View {
+        Stepper(value: Binding(get: { Int(text) ?? 0 }, set: { text = String($0) }), in: Self.range) {
+            LabeledContent {
+                Text(verbatim: text.isEmpty ? ArknightsTextRow.unset : text).foregroundStyle(.secondary)
+            } label: {
+                Text(verbatim: label)
+            }
         }
     }
 }

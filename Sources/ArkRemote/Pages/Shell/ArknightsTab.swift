@@ -53,11 +53,15 @@ struct ArknightsTab: View {
         }, edited: edited)
             .modifier(EWSaveBar(title: "明日方舟"))   // the tab's own name (HIG Toolbars: "Don't title windows with your app name."); 「待保存 N 项」 while editing
             .task { await reload() }
-            // Pull to refresh asks the machine to report again (view.js:1150 → live.js:21 ping: {action:"refresh"}, up to 11 s),
-            // as the 状态 tab does (StatusTab.swift:23); the state it adopts redraws through onChange(of: snapAt).
+            // Pull to refresh asks the machine to report again (view.js:1150 → live.js:21 ping: {action:"refresh"}). The
+            // control closes once the ask is out instead of spinning for the up to 11 s the answer takes (HIG Refresh
+            // content controls: hidden by default, shown while people drag); the state it adopts redraws the rows
+            // through onChange(of: snapAt), and refresh() runs again when the ping ends.
             .refreshable {
-                await Live.shared.ping()
-                refresh()
+                Task { @MainActor in
+                    await Live.shared.ping()
+                    refresh()
+                }
             }
             // a change on the page goes into the pool (view.js note → edits[id])
             .onChange(of: shown) {
