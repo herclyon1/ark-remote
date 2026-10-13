@@ -283,25 +283,11 @@ struct EndfieldStockpilePage: View {
         }
         #endif
         .navigationTitle(Stockpile.title)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                // a symbol, named 刷新 for VoiceOver (HIG Toolbars: "Prefer simple, recognizable symbols for items instead
-                // of text"); off while 森空岛 is not set up, when there is nothing it could read
-                Button { Task { await s.load(force: true) } } label: {
-                    symbol("arrow.clockwise", android: "Icons.Outlined.Refresh")
-                }
-                .accessibilityLabel(Stockpile.refreshLabel)
-                .disabled(s.busy || notSetUp)
-            }
-        }
+        // refreshed by pulling down only, as every other page (BOARD/App-待他定项-从记录定-1014.md E4: the toolbar 刷新
+        // was a duplicate found only here; the page loads itself on open, .task below, and his 09-02 10:29 asks for manual
+        // refresh as a fallback); under the empty state too, whose own button stays
         .refreshable { await s.load(force: true) }
         .task { await s.open() }
-    }
-
-    /// 森空岛 not set up yet: the empty state that sends to the 手机 tab.
-    private var notSetUp: Bool {
-        if case .empty(_, _, _, let action) = Stockpile.shared.content { return action == .phone }
-        return false
     }
 
     /// The stand-in for a material picture that is not there.
