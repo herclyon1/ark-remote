@@ -71,4 +71,12 @@ final class StatusTextTests: XCTestCase {
         XCTAssertNil(ewMenuParts(p, "危境预演"))
         XCTAssertNil(ewMenuParts("ProtocolSpace/CrisisDrills", "第一档（某材料）"))   // other rows keep their brackets
     }
+
+    /// A wrapped 无音区 value breaks between the two set names only (HIG review 1014).
+    func testSetNamesDoNotBreakInside() {
+        let v = ewUnbrokenNames("雪落无声之愿 ＋ 剪心辑梦之影")
+        XCTAssertEqual(v.replacingOccurrences(of: "\u{2060}", with: ""), "雪落无声之愿 ＋ 剪心辑梦之影")
+        XCTAssertEqual(v.split(separator: " ").count, 3)
+        XCTAssertEqual(v.split(separator: " ").first.map(String.init), "雪\u{2060}落\u{2060}无\u{2060}声\u{2060}之\u{2060}愿")
+    }
 }

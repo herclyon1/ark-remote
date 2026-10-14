@@ -34,6 +34,12 @@ func ewMenuParts(_ path: String, _ label: String) -> (title: String, subtitle: S
     return sub.isEmpty ? nil : (title, sub)
 }
 
+/// 「A ＋ B」 with a word joiner (U+2060) between the characters of each name, so a line can break only at the spaces
+/// around 「＋」, never inside a set name (Unicode line breaking: WJ prohibits a break). Display only.
+func ewUnbrokenNames(_ s: String) -> String {
+    s.components(separatedBy: " ").map { w in w.map(String.init).joined(separator: "\u{2060}") }.joined(separator: " ")
+}
+
 /// One footer line's source: a row's name and its hint.
 struct EWFootItem {
     var label: String
@@ -207,9 +213,10 @@ struct EWRowView: View {
                 HStack {
                     EWRowTitle(label: row.label, hint: hint)
                     Spacer()
-                    Text(value == .null ? "（空）" : pick(value)).foregroundStyle(.secondary)   // view.js:545 fmt(null)
-                        // a value that wraps (Android: 「雪落无声之愿 ＋ 剪心辑梦之影」) keeps to the trailing edge, as a
-                        // value does, instead of leaving 「影」 alone at the left (HIG review 1014)
+                    Text(value == .null ? "（空）" : ewUnbrokenNames(pick(value))).foregroundStyle(.secondary)   // view.js:545 fmt(null)
+                        // a value that wraps (Android: 「雪落无声之愿 ＋ 剪心辑梦之影」) breaks between the two names, not
+                        // inside one, and keeps to the trailing edge as a value does, instead of leaving 「影」 alone at the
+                        // left (HIG review 1014)
                         .multilineTextAlignment(.trailing)
                 }
                 .foregroundStyle(Color.primary)   // see sheetRowColour
