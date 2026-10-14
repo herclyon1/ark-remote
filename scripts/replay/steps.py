@@ -218,7 +218,7 @@ step("status.off.ok", "status", "好 → 关提示；心跳回来 → 「开机�
 # the base state puts 晚班 at 00:01 machine time (mailbox.normalized), so its run today is over: the tile says 明天, and
 # its row says so with its switch off-limits (skip_today acts on today only)
 step("shift.night", "shift", "班次切「晚班」→ 只剩明日方舟，底栏没有终末地；下一趟写「明天」",
-     [tap("晚班")], expect=["~晚班 · 下一趟 明天", "~今天这班已过"], absent=[TAB_EF])
+     [tap("晚班")], expect=["~晚班 · 下一趟 明天", "~今天这班已过", "~选哪一班"], absent=[TAB_EF])
 step("shift.morning", "shift", "切回「早班」→ 五个标签回来", [tap("早班", region="content")], expect=[TAB_EF])
 
 # ------------------------------------------------------------------ receipts + D39 on 状态

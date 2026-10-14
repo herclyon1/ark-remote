@@ -79,6 +79,11 @@ struct StatusPage: View {
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     #endif
+                } footer: {
+                    // the control has no title and, since the 班次 list below shows every shift, nothing on this page
+                    // changes when it is flipped: it picks the shift the game tabs edit and 现在跑一趟 runs (decision G1
+                    // keeps the control). HIG Segmented controls: "affect an object, state, or view"; say which.
+                    Text("选哪一班，方舟、终末地、鸣潮页改的就是这一班的设置，「现在跑一趟」也跑这一班。")
                 }
             }
             // every shift in one list right after the actions, as Clock's alarms (HIG Layout: "Group related items"): the

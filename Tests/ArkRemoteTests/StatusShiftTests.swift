@@ -148,4 +148,18 @@ import XCTest
         let c = try XCTUnwrap(a.changeEchoFarmUntil("09:30"))
         XCTAssertEqual(c.body["until"]?.string, "08:30")
     }
+
+    /// The 早班 / 晚班 control has no title, and since the 班次 list shows every shift nothing on 状态 changes when it is
+    /// flipped. Defect guarded: the control without a line saying what it picks (the game tabs' shift and the shift
+    /// 现在跑一趟 runs), so a first-time reader cannot tell what it does.
+    func testShiftPickerSaysWhatItPicks() throws {
+        let lines = try RepoFiles.lines("Sources/ArkRemote/Pages/Status/StatusPage.swift")
+        let section = try XCTUnwrap(RepoFiles.body(after: "listSection(\"status-shift\"", in: lines), "the shift control's section")
+        let text = section.joined(separator: "\n")
+        XCTAssertTrue(text.contains(".pickerStyle(.segmented)"), "the section holds the 早班 / 晚班 control")
+        guard let foot = text.range(of: "footer:") else { return XCTFail("the control's section has no footer") }
+        let after = String(text[foot.upperBound...])
+        XCTAssertTrue(after.contains("现在跑一趟") && after.contains("设置"),
+                      "the footer says the game tabs' settings and 现在跑一趟 follow the choice")
+    }
 }
