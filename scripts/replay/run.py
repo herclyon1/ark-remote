@@ -936,6 +936,8 @@ class Runner:
                     miss.append(f"「{sel_text(low)}」（上边 {lo[0]['y'] - lo[0]['h'] / 2:g}）压着「{sel_text(up)}」（下边 {u[0]['y'] + u[0]['h'] / 2:g}）")
             if step.get("last_above") or step.get("last_bottom"):
                 miss += self.check_last(step, dump)
+            if step.get("group_gap") or step.get("header_gap") or step.get("large_title"):
+                miss += self.check_layout(step, dump)
             if kb is not None and self.drv.keyboard_up(dump["nodes"]) != kb:
                 k = [n for n in dump["nodes"] if n["kind"] == "Keyboard"]
                 miss.append(("键盘还在" + (f"（y {k[0]['y']} 高 {k[0]['h']}）" if k else "")) if not kb else "键盘没出来")
@@ -978,6 +980,52 @@ class Runner:
             if not (lo <= b <= hi):
                 return [f"最后一行下边 {b:g}，应在 {lo}–{hi}"]
         return []
+
+    def check_layout(self, step, dump):
+        """Android only (regression list 0108 item 29, 「安卓那个间距太丑了」 10-07 21:0x).
+
+        group_gap: [lo, hi] dp - every gap between two grouped sections with no header or footer text in it is in
+        the range. header_gap: [lo, hi] dp - in every gap with text in it, the lowest text (the next section's header)
+        ends this far above the next card (Settings, Android 17: 26 px = 9.9 dp under 「Lock display」). The cards are not in the uiautomator tree (Compose draws them), so the screenshot is read down one
+        pixel column 22 dp inside the right edge (inside the cards' 16 dp inset and right of every row's own control):
+        a pixel is ground when it matches the page ground at x = 8 px on the same row. Ground runs under 3 dp are row
+        dividers. Reference: Settings on Android 17 (ark37, 10-14) draws its groups 16 dp apart (42 px at 420 dpi).
+        large_title: sel - the tab's title is the large one in the top bar's second row (skip-ui's MediumTopAppBar with
+        headlineLarge bold, Containers/Navigation.swift:505-515; AppBarMediumTokens.ContainerHeight = 112.0.dp), not an
+        inline one: at least 40 dp tall, its top at
+        least 100 dp down (status bar + Material's 64 dp collapsed row), its left edge 14-18 dp in (Material 3
+        TopAppBarTitleInset = 16.dp, compose material3 AppBar.kt)."""
+        if self.drv.platform != "android":
+            return []
+        d = self.drv.density
+        miss, said = [], []
+        if step.get("large_title"):
+            hits = [n for n in self.find(step["large_title"], dump, "upper") if self.on_screen(n)]
+            if not hits:
+                miss.append(f"没有大标题「{sel_text(step['large_title'])}」")
+            else:
+                n = hits[0]
+                left, top, h = (n["x"] - n["w"] / 2) / d, (n["y"] - n["h"] / 2) / d, n["h"] / d
+                said.append(f"大标题 高 {h:.1f} dp、上边 {top:.1f} dp、左边 {left:.1f} dp")
+                if h < 40 or top < 100 or not 14 <= left <= 18:
+                    miss.append(f"「{sel_text(step['large_title'])}」不是大标题（高 {h:.1f}、上边 {top:.1f}、左边 {left:.1f} dp）")
+        if step.get("group_gap") or step.get("header_gap"):
+            path = os.path.join(self.out, f"layout-{step['id']}.png")
+            self.drv.screenshot(path)
+            texts = [n for n in dump["nodes"] if (n["texts"] or n["label"]) and n["h"] > 0]
+            plain, titled = group_gaps(path, d, self.drv.content_box(dump["nodes"]), texts)
+            for key, gaps, name in (("group_gap", plain, "分组间距"), ("header_gap", titled, "组标题到下一组")):
+                if not step.get(key):
+                    continue
+                lo, hi = step[key]
+                said.append(f"{name} " + ("、".join(f"{g:.1f}" for g in gaps) or "无") + " dp")
+                if not gaps:
+                    miss.append(f"屏幕上量不到{name}")
+                bad = [g for g in gaps if not lo <= g <= hi]
+                if bad:
+                    miss.append(f"{name} {'、'.join(f'{g:.1f}' for g in bad)} dp，应在 {lo}–{hi}")
+        self.note = "；".join(said) or None
+        return miss
 
     def check_cmds(self, step, t0):
         want = step.get("cmd")
@@ -1088,7 +1136,41 @@ ACTIONS = {"bottom", "until", "gone", "nokb", "retry", "tap", "tab", "toggle", "
            "dismiss", "discard", "clear", "pick", "tapout", "time", "see", "point", "allow_paste"}
 STEP_KEYS = {"id", "page", "say", "do", "on", "expect", "absent", "visible", "keyboard", "cmd", "nocmd", "timeout", "cmd_timeout",
              "ios", "android", "always", "settle", "pause", "relaunch_on_crash", "switch", "offline",
-             "skip", "nojudge", "nojudge_fail", "below", "last_above", "last_bottom"}
+             "skip", "nojudge", "nojudge_fail", "below", "last_above", "last_bottom", "group_gap", "header_gap", "large_title"}
+
+
+def group_gaps(png, density, box, texts):
+    """Down one pixel column 22 dp inside the right edge, within box (top, bottom): (plain, titled) in dp - plain, the
+    gaps between two cards with no text node centred in them; titled, for each gap with text in it (a footer and / or
+    the next section's header), the lowest text's bottom edge to the next card's top. Ground runs under 3 dp (row
+    dividers) and runs not closed by a card on both sides are left out. See Runner.check_layout."""
+    from PIL import Image   # Pillow: in Homebrew's python3 and ~/.local/bin/python3.14 on this Mac
+    im = Image.open(png).convert("RGB")
+    px = im.load()
+    W = im.size[0]
+    X, M = W - round(22 * density), 8
+    top, bottom = box
+    runs, cur, start = [], None, top
+    for y in range(top, bottom):
+        a, b = px[X, y], px[M, y]
+        kind = "ground" if sum(abs(a[k] - b[k]) for k in range(3)) <= 6 else "card"
+        if kind != cur:
+            if cur:
+                runs.append((cur, start, y))
+            cur, start = kind, y
+    runs.append((cur, start, bottom))
+    plain, titled = [], []
+    for k in range(1, len(runs) - 1):
+        kind, a, b = runs[k]
+        if kind != "ground" or runs[k - 1][0] != "card" or runs[k + 1][0] != "card" or b - a < 3 * density:
+            continue
+        inside = [n for n in texts if a <= n["y"] <= b]
+        if not inside:
+            plain.append((b - a) / density)
+        else:
+            # the lowest text in the gap is the next section's header: its bottom edge to the next card's top
+            titled.append((b - max(n["y"] + n["h"] / 2 for n in inside)) / density)
+    return plain, titled
 
 
 def validate(all_steps):

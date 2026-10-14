@@ -91,6 +91,7 @@ class AndroidDriver:
         self.log = log
         self.adb_bin = find_adb()
         self.size = (1080, 2400)
+        self.density = 2.625
         self.pid = None
         self.prof = Profile(os.path.join(out_dir, "profile.jsonl")) if os.environ.get("REPLAY_PROFILE") == "1" else None
 
@@ -128,6 +129,11 @@ class AndroidDriver:
         m = re.search(r"(\d+)x(\d+)", self.sh("wm size"))
         if m:
             self.size = (int(m.group(1)), int(m.group(2)))
+        # px per dp, for the layout checks (group_gap / large_title); `wm density` prints the physical value and, when
+        # set, an override after it - the last one is the one in use
+        dens = re.findall(r"density: (\d+)", self.sh("wm density"))
+        if dens:
+            self.density = int(dens[-1]) / 160
 
     def stop(self):
         self._dumper_stop()

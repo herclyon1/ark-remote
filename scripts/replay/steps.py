@@ -43,6 +43,9 @@ Each step is a dict:
   nojudge / nojudge_fail   reason: never judged / judged 对 when it passes, 「不判（reason）」 when it fails
   below    [[upper sel, lower sel], ...]: the lower element starts under the upper one's bottom edge
   last_above sel / last_bottom [lo, hi]: the page's last line ends above sel's top edge / inside the range
+  group_gap / header_gap [lo, hi], large_title sel   Android only, in dp (run.py check_layout): the gaps between
+           untitled groups / a section header's bottom to its card, read from the screenshot; the tab's title is the
+           large one (regression list 0108 item 29)
 
 Selectors: "exact text" | "~substring" | "re:regex" | [alternatives] |
            {"t": ..., "kind": "Switch", "region": "content", "nth": 1, "after": "<anchor text>", "count": 2}
@@ -455,6 +458,30 @@ step("diag.off.ef", "diag", "诊断关 · 终末地根页滑到底 → 最后一
      [("tab", "终末地"), ("wait", 0.8), ("bottom", 8)], last_bottom=[860, 880], on="ios")
 step("d39.ph.top", "d39", "D39：手机页滑到底再点「手机」→ 回顶",
      [("tab", "手机"), ("wait", 0.8), ("swipe", "up", 4), ("tab", "手机"), ("wait", 1.2)], visible=[VERSION])
+
+# ------------------------------------------------------------------ Android group spacing and large titles (regression 0108 #29)
+# 「安卓那个间距太丑了。不是你改标题，你标题改的更丑了。」 10-07 21:0x. Measured on ark37 (Android 17, 420 dpi) 10-14:
+# Settings draws its groups 16 dp apart (42 px), a category title 9.9 dp (26 px) above its card, rows 2 dp apart (5 px;
+# Material 3 ListTokens.SegmentedGap = 2.0.dp). The App: section title to card 8.4 dp (22 px); title large (skip-ui's
+# MediumTopAppBar, AppBarMediumTokens.ContainerHeight = 112.0.dp, measured 294 px = 112 dp; title 16.4 dp in, Material
+# TopAppBarTitleInset 16.dp) - the 10-07 complaint was about an inline title. Untitled groups are 33.5 dp apart (88 px):
+# skip-ui 1.61.0 (and its main branch, 10-14) lays the previous section's footer box (an 8 dp corner mask), a 16 dp gap
+# item and the next header box (another 8 dp corner mask) between them (Containers/List.swift:453-465, 1300-1310,
+# 1370-1373) and has no listSectionSpacing on Android (:1586, a no-op). No header or footer view can shrink those, so
+# layout.gap.status reads 不判 with the measured value until skip-ui is patched or upgraded (not decided), then 对.
+_TITLE = ["StaticText", "TextView"]
+step("layout.title.status", "layout", "状态页（安卓）：大标题、组标题离下一组 6–12 dp（设置 App 9.9 dp）",
+     [("tab", "状态"), ("top", 3), ("wait", 1.5)], header_gap=[6, 12], large_title={"t": "状态", "kind": _TITLE},
+     on="android")
+step("layout.gap.status", "layout", "状态页（安卓）：不带标题的两组相隔 14–18 dp（设置 App 16 dp）",
+     [("wait", 0.5)], group_gap=[14, 18], on="android",
+     nojudge_fail="skip-ui 1.61.0 两组之间是 8+16+8 dp 的内部件，改要补丁或升级 skip-ui，待定")
+step("layout.title.ark", "layout", "方舟页（安卓）：大标题、组标题离下一组 6–12 dp",
+     [("tab", "方舟"), ("top", 3), ("wait", 1.5)], header_gap=[6, 12], large_title={"t": "明日方舟", "kind": _TITLE},
+     on="android")
+step("layout.title.phone", "layout", "手机页（安卓）：大标题、组标题离下一组 6–12 dp",
+     [("tab", "手机"), ("top", 3), ("wait", 1.5)], header_gap=[6, 12], large_title={"t": "手机", "kind": _TITLE},
+     on="android")
 
 # ------------------------------------------------------------------ shift change while on a gone tab (pass-1 item 6, fix 5)
 step("noef.jump", "layout", "人在终末地，机器发来早班不含终末地的状态（实时分片，不刷新）→ 终末地标签消失、跳到状态",
