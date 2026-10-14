@@ -357,8 +357,10 @@ step("ww.what.same", "wuwa", "选回「无音区」→ 菜单收起、没有待�
 # the row's name is the app's own 「无音区打哪个」 (WuwaSchema name); OK-WW's 「刷第几个无音区 (F2列表)」 on the 0.4.4 base
 TACET_ROW = ["~无音区打哪个", "~刷第几个无音区"]
 step("ww.tacet", "wuwa", "无音区打哪个（安卓旧闪退点）→ 选择页 7 行", [tap(TACET_ROW)], expect=["~雪落无声之愿", "~长路启航之星"])
-step("ww.tacet.pick", "wuwa", "选第 5 个 → ✓ → 待保存 1 项",
-     [tap("~雪落无声之愿"), ("wait", 0.4), tap(SAVE, region="top")], expect=["~待保存 1 项"])
+# the row's own grey 「待保存」 line too: on Android the row kept its old height after the sheet closed and hid it (HIG
+# review 1014, EWRowView .id)
+step("ww.tacet.pick", "wuwa", "选第 5 个 → ✓ → 待保存 1 项，那行出现小字「待保存」",
+     [tap("~雪落无声之愿"), ("wait", 0.4), tap(SAVE, region="top")], expect=["~待保存 1 项", "待保存"])
 # 周本打第几个 is a Stepper 1–20 (WuwaPage.swift bossRange): a value the relay refuses cannot be entered any more, so the
 # old 「填 251 → 要填 1–20」 step is gone; Logic/Edits.swift problem() still checks it before sending.
 step("ww.boss.plus", "wuwa", "周本打第几个 ＋ → 待保存 2 项",
