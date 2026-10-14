@@ -37,4 +37,29 @@ import XCTest
         try await SharedStateGuard.settleStaminaRefresh()
         XCTAssertNil(Relay.shared.config)
     }
+
+    /// The App's own link (复制免输入链接 on 手机, arkremote://link#k=…) is taken as well as an old web-page one.
+    func testClipboardAppLinkFillsMailboxAndPin() async throws {
+        let saved = SharedStateGuard()
+        defer { saved.restore() }
+        notSetUp()
+        PhoneLink.readClipboard = { PhoneLink.linkBase + "#k=" + PhoneLink.enc(#"{"t":"box2","p":"8765"}"#) }
+
+        let took = SetupScreen.takeLink()
+        try await SharedStateGuard.settleStaminaRefresh()
+        XCTAssertTrue(took)
+        XCTAssertEqual(Relay.shared.config?.topic, "box2")
+        XCTAssertEqual(Relay.shared.config?.pin, "8765")
+    }
+
+    /// Shot 26: the footer under 粘贴免输入链接 pointed at the retired web page (「在网页「手机」页或书签里…」). It names
+    /// where the App itself makes the link, and says older links work, in one sentence.
+    func testLinkFooterNamesTheAppNotTheWebPage() {
+        let foot = SetupScreen.linkFootNote
+        XCTAssertFalse(foot.contains("网页"), foot)
+        XCTAssertFalse(foot.contains("书签"), foot)
+        XCTAssertTrue(foot.contains("「手机」页"), foot)
+        XCTAssertTrue(foot.contains("旧链接"), foot)
+        XCTAssertEqual(foot.filter { "。！？".contains($0) }.count, 1, foot)
+    }
 }

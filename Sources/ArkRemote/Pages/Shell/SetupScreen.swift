@@ -64,14 +64,14 @@ struct SetupScreen: View {
                     .listRowBackground(Color.clear)
                     #endif
                 }
-                // The web page is entered with the 免输入链接 (#k=…); on Android that link opens the browser, not the app
-                // (no assetlinks.json on herclyon1.github.io), so the app takes the same link from the clipboard instead.
+                // The 免输入链接 copied on 手机 (PhoneLink.make, arkremote://link#k=…) or an older one (PhoneLink.oldPageURL#k=…):
+                // takeLink reads only the #k= part, so both fill the mailbox and PIN from the clipboard.
                 Section {
                     Button("粘贴免输入链接") {
                         if !Self.takeLink() { noLinkShown = true }
                     }
                 } footer: {
-                    Text("在网页「手机」页或书签里复制免输入链接，再点上面。")
+                    Text(Self.linkFootNote)
                 }
             }
             #if os(Android)
@@ -88,6 +88,8 @@ struct SetupScreen: View {
     }
 
     static let footNote = "只存在这台手机里，填一次就不再问。"
+    /// Under 粘贴免输入链接: where the link comes from in the App itself (手机 › 复制免输入链接); older links work too.
+    static let linkFootNote = "「手机」页复制的免输入链接或旧链接都行，复制后点上面。"
     /// case kept: ntfy topics are case-sensitive (Relay.saveConfig)
     private var trimmedTopic: String { topic.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedPin: String { pin.trimmingCharacters(in: .whitespacesAndNewlines) }
