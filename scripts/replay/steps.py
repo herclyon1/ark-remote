@@ -63,7 +63,8 @@ TAB_EF = {"t": "终末地", "region": "bottom"}
 # 「理智药数量」 / 「是否理智作战」 are kept for a build before app-r1 fix round 2 (the 0.4.4 base), 「作战开关」 for one
 # before the HIG review of 10-14
 MEDICINE = ["理智药数量", "理智药"]
-FIGHT = ["是否理智作战", "作战开关", "作战"]
+# 「作战」 is also the card's header above the row: the row is the one after 理智药
+FIGHT = {"t": ["是否理智作战", "作战开关", "作战"], "after": "~理智药"}
 MAIL = ["邮件", "领取所有邮件奖励"]
 DRONES = ["无人机用途", "基建无人机用在哪"]
 STATUS_ROOT = "现在跑一趟"
