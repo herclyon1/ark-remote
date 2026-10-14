@@ -463,24 +463,23 @@ step("d39.ph.top", "d39", "D39：手机页滑到底再点「手机」→ 回顶"
      [("tab", "手机"), ("wait", 0.8), ("swipe", "up", 4), ("tab", "手机"), ("wait", 1.2)], visible=[VERSION])
 
 # ------------------------------------------------------------------ Android group spacing and large titles (regression 0108 #29)
-# 「安卓那个间距太丑了。不是你改标题，你标题改的更丑了。」 10-07 21:0x. Measured on ark37 (Android 17, 420 dpi) 10-14:
-# Settings draws its groups 16 dp apart (42 px), a category title 9.9 dp (26 px) above its card, rows 2 dp apart (5 px;
-# Material 3 ListTokens.SegmentedGap = 2.0.dp). The App: section title to card 8.4 dp (22 px); title large (skip-ui's
-# MediumTopAppBar, AppBarMediumTokens.ContainerHeight = 112.0.dp, measured 294 px = 112 dp; title 16.4 dp in, Material
-# TopAppBarTitleInset 16.dp) - the 10-07 complaint was about an inline title. Untitled groups are 33.5 dp apart (88 px):
-# skip-ui 1.61.0 (and its main branch, 10-14) lays the previous section's footer box (an 8 dp corner mask), a 16 dp gap
-# item and the next header box (another 8 dp corner mask) between them (Containers/List.swift:453-465, 1300-1310,
-# 1370-1373) and has no listSectionSpacing on Android (:1586, a no-op). No header or footer view can shrink those, so
-# layout.gap.status reads 不判 with the measured value until skip-ui is patched or upgraded (not decided), then 对.
+# Measured on ark37 (Android 17, 420 dpi) 10-14: Settings draws its groups 16 dp apart (42 px), a category title 9.9 dp
+# (26 px) above its card, rows 2 dp apart (5 px; Material 3 ListTokens.SegmentedGap = 2.0.dp). The App: section title to
+# card 8.4 dp (22 px); title large (skip-ui's MediumTopAppBar, AppBarMediumTokens.ContainerHeight = 112.0.dp, measured
+# 294 px = 112 dp; title 16.4 dp in, Material TopAppBarTitleInset 16.dp). Untitled groups: upstream skip-ui 1.61.0 lays
+# the previous section's footer box (an 8 dp corner mask), a 16 dp gap item and the next header box (another 8 dp) between
+# them (Containers/List.swift:453-465, 1300-1310, 1370-1373; no listSectionSpacing on Android, :1586) - 33.5 dp (88 px),
+# twice Settings' 16 dp. The vendored skip-ui (Vendor/skip-ui/VENDORED.md) patches a headerless section after the first
+# to 12 dp, the size of iOS 27's .compact section spacing (36 px at 3x): measured 12.6 dp (33 px) 10-14, so
+# layout.gap.status checks 11-13 dp (+-1 dp covers 2-3 px of rounding at 420 dpi) and an upstream skip-ui (33.5 dp) fails it.
 # A second tap on the tab (D39 reselect) lands each page at its real top with the title opened again; swipes did not
 # reach the top of a long 状态 page in a full run.
 _TITLE = ["StaticText", "TextView"]
 step("layout.title.status", "layout", "状态页（安卓）：大标题、组标题离下一组 6–12 dp（设置 App 9.9 dp）",
      [("tab", "状态"), ("wait", 1.0), ("tab", "状态"), ("wait", 1.5)], header_gap=[6, 12], large_title={"t": "状态", "kind": _TITLE},
      on="android")
-step("layout.gap.status", "layout", "状态页（安卓）：不带标题的两组相隔 14–18 dp（设置 App 16 dp）",
-     [("wait", 0.5)], group_gap=[14, 18], on="android",
-     nojudge_fail="skip-ui 1.61.0 两组之间是 8+16+8 dp 的内部件，改要补丁或升级 skip-ui，待定")
+step("layout.gap.status", "layout", "状态页（安卓）：不带标题的两组相隔 11–13 dp（补过的 skip-ui 12 dp；没补的 33.5 dp）",
+     [("wait", 0.5)], group_gap=[11, 13], on="android")
 step("layout.title.ark", "layout", "方舟页（安卓）：大标题、组标题离下一组 6–12 dp",
      [("tab", "方舟"), ("wait", 1.0), ("tab", "方舟"), ("wait", 1.5)], header_gap=[6, 12], large_title={"t": "明日方舟", "kind": _TITLE},
      on="android")
