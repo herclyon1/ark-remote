@@ -208,6 +208,9 @@ struct EWRowView: View {
                     EWRowTitle(label: row.label, hint: hint)
                     Spacer()
                     Text(value == .null ? "（空）" : pick(value)).foregroundStyle(.secondary)   // view.js:545 fmt(null)
+                        // a value that wraps (Android: 「雪落无声之愿 ＋ 剪心辑梦之影」) keeps to the trailing edge, as a
+                        // value does, instead of leaving 「影」 alone at the left (HIG review 1014)
+                        .multilineTextAlignment(.trailing)
                 }
                 .foregroundStyle(Color.primary)   // see sheetRowColour
             }
