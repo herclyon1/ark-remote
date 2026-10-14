@@ -469,18 +469,20 @@ step("d39.ph.top", "d39", "D39：手机页滑到底再点「手机」→ 回顶"
 # item and the next header box (another 8 dp corner mask) between them (Containers/List.swift:453-465, 1300-1310,
 # 1370-1373) and has no listSectionSpacing on Android (:1586, a no-op). No header or footer view can shrink those, so
 # layout.gap.status reads 不判 with the measured value until skip-ui is patched or upgraded (not decided), then 对.
+# A second tap on the tab (D39 reselect) lands each page at its real top with the title opened again; swipes did not
+# reach the top of a long 状态 page in a full run.
 _TITLE = ["StaticText", "TextView"]
 step("layout.title.status", "layout", "状态页（安卓）：大标题、组标题离下一组 6–12 dp（设置 App 9.9 dp）",
-     [("tab", "状态"), ("top", 3), ("wait", 1.5)], header_gap=[6, 12], large_title={"t": "状态", "kind": _TITLE},
+     [("tab", "状态"), ("wait", 1.0), ("tab", "状态"), ("wait", 1.5)], header_gap=[6, 12], large_title={"t": "状态", "kind": _TITLE},
      on="android")
 step("layout.gap.status", "layout", "状态页（安卓）：不带标题的两组相隔 14–18 dp（设置 App 16 dp）",
      [("wait", 0.5)], group_gap=[14, 18], on="android",
      nojudge_fail="skip-ui 1.61.0 两组之间是 8+16+8 dp 的内部件，改要补丁或升级 skip-ui，待定")
 step("layout.title.ark", "layout", "方舟页（安卓）：大标题、组标题离下一组 6–12 dp",
-     [("tab", "方舟"), ("top", 3), ("wait", 1.5)], header_gap=[6, 12], large_title={"t": "明日方舟", "kind": _TITLE},
+     [("tab", "方舟"), ("wait", 1.0), ("tab", "方舟"), ("wait", 1.5)], header_gap=[6, 12], large_title={"t": "明日方舟", "kind": _TITLE},
      on="android")
 step("layout.title.phone", "layout", "手机页（安卓）：大标题、组标题离下一组 6–12 dp",
-     [("tab", "手机"), ("top", 3), ("wait", 1.5)], header_gap=[6, 12], large_title={"t": "手机", "kind": _TITLE},
+     [("tab", "手机"), ("wait", 1.0), ("tab", "手机"), ("wait", 1.5)], header_gap=[6, 12], large_title={"t": "手机", "kind": _TITLE},
      on="android")
 
 # ------------------------------------------------------------------ shift change while on a gone tab (pass-1 item 6, fix 5)
