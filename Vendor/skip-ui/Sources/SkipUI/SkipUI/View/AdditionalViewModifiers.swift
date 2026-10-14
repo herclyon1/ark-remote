@@ -1758,14 +1758,14 @@ final class TagModifier: RenderModifier {
         guard role == .id else {
             return nil
         }
-        // Reset the state saver when the id value changes
-        let idValue = value ?? Self.defaultIdValue
-        let rememberedId = rememberSaveable(stateSaver: context.stateSaver as! Saver<Any, Any>) { mutableStateOf(idValue) }
-        guard rememberedId.value != idValue else {
-            return context.stateSaver as? ComposeStateSaver
-        }
-        rememberedId.value = idValue
-        return ComposeStateSaver()
+        // ark-remote patch (Vendor/skip-ui/VENDORED.md): always the parent's saver. Upstream handed the subtree a fresh
+        // ComposeStateSaver() for the one pass in which the id changed and the parent's on every later pass. A
+        // ComposeStateSaver keeps non-primitive values in a map of its own instance, so a lazy row composed in that pass
+        // and dropped before it recomposed was saved into the fresh saver and restored through the parent's as null:
+        // onChange then ran with a null old value, which skip-fuse-ui cannot cast to SwiftEquatable (SIGABRT, 0.5.1
+        // replay farm.done). The key() in Evaluate / Render still resets the subtree's state on an id change (the new
+        // id gives every rememberSaveable a new key), and Key values are unique per process, so one saver serves both.
+        return context.stateSaver as? ComposeStateSaver
     }
 
     /// Extract the existing tag modifier view from the given view's modifiers.

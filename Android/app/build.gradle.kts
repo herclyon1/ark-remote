@@ -61,6 +61,13 @@ android {
         disable.add("MissingPermission")
     }
 
+    // Robolectric reads the merged resources and manifest (IdStateSaverTest)
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
+
     dependenciesInfo {
         // Disables dependency metadata when building APKs.
         includeInApk = false
@@ -110,4 +117,16 @@ android {
 // (https://developer.android.com/training/testing/local-tests)
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    // IdStateSaverTest composes skip-ui views on the JVM. Robolectric runs Android code in local tests ("Robolectric
+    // ... lets you run your tests on the JVM", https://developer.android.com/training/testing/local-tests/robolectric);
+    // the compose test rule needs ui-test-junit4, and its ComponentActivity comes from ui-test-manifest in the debug
+    // manifest (https://developer.android.com/develop/ui/compose/testing#setup). Versions: the Skip catalogs' own
+    // (robolectric 4.16.1, androidx.test.ext junit 1.3.0, Compose from the Compose BOM that skip-ui applies).
+    testImplementation(testLibs.robolectric)
+    // Robolectric 4.16.1 brings ASM 9.8, which cannot read this JDK's class files ("Unsupported class file major version
+    // 71" = Java 27, measured 10-14); the Skip catalog's newer ASM (9.10, which skip-ui's own tests add) can
+    testImplementation(testLibs.asm)
+    testImplementation(testLibs.androidx.test.ext.junit)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
