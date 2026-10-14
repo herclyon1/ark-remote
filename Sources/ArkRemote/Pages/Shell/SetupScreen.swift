@@ -25,7 +25,17 @@ struct SetupScreen: View {
                             .setupPlainInput()
                     }
                     HStack {
+                        #if os(Android)
+                        // Android: Material's outlined field starts right after its label, so 信箱名's box began further
+                        // right than PIN's; PIN's label takes 信箱名's width (an invisible copy under it) and both boxes
+                        // start at one x, at any text size (HIG Text fields: "use consistent widths"; HIG review 1014)
+                        ZStack(alignment: .leading) {
+                            Text("信箱名").opacity(0).accessibilityHidden(true)
+                            Text("PIN")
+                        }
+                        #else
                         Text("PIN")
+                        #endif
                         TextField("4 位数字", text: $pin)
                             .multilineTextAlignment(.trailing)
                             .setupNumberInput()
