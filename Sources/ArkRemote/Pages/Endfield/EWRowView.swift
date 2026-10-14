@@ -253,8 +253,7 @@ struct EWRowView: View {
                 HStack {
                     EWRowTitle(label: row.label, hint: hint)
                     Spacer()
-                    Text("已选 \(row.choices.filter { value.items.contains($0.value) }.count)/\(row.choices.count)")
-                        .foregroundStyle(.secondary)
+                    Text(ewPillsValue(row.choices, value.items)).foregroundStyle(.secondary)
                 }
                 // sheetRowColour: the name in the label colour and 「已选 N/M」 grey, as Calendar › Repeat's row. The
                 // row is a Button (SheetLink), whose label takes the accent colour; `.primary` / `.secondary` are
@@ -324,7 +323,7 @@ struct EWRowView: View {
     }
 }
 
-/// The small lines under a row: 「待保存」 in grey (not the accent colour of things that can be tapped: HIG Color), then the receipt —
+/// The small lines under a row: 「未寄出」 in grey (not the accent colour of things that can be tapped: HIG Color), then the receipt —
 /// grey, or red with 「再发一次」 (pending.js:51-58, index.html:691-695; ArknightsPage.tagged).
 struct EWTagLine: View {
     var tag: EWRowTag
@@ -333,7 +332,8 @@ struct EWTagLine: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
             if tag.unsaved {
-                Text("待保存").font(.footnote).foregroundStyle(.secondary)
+                // the one verb of the flow, 寄出 (the review's button is 「寄出 N 项」); 「待保存」 named a 保存 that never happens
+                Text("未寄出").font(.footnote).foregroundStyle(.secondary)
             }
             if let text = tag.text {
                 HStack(spacing: 6) {
@@ -415,6 +415,9 @@ struct EWChoiceList: View {
                 // why ✓ is grey (shell-api 191, was the toast 「至少要留一个」 view.js:1399): HIG Entering data "make the
                 // button available only after people enter the data you require"
                 if blocked { Text("至少要留一个") }
+                // a weekday list says whose week it is: the machine's options are the game's weekdays (MaaEnd
+                // 「执行周期(游戏时间)」)
+                else if ewIsWeekdays(choices) { Text("按游戏里的星期算。") }
             }
         }
         .navigationTitle(title)
@@ -499,4 +502,27 @@ func ewChoiceResult(draft: [String], initial: [String], listed: [String], multi:
     if multi && Set(next) == Set(initial) { return .unchanged }
     if next.isEmpty { return .blocked }
     return .commit(next)
+}
+
+
+/// The seven weekdays MaaEnd lists for a schedule (values …Monday … …Sunday, in that order).
+func ewIsWeekdays(_ choices: [EWChoice]) -> Bool {
+    let days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    return choices.count == 7 && zip(choices, days).allSatisfy { $0.value.hasSuffix($1) }
+}
+
+/// A multi-pick row's value. A weekday list says the days as Clock's Repeat does (「每天」, 「工作日」, 「周末」, else the
+/// days: 「周一、三、五」) instead of a count to work out; any other list keeps 「已选 N/M」.
+func ewPillsValue(_ choices: [EWChoice], _ items: [String]) -> String {
+    let on = choices.enumerated().filter { items.contains($0.element.value) }
+    guard ewIsWeekdays(choices) else { return "已选 \(on.count)/\(choices.count)" }
+    let idx = on.map(\.offset)
+    if idx.count == 7 { return "每天" }
+    if idx == [0, 1, 2, 3, 4] { return "工作日" }
+    if idx == [5, 6] { return "周末" }
+    if idx.isEmpty { return "不跑" }
+    // 「周一」 then 「三」, 「五」: the 周 said once, as Clock's 「Mon Wed Fri」 lists the days without repeating a word
+    return on.enumerated().map { i, c in
+        i == 0 || !c.element.label.hasPrefix("周") ? c.element.label : String(c.element.label.dropFirst())
+    }.joined(separator: "、")
 }

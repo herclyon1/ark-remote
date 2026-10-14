@@ -204,6 +204,14 @@ class Mailbox:
             b["plan"] = re.sub(f"(🕘 {new}　东京 )\\d\\d:\\d\\d", lambda mo: mo.group(1) + _tokyo(new), b["plan"], count=1)
         for q, t in zip(b.get("queues") or [], [SHIFT_LATER, SHIFT_EARLIER]):
             q["时刻"] = [t]
+        # 终末地 › 基质刷取: random mode, every day, two of the twelve areas, so the 哪几天跑 / 随机地区 steps start from
+        # a known value (「每天」, 「已选 2/12」)
+        ef = ((b.get("master") or {}).get("MaaEnd") or {}).get("values")
+        if isinstance(ef, dict) and "AutoEssence/AutoEssenceMenu" in ef:
+            ef["AutoEssence/AutoEssenceMenu"] = "Random"
+            ef["AutoEssence/AutoEssenceSchedule"] = [f"AutoEssenceSchedule{d}" for d in
+                                                     ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")]
+            ef["AutoEssence/AutoEssenceChooseLocation"] = ["WLSwordVaultDale", "WLQingboStockade"]
         t = b.setdefault("今天", {})
         t["失败"] = max(int(t.get("失败") or 0), 2)
         t["最近"] = t.get("最近") or "OK-WW"

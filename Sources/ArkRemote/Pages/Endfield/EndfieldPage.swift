@@ -1,5 +1,5 @@
 // The 终末地 (MaaEnd) tab. Same cards and rows as the web page's 终末地 tab (view.js:753 TABS /^终末地/):
-// the 库存 entry row (view.js:407), then 基质刷取, 协议空间, 另一个任务 (schema.js:143-218; the web's 「另外两个任务」 has one, 自动采集).
+// the 库存 entry row (view.js:407), then 基质刷取, 协议空间, 自动采集 (schema.js:143-218; the web's 「另外两个任务」 has one).
 // Data, saving and the tab bar are wired by 验收 once the logic layer lands; this page only draws and reports edits.
 
 import SwiftUI
@@ -49,7 +49,13 @@ struct EndfieldPage: View {
                 // (10-03 01:11) could not get back in after returning once - a Bool that the pop did not reset leaves the
                 // next tap with nothing to change.
                 NavigationLink(value: EndfieldRoute.stockpile) {
-                    Text("库存")
+                    // a row that leads somewhere shows its state at the trailing edge (Settings' Bluetooth 「Off」): without
+                    // a 森空岛 session the page behind it can only say so
+                    HStack {
+                        Text("库存")
+                        Spacer()
+                        if InventoryStore.shared.status().isEmpty { Text("没配森空岛").foregroundStyle(.secondary) }
+                    }
                 }
             }
             card(EndfieldSchema.essence)
@@ -102,11 +108,9 @@ struct EndfieldPage: View {
                         }
                         .listRowBackground(rowBackground(nil))   // same row shape as the EWRowView rows beside it (SkipFixes.swift)
                     }
-                } header: {
-                    // the page is 终末地 already: 「终末地 · 基质刷取」 → 「基质刷取」 (HIG Writing: "Check each word to be
-                    // sure it needs to be there.")
-                    Text(ewCardName(g.title))
                 } footer: {
+                    // no header: the card's first row is the task's own switch, which names it (「基质刷取」); a header
+                    // said it again right above (HIG Writing: "Check each word to be sure it needs to be there.")
                     if !foot.isEmpty { Text(verbatim: foot) }
                 }
             }
@@ -116,7 +120,8 @@ struct EndfieldPage: View {
                 warningLabel("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改")
                     .foregroundStyle(.orange)
             } header: {
-                Text(ewCardName(g.title))
+                // the card has no switch row here to name it
+                Text(ewTaskName(g.title))
             }
         }
     }
@@ -147,11 +152,12 @@ func ewCard(_ g: EWGroupSpec, _ data: EndfieldPageData, values: [String: EWValue
 /// the card's key (EndfieldRoute.more, section ids).
 func ewCardName(_ title: String) -> String { title.components(separatedBy: " · ").last ?? title }
 
-/// The row that pushes a card's EndfieldMorePage, and that page's title: 「基质刷取设置」, 「协议空间设置」. The card
-/// 「另一个任务」 holds one task, 自动采集, so its row is 「自动采集设置」 (EndfieldSchema.otherTasks).
+/// The task a card holds: its name without the game.
+func ewTaskName(_ title: String) -> String { ewCardName(title) }
+
+/// The row that pushes a card's EndfieldMorePage, and that page's title: 「基质刷取设置」, 「协议空间设置」, 「自动采集设置」.
 func ewMoreName(_ title: String) -> String {
-    let n = ewCardName(title)
-    return (title == EndfieldSchema.otherTasks.title ? "自动采集" : n) + "设置"
+    ewTaskName(title) + "设置"
 }
 
 /// The warnings as rows; `prefix` keeps their ids apart between pages.
@@ -191,17 +197,23 @@ struct EndfieldMorePage: View {
         let data = self.data()
         let c = ewCard(group, data, values: values)
         let rest = c?.rows.filter { !EndfieldSchema.firstLevel.contains($0.path) } ?? []
-        let foot = ewFoot(rest, card: c?.rows ?? [])   // view.js:976-995, as on the 终末地 page
+        // 基质刷取设置 in several cards, each with its own footer (EndfieldSchema.moreCards); the others one card
+        let cards = EndfieldSchema.moreCards(group.title, rest)
         List {
             // listSection: rows a mode opened can all go while this page is open (SkipFixes.swift)
             listSection("endfield-more-\(group.title)", if: !rest.isEmpty) {
-                Section {
-                    ForEach(ewNoteRows(c?.notes ?? [], "more-warn-\(group.title)") + rest) { row in
-                        EWRowView(row: row, values: $values, readonly: c?.master.readonly ?? [:], onChange: onChange,
-                                  tag: data.tags[row.path], onResend: onResend, showHint: false)
+                ForEach(Array(cards.enumerated()), id: \.offset) { i, card in
+                    let foot = ewFoot(card.rows, card: c?.rows ?? [])   // view.js:976-995, as on the 终末地 page
+                    Section {
+                        ForEach((i == 0 ? ewNoteRows(c?.notes ?? [], "more-warn-\(group.title)") : []) + card.rows) { row in
+                            EWRowView(row: row, values: $values, readonly: c?.master.readonly ?? [:], onChange: onChange,
+                                      tag: data.tags[row.path], onResend: onResend, showHint: false)
+                        }
+                    } header: {
+                        if let h = card.header { Text(h) }
+                    } footer: {
+                        if !foot.isEmpty { Text(verbatim: foot) }
                     }
-                } footer: {
-                    if !foot.isEmpty { Text(verbatim: foot) }
                 }
             }
         }
