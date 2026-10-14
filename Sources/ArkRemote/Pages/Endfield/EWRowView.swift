@@ -20,6 +20,20 @@ struct EWRowTitle: View {
     }
 }
 
+/// The select rows whose choices end in their products in brackets (ewYieldLabel): only 刷哪一类, whose
+/// 「干员养成（作战记录、协议圆盘、折金票、协议棱柱）」 wrapped to 2 lines on iOS and 3 (cut) on Android (HIG review 1014).
+let ewMenuSubtitlePaths: Set<String> = ["ProtocolSpace/ProtocolSpaceTab"]
+
+/// 「干员养成（作战记录、协议圆盘）」 → (「干员养成」, 「作战记录、协议圆盘」) for a row in ewMenuSubtitlePaths; nil otherwise or
+/// when the label has no trailing bracket.
+func ewMenuParts(_ path: String, _ label: String) -> (title: String, subtitle: String)? {
+    guard ewMenuSubtitlePaths.contains(path), label.hasSuffix("）"), let open = label.firstIndex(of: "（"),
+          open != label.startIndex else { return nil }
+    let title = String(label[..<open])
+    let sub = String(label[label.index(after: open)..<label.index(before: label.endIndex)])
+    return sub.isEmpty ? nil : (title, sub)
+}
+
 /// One footer line's source: a row's name and its hint.
 struct EWFootItem {
     var label: String
@@ -93,7 +107,68 @@ struct EWRowView: View {
             Text("未设").tag("")
         }
         ForEach(row.choices, id: \.value) { c in
-            Text(c.label).tag(c.value)
+            if let parts = ewMenuParts(row.path, c.label) {
+                // the name as the item's title and the row's value, the products as the item's subtitle (a menu item's
+                // second Text): 「干员养成」 on one line in the row, 「作战记录、协议圆盘、…」 still beside it in the menu
+                // (HIG Menus: "write a label that clearly and succinctly describes it"; decision E7: the products stay
+                // visible on the choice page)
+                VStack(alignment: .leading) {
+                    Text(verbatim: parts.title)
+                    Text(verbatim: parts.subtitle)
+                }
+                .tag(c.value)
+            } else {
+                Text(c.label).tag(c.value)
+            }
+        }
+    }
+
+    #if os(Android)
+    /// Android, a row whose choices carry products (ewMenuParts): skip-ui draws a Picker's picked value with the very
+    /// view its menu item uses (Picker.swift RenderSelectedValue / RenderPickerSelectionMenu), so the products wrapped
+    /// into the row again (2-3 lines, the last cut). The system Menu keeps them apart: its label is the name alone,
+    /// with the chevron the Picker draws, and each item the name over its products, the picked one ticked.
+    private var productMenu: some View {
+        HStack(spacing: 12) {
+            EWRowTitle(label: row.label, hint: hint).frame(maxWidth: .infinity, alignment: .leading)
+            Menu {
+                ForEach(row.choices, id: \.value) { c in
+                    let parts = ewMenuParts(row.path, c.label)
+                    Button { setChoice(c.value) } label: {
+                        if c.value == value.key {
+                            Label { productItem(c, parts) } icon: { Image(systemName: "checkmark") }
+                        } else {
+                            productItem(c, parts)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 2) {
+                    Text(verbatim: value == .null ? "未设" : (ewMenuParts(row.path, pick(value))?.title ?? pick(value)))
+                    Image(systemName: "chevron.down").accessibilityHidden(true)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func productItem(_ c: EWChoice, _ parts: (title: String, subtitle: String)?) -> some View {
+        if let parts {
+            VStack(alignment: .leading) {
+                Text(verbatim: parts.title)
+                Text(verbatim: parts.subtitle).font(.footnote).foregroundStyle(.secondary)
+            }
+        } else {
+            Text(c.label)
+        }
+    }
+    #endif
+
+    /// menuPicker (SkipFixes.swift): inside this row's VStack a bare Picker loses its title on Android.
+    private var selectPicker: some View {
+        menuPicker(selection: selectBinding) {
+            choiceItems
+        } title: {
+            EWRowTitle(label: row.label, hint: hint)
         }
     }
 
@@ -115,12 +190,15 @@ struct EWRowView: View {
                 EWRowTitle(label: row.label, hint: hint)
             }
         case .select:
-            // menuPicker (SkipFixes.swift): inside this row's VStack a bare Picker loses its title on Android
-            menuPicker(selection: selectBinding) {
-                choiceItems
-            } title: {
-                EWRowTitle(label: row.label, hint: hint)
+            #if os(Android)
+            if ewMenuSubtitlePaths.contains(row.path) {
+                productMenu
+            } else {
+                selectPicker
             }
+            #else
+            selectPicker
+            #endif
         case .icons:
             SheetLink {   // the 37b / 38 pick page as a sheet (SkipFixes.swift)
                 EWChoiceList(title: row.label, choices: row.choices, multi: false, icons: true,

@@ -102,7 +102,9 @@ struct ContentView: View {
     var body: some View {
         // the no-input link opening the app: mailbox + PIN (#k=) and game tokens (&t=), view.js fromLink / Stamina.fromLink.
         // On the whole body, so a link opened while still on 「第一次使用」 gets in (it was only on the tabs before).
-        Group { gate }.onOpenURL { url in PhoneLink.open(url) }
+        Group { gate }
+            .onOpenURL { url in PhoneLink.open(url) }
+            .chineseTypesetting()
     }
 
     @ViewBuilder private var gate: some View {
@@ -241,4 +243,19 @@ private func tabIcon(_ name: String) -> some View {
     #else
     Image(name, bundle: assetBundle)
     #endif
+}
+
+extension View {
+    /// Every Text below laid out as Chinese (SwiftUI View.typesettingLanguage(_:isEnabled:): "the language used to lay
+    /// out text"). A Text(verbatim:) or Text(String) carries no language of its own, so on his English-language phone its
+    /// full-width 「，」 kept its whole em width plus the gap after it (「前两个， 这是定好的」), while a literal Text,
+    /// localised from the zh-Hans catalog, came out tight (HIG review 1014). iOS only: skip-ui has no such modifier and
+    /// Android lays the punctuation out tight already.
+    @ViewBuilder func chineseTypesetting() -> some View {
+        #if os(Android)
+        self
+        #else
+        self.typesettingLanguage(Locale.Language(identifier: "zh-Hans"))
+        #endif
+    }
 }

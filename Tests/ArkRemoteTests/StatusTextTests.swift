@@ -59,4 +59,16 @@ final class StatusTextTests: XCTestCase {
         XCTAssertEqual(receiptDayWord("10-31", now: now), "昨天")
         XCTAssertNil(receiptDayWord("10-30", now: now))
     }
+
+    /// 刷哪一类: the row shows the name alone, the products go to the menu item's subtitle (HIG review 1014, E7).
+    func testProtocolTabMenuSplitsNameAndProducts() {
+        let p = "ProtocolSpace/ProtocolSpaceTab"
+        let full = ewYieldLabel(p, "干员养成", "OperatorProgression")
+        XCTAssertEqual(full, "干员养成（作战记录、协议圆盘、折金票、协议棱柱）")
+        let parts = ewMenuParts(p, full)
+        XCTAssertEqual(parts?.title, "干员养成")
+        XCTAssertEqual(parts?.subtitle, "作战记录、协议圆盘、折金票、协议棱柱")
+        XCTAssertNil(ewMenuParts(p, "危境预演"))
+        XCTAssertNil(ewMenuParts("ProtocolSpace/CrisisDrills", "第一档（某材料）"))   // other rows keep their brackets
+    }
 }
