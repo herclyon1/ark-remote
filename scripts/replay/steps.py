@@ -457,7 +457,9 @@ step("ph.paste.bad", "phone", "粘贴密钥串 填乱码 → 存 → 「没存�
      # Android: an empty-text selector with kind TextView matches the sheet's 「取消」 first and closes the sheet
      android={"do": [tap("粘贴密钥串"), ("wait", 1.0), ("field", {"t": "", "kind": "EditText"}, "zzz"), tap("存")]})
 step("ph.paste.close", "phone", "好 → 提示和粘贴单一起关掉，回手机页",
-     [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.8)], expect=[VERSION], absent=["没存上"])
+     # 粘贴密钥串, the row the sheet came from: the 换手机 section (54458af) made the page long enough that 版本 is off
+     # screen on Android, where a lazy list has no nodes for rows off screen; the sheet's own footer is gone
+     [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.8)], expect=["粘贴密钥串"], absent=["没存上", "~用来读鸣潮体力"])
 DIAG_BTN = "标出问题"
 step("diag.bottom.phone", "diag", "诊断开 · 手机页滑到底 → 最后一行在「标出问题」按钮上面（ce8ebc3）",
      [("bottom", 4)], last_above=DIAG_BTN, on="ios")

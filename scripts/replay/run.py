@@ -469,9 +469,10 @@ class Runner:
         hour / minute (XCUIElement.adjust), then close the popover with a tap in the right margin at the capsule's
         height (outside the cards: a tap on a row below would also hit that row, pass 7 doubt 3)."""
         if self.drv.platform == "android":
-            # a TextView button with the time (「8:30 AM」 / 「08:30」) right of the row title opens a Material3 dialog
-            n = self.locate(f"{label}（机器时间）")
-            n = self.steady(f"{label}（机器时间）", n, {})
+            # a TextView button with the time (「8:30 AM」 / 「08:30」) right of the row title opens a Material3 dialog;
+            # the title is the label alone since the page went to one clock (8b6d488 dropped 「（机器时间）」)
+            n = self.locate(label)
+            n = self.steady(label, n, {})
             pat = re.compile(r"^\d{1,2}:\d\d( [AP]M)?$")
             btns = [b for b in self.dump(True)["nodes"] if any(pat.match(t) for t in b["texts"]) and b["x"] > n["x"]
                     and abs(b["y"] - n["y"]) <= 120 and self.on_screen(b)]
@@ -1168,9 +1169,17 @@ def group_gaps(png, density, box, texts):
         inside = [n for n in texts if a <= n["y"] <= b]
         if not inside:
             plain.append((b - a) / density)
-        else:
-            # the lowest text in the gap is the next section's header: its bottom edge to the next card's top
-            titled.append((b - max(n["y"] + n["h"] / 2 for n in inside)) / density)
+            continue
+        # One block of text hugging the card above is that card's footer, and the next section has no header (方舟's
+        # 作战 split into two cards, f8626ed: footer, then the untitled switches card 12.8 dp lower). Measuring it as a
+        # header gap took the footer for a header. A header is a second block (after a footer) or a block that starts
+        # well below the card above.
+        rows = sorted(inside, key=lambda n: n["y"])
+        one_block = all(q["y"] - q["h"] / 2 - (p["y"] + p["h"] / 2) <= 6 * density for p, q in zip(rows, rows[1:]))
+        if one_block and rows[0]["y"] - rows[0]["h"] / 2 - a <= 12 * density:
+            continue
+        # the lowest text in the gap is the next section's header: its bottom edge to the next card's top
+        titled.append((b - max(n["y"] + n["h"] / 2 for n in inside)) / density)
     return plain, titled
 
 

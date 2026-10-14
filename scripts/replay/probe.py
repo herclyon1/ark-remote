@@ -190,7 +190,7 @@ def serve(a):
         if kind == "time":
             hhmm, _, row = rest.partition(" ")
             hh, mm = (int(x) for x in hhmm.split(":"))
-            row = row or ["刷到几点（机器时间）", "改成刷到几点（机器时间）"]
+            row = row or ["刷到几点", "改成刷到几点"]
             n = r.locate(row)
             nodes = r.dump(False)["nodes"]
             btn = [b for b in nodes if b["texts"] and re.fullmatch(r"\d{1,2}:\d\d(?: [AP]M)?", b["texts"][0])
