@@ -194,7 +194,7 @@ struct SelfCheckItem: Sendable, Equatable {
         }
 
         // 4. the push stream: open one, wait for ntfy's `open` event, close it
-        let pushMs = await NtfyStream.probeOpen(topic: cfg.topic)
+        let pushMs = await PushProbe.openMs(topic: cfg.topic)   // Logic/PushProbe.swift
         out.append(SelfCheckItem(name: "推送通道", ok: pushMs != nil,
                                  detail: pushMs.map { "\($0) ms 连上" } ?? "8 秒内没连上"))
 
@@ -219,38 +219,15 @@ struct SelfCheckItem: Sendable, Equatable {
     }
 }
 
-/// True for the first caller only.
-final class OnceFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var used = false
-    func take() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        if used { return false }
-        used = true
-        return true
-    }
-}
-
-/// A 运行自检 in progress and its result (PhoneDiagRows' 运行自检 / 自检结果 rows). Not @State in the rows: a reselect of
-/// the 手机 tab gives PhonePage's List a new identity on Android (D39, PhonePage .id(reselect)), which dropped a row's
-/// @State mid-run - the row lost its progress and the result never showed.
+/// A 运行自检 in progress and its 「自检结果」 sheet (PhoneDiagRows' button, PhonePage's sheet). Not @State in the rows:
+/// a reselect of the 手机 tab gives PhonePage's List a new identity on Android (D39, PhonePage .id(reselect)), which
+/// dropped a row's @State mid-run - the button read 「运行自检」 again and the result sheet never came up.
 @MainActor @Observable final class SelfCheckRun {
     static let shared = SelfCheckRun()
 
     var checking = false
-    /// The last result as LastSelfCheck stores it (nil = never run on this phone); the 自检结果 row shows and shares it.
-    var record: JSONValue? = LastSelfCheck.stored()
-
-    /// One pass; the rows show ProgressView while it runs and the result after.
-    func run() {
-        guard !checking else { return }
-        checking = true
-        Task {
-            _ = await SelfCheck.run()   // kept in LastSelfCheck
-            record = LastSelfCheck.stored()
-            checking = false
-        }
-    }
+    /// The 「自检结果」 sheet is up.
+    var shown = false
 }
 
 /// This phone's last 运行自检, kept for the next start (the web keeps accept.js's result in localStorage ark-accept and
@@ -304,7 +281,9 @@ func diagKB(_ text: String) -> String {
     static let markWords = ["不该动", "动错了", "卡住了", "慢半拍", "位置不对"]
     /// seg-frames-logger.js:497, the line while nothing has been sent yet. The App logs messages, the network and the
     /// machine status (not taps) and sends the whole log as one record, so the web's wording would be wrong here.
-    static let startLine = "诊断记录开着：收发消息、网络通断和机器状态记在手机里，不送；出问题按右下角「就是这里」，送整份记录"
+    /// Short enough for the bar's two lines beside 「就是这里」 and for one line inline (P14: MiniPlayer's one row,
+    /// 「诊断记录中」); no 「右下角」: the button sits beside the line now (Pages/Shell/DiagAccessory.swift).
+    static let startLine = "诊断记录中：记在手机里，按「就是这里」才送出"
 
     /// The 诊断记录 switch, mirrored here so the mark button and the line appear / go at once.
     var on = DiagLog.shared.enabled
@@ -312,13 +291,13 @@ func diagKB(_ text: String) -> String {
     var line = DiagUI.startLine
     /// The record #diagsheet shows (`upload` = where it got to; refreshed live, view.js showDiagSheet._live).
     var sheetRecord: JSONValue?
-    /// The 诊断记录 sheet open, from a tap on the status line (DiagAccessory / DiagOverlay). A failed upload does not
-    /// open it: the line says so (HIG Alerts: "Avoid using an alert merely to provide information").
+    /// #diagsheet open, from a tap on the line or the first failed upload of this run.
     var sheetOpen = false
 
     @ObservationIgnored private var lastMarked: JSONValue?
     @ObservationIgnored private var sentN = 0
     @ObservationIgnored private var keptN = 0
+    @ObservationIgnored private var sheetShown = false
     @ObservationIgnored private var started = false
     @ObservationIgnored private var flushing = false
 
@@ -351,13 +330,13 @@ func diagKB(_ text: String) -> String {
     }
 
     /// A tap on the line: the latest marked record while it is not in the bucket (the line then says 「点这行可复制 / 分享」),
-    /// otherwise the log as it is now, unsent (upWord 「没标记，留在手机里没送」).
+    /// otherwise the log as it is now, unsent (upWord 「还没按「就是这里」，只在这台手机里」).
     func openSheet() {
         prepareSheet()
         sheetOpen = true
     }
 
-    /// Sets the record the sheet shows without presenting it (the 手机 page pushes the same view).
+    /// Sets the record the sheet shows without presenting it.
     func prepareSheet() {
         if let m = lastMarked, m["upload"]?["state"]?.string != "sent" {
             sheetRecord = m
@@ -369,31 +348,21 @@ func diagKB(_ text: String) -> String {
         }
     }
 
-    /// view.js showDiagSheet msg(), as rows: what the record is and where its upload got to.
-    struct RecordFacts {
-        var json: String
-        var events: Int
-        /// diagKB(json), the web's one-decimal KB
-        var kb: String
-        /// the words the user marked, 「、」-joined; empty = none
-        var marks: String
-        /// 还在送 / 已送达 / 没标记，留在手机里没送 / 没送到（…）
-        var upload: String
-        var sent: Bool
-    }
-
-    static func facts(_ rec: JSONValue) -> RecordFacts {
+    /// view.js showDiagSheet msg(): what the record is and where its upload got to.
+    static func sheetMessage(_ rec: JSONValue) -> (json: String, text: String, sent: Bool) {
         let json = rec.encodedString()
-        let marks = (rec["marks"]?.array ?? []).map { $0["word"]?.string ?? "未选词" }.joined(separator: "、")
+        let n = rec["events"]?.array?.count ?? 0
+        let marks = rec["marks"]?.array ?? []
+        let mk = marks.isEmpty ? "" : "你标了 \(marks.count) 处（\(marks.map { $0["word"]?.string ?? "未选词" }.joined(separator: "、"))）。"
         let u = rec["upload"]
         let state = u?["state"]?.string
         let up: String
-        if u == nil || state == nil { up = "还在送" }
-        else if state == "sent" { up = "已送达" }
-        else if state == "local" { up = "没标记，留在手机里没送" }
-        else { up = "没送到（\(u?["detail"]?.string ?? "原因不明")）" }
-        return RecordFacts(json: json, events: rec["events"]?.array?.count ?? 0, kb: diagKB(json), marks: marks,
-                           upload: up, sent: state == "sent")
+        if u == nil || state == nil { up = "上传：还在送" }
+        else if state == "sent" { up = "上传：已送达" }
+        else if state == "local" { up = "还没按「就是这里」，只在这台手机里" }   // plain words for 「没标记」 (HIG Writing: "avoiding jargon"; HIG review 1014)
+        else { up = "上传：没送到（\(u?["detail"]?.string ?? "原因不明")）" }
+        // no file format or size in the words (HIG Writing: "avoiding jargon"; app-1013 review 手机 8)
+        return (json, "\(mk)\(n) 条。\(up)。送不到时复制后粘到聊天里，或用分享发出。", state == "sent")
     }
 
     // MARK: 件 C
@@ -408,12 +377,12 @@ func diagKB(_ text: String) -> String {
         } else {
             // DiagUpload.put says only yes / no, so the web's reason is 「原因不明」 here (view.js upWord's own fallback)
             keep(key, body)
-            report(rec, "kept", "没送到（原因不明），已存在手机里共 \(keptN) 份；点这行可复制 / 分享", key)
+            report(rec, "kept", "没送到，手机里存着 \(keptN) 份；点这行可复制 / 分享", key)
         }
     }
 
-    /// seg-frames-logger.js report(): the record learns where it got to and the line says it (the web also opened the
-    /// sheet on the first failure; here the line is the status, a tap on it opens the sheet).
+    /// seg-frames-logger.js report(): the record learns where it got to, the line says it, and the first failure of a run
+    /// opens the copy / share sheet (after that the line does it on a tap).
     private func report(_ rec: [String: JSONValue], _ state: String, _ detail: String, _ key: String) {
         var o = rec
         o["upload"] = .object(["state": .string(state), "detail": .string(detail), "key": .string(key), "at": .double(nowMs())])
@@ -421,6 +390,11 @@ func diagKB(_ text: String) -> String {
         if lastMarked?["record_id"] == r["record_id"] { lastMarked = r }
         if sheetRecord?["record_id"] == r["record_id"] { sheetRecord = r }
         line = detail
+        if state != "sent", !sheetShown {
+            sheetShown = true
+            sheetRecord = r
+            sheetOpen = true
+        }
     }
 
     /// The queue left on the phone, oldest first, until one does not go.

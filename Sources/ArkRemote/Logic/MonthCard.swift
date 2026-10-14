@@ -85,8 +85,9 @@ struct MonthCardEntry: Sendable, Equatable {
 
     /// Today in Asia/Shanghai, "YYYY-MM-DD". Shanghai has kept UTC+8 with no daylight saving since 1991, so a fixed offset
     /// gives the same day as the web's Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).
-    static func today() -> String {
-        isoDay(Int(((nowMs() + 8 * 3600 * 1000) / 86_400_000).rounded(.down)))
+    /// `ms`: the moment to read (tests pass one either side of Shanghai midnight); now by default.
+    static func today(_ ms: Double = nowMs()) -> String {
+        isoDay(Int(((ms + 8 * 3600 * 1000) / 86_400_000).rounded(.down)))
     }
 
     /// `iso` + n days (monthcard.js plus(): setUTCDate).
@@ -263,10 +264,11 @@ struct MonthCardEntry: Sendable, Equatable {
     /// The grey line under a local registration (monthcard.js syncNote()).
     static var syncNote: String { alive ? "正在同步到游戏机" : "游戏机开机后同步" }
 
-    /// monthcard.js line(e).
+    /// monthcard.js line(e), led by the days left as the game's page leads with them (no colon or brackets); the date in the
+    /// same word order as the 月卡 page's card (「最后一次领取 10月29日」, MonthCardRows.swift; HIG Writing: consistent terms).
     static func line(_ e: MonthCardEntry?) -> String {
         guard let e else { return "未登记" }
-        return e.expired ? "已过期" : "最后一次领取：\(md(e.last))（还剩 \(e.left) 天）"
+        return e.expired ? "已过期" : "还剩 \(e.left) 天 · 最后一次领取 \(md(e.last))"
     }
 
     /// The cards with 0–5 days left (monthcard.js banner(); spec §4: the reminder starts 5 days before).
@@ -308,8 +310,8 @@ struct MonthCardEntry: Sendable, Equatable {
         // replaced the other: one purchase was lost (edge audit 13).
         let bare = add != nil && (mine(g).map { caughtUp($0, Self.fromRelay(g)) } ?? true)
         remember(g, last: last, at: at, sentAt: at)
-        // no 「已登记」 toast: the rows show the new date and days left at once (HIG Feedback: "Consider integrating status
-        // feedback into your interface.")
+        // no message: the page's rows show the new date and days at once (HIG Alerts "Avoid using an alert merely to
+        // provide information … prefer finding an alternative way to communicate it within the relevant context")
         do {
             try await post(g, add: add, left: left, last: bare ? nil : last, at: bare ? nil : at)
         } catch {

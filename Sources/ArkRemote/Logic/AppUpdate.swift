@@ -134,8 +134,8 @@ import SwiftUI
 /// https://m2.material.io/components/banners). Placed above the whole TabView they doubled the status-bar inset:
 /// SkipUI's top app bar adds the status bar's window insets whenever the top system bar is there (Navigation.swift
 /// hasAbsoluteTopSystemBar → TopAppBarDefaults.windowInsets), so a strip of empty space opened under the banner.
-/// iOS: the pending line is the root's navigation subtitle with 「不再等待」 in the navigation bar (PendingStatus,
-/// Pages/Shell/PendingBarView.swift): system navigation-bar parts, no bar of our own over the list.
+/// iOS: the pending line (or the last status note) is the navigation bar's subtitle item under the large title, as Mail
+/// shows 「Undo Send」 (Pages/Shell/PendingBarView.swift); no bar of our own over the list.
 extension View {
     func topNotices() -> some View { TopNotices(content: self) }
 }
@@ -150,11 +150,22 @@ struct TopNotices<Content: View>: View {
         #if os(Android)
         VStack(spacing: 0) {
             if AppUpdate.shared.showsBanner { UpdateBanner() }
-            if let bar = Pending.shared.bar { PendingBarView(bar: bar) }
+            if let bar = Pending.shared.bar {
+                PendingBarView(bar: bar)
+            } else if let note = Feedback.shared.note {
+                StatusNoteRow(note: note)   // the last status line (Pages/Shell/Feedback.swift)
+            }
             content
         }
         #elseif os(iOS)
-        PendingStatus(content: content)
+        // P15: the line under the large title, Mail's 「Undo Send」 place, and under the small title once the list has
+        // scrolled and the title has collapsed (.largeSubtitle alone left it out then) (Pages/Shell/PendingBarView.swift)
+        content.toolbar {
+            if Pending.shared.bar != nil || Feedback.shared.note != nil {
+                ToolbarItem(placement: .largeSubtitle) { SubtitleLine() }
+                ToolbarItem(placement: .subtitle) { SubtitleLine(large: false) }
+            }
+        }
         #else
         content
         #endif
@@ -198,7 +209,8 @@ struct UpdateBanner: View {
                 }
             }
         }
-        .padding()   // the system's standard spacing, not fixed values
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         Divider()
     }

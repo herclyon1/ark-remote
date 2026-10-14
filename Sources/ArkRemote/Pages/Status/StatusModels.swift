@@ -100,6 +100,7 @@ struct StatusBoss: Hashable, Identifiable {
 
 /// The small line under a row (pending.js applyPending; index.html:769-773): grey, or red with 「再发一次」.
 enum StatusTag: Hashable {
+    case unsaved(String)                 // 待保存
     case sent(String, again: Bool)       // 已寄出 … / 没回执 · 已寄出 HH:MM (+ 再发一次 past 10 h)
     case bad(String)                     // 没生效 · … + 再发一次, red
     case applied(String)                 // 已应用 HH:MM
@@ -130,6 +131,8 @@ struct StatusData {
     var configIsStale = false                 // falling back to lastGoodConfig
     // Action tiles.
     var nextAt = ""                           // next 🕘 time in plan
+    var lastUpdate = "还没有数据"               // ago(snap.at)
+    var snapAt: Int? = nil                    // snap.at, so the page can redraw 「X 分钟前」 by the local clock
     var refreshing = false                    // Live.busy: the 刷新 tile spins while a ping runs
     // Stamina tiles; nil = phone not configured, [] = configured but still reading.
     var stamina: [StatusStamina]? = nil
@@ -151,8 +154,6 @@ struct StatusData {
     var planFoot: [String] = []
     // Receipts (newest first) and the group-header note.
     var receipts: [StatusReceipt] = []
-    var todayLast = ""                        // 今天.最近
-    var todayFailed = 0                       // 今天.失败
     /// view.js nowRow 「今天实际」: 「早班 照常 · 晚班 跳过」 while a skip is in play today, else nil.
     var todayActual: String? = nil
     var receiptsToday = ""                    // today "MM-DD" on the phone's clock: the 回执 page puts 今天实际 in that day's group
@@ -161,18 +162,22 @@ struct StatusData {
 }
 
 /// What the page asks the logic layer to do. Every closure is optional so the page builds on its own.
+/// The commands that act on the other machine return the question to ask (shown by StatusPage as a confirmationDialog
+/// anchored to the button pressed), or nil when nothing is to be confirmed (a one-button notice went up instead, or the
+/// entry is not valid yet). `confirm` sends a question the user said yes to.
 struct StatusActions {
-    var runNow: () -> Void = {}
-    var stopAll: () -> Void = {}
+    var runNow: () -> StatusAsk? = { nil }
+    var refresh: () -> Void = {}
+    var stopAll: () -> StatusAsk? = { nil }
     var selectQueue: (String) -> Void = { _ in }
     var setRunsToday: (String, Bool) -> Void = { _, _ in }        // queue name, on
-    var startEchoFarm: (Int, String) -> Void = { _, _ in }        // boss index, until HH:MM
-    var changeEchoFarmUntil: (String) -> Void = { _ in }
-    var stopEchoFarm: () -> Void = {}
+    var startEchoFarm: (Int, String) -> StatusAsk? = { _, _ in nil }   // boss index, until HH:MM
+    var changeEchoFarmUntil: (String) -> StatusAsk? = { _ in nil }
+    var stopEchoFarm: () -> StatusAsk? = { nil }
+    var confirm: (StatusAsk) -> Void = { _ in }
     var setSkipShutdown: (Bool) -> Void = { _ in }
     var setDebugMode: (Bool) -> Void = { _ in }
     var resend: (String) -> Void = { _ in }                       // 「再发一次」 under a row, switch id
-    var resendShot: (StatusAsk) -> Void = { _ in }                // 「再发一次」 of a one-shot the machine never read
 }
 
 extension StatusData {
@@ -183,6 +188,7 @@ extension StatusData {
         d.deviceStatus = "实时 · 配置 1 分钟前"
         d.online = true
         d.nextAt = "04:00"
+        d.lastUpdate = "1 分钟前"
         d.stamina = [
             StatusStamina(label: "明日方舟 理智", value: 120, cap: 135, sub: "今天 19:24 回满"),
             StatusStamina(label: "终末地 理智", value: 240, cap: 240, sub: "已满"),
@@ -206,7 +212,6 @@ extension StatusData {
                       StatusReceipt(ok: true, text: "现在跑一趟", at: "10-02 05:31"),
                       StatusReceipt(ok: false, text: "刷声骸：游戏没开", at: "10-01 22:10"),
                       StatusReceipt(ok: true, text: "调试模式 90 分钟", at: "10-01 21:00")]
-        d.todayLast = "早班"
         return d
     }
 }

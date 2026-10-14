@@ -3,34 +3,57 @@ import SwiftUI
 /// The 手机 tab, carried over from the web page (maa-automation web/view.js, the 「这台手机」 and 「游戏账号」 sections;
 /// the tab takes the sections whose title matches /^这台手机|^游戏账号/, view.js TABS). PhoneTab fills it from the stores.
 struct PhonePageData {
-    /// 页面版本: the web page shows view.js's ?v= stamp; the app shows its own version.
+    /// 版本 (the web's 页面版本): the web page shows view.js's ?v= stamp; the app shows its own version.
     var pageVersion: String = ""
-    /// 游戏账号 · 密钥: Stamina.status() on the web; empty = 「没有」, and 清除密钥 is disabled.
+    /// 游戏账号 · 已配置: Stamina.status() on the web; empty = 「没有」, and the 清除密钥 button is hidden.
     var staminaStatus: String = ""
-    /// The 免输入链接 (PhoneLink.make()); nil while this phone has no mailbox and PIN to put in it.
-    var noInputLink: String? = nil
+    /// This phone has a mailbox and PIN to put in the 免输入链接; without them 复制免输入链接 is disabled.
+    var hasConfig: Bool = true
 }
 
-/// What the page's controls do (view.js #tokpaste / #tokclear handlers).
+/// What the page's controls do (view.js #tokpaste / #tokclear / #mklink handlers).
 struct PhonePageActions {
-    /// Stamina.fromPaste(s); throws with the message shown in the paste sheet.
+    /// Stamina.fromPaste(s); throws with the message the web shows in 「没存上」.
     var pasteTokens: (String) throws -> Void = { _ in }
     var clearTokens: () -> Void = {}
+    /// Copies the no-input link.
+    var copyNoInputLink: () -> PhoneCopyResult = { .noConfig }
 }
 
-/// Settings-style page: LabeledContent rows, the share sheet for the link (it carries Copy, Add Bookmark and the apps:
-/// HIG Activity views, https://developer.apple.com/design/human-interface-guidelines/activity-views), a sheet for the
-/// paste, and confirmation dialogs for the clears (HIG Action sheets: "Use an action sheet — not an alert — to offer
-/// choices related to an intentional action", https://developer.apple.com/design/human-interface-guidelines/action-sheets).
+enum PhoneCopyResult {
+    case copied
+    /// No mailbox config to put in the link.
+    case noConfig
+    /// The clipboard did not take it; the link is shown for a long-press copy.
+    case failed(String)
+}
+
+/// The 手机 tab: 0.4.4's two groups in their order, each part fitted to the Apple page of the same use
+/// (BOARD/app-page-references.txt):
+/// - rows: the value on the right of its row, grey (P11 row's component conclusion);
+/// - 粘贴密钥串: Passwords' 「New Password」 sheet, ✕ leading and ✓ trailing (P12, evidence/app-pages-1007/apple/
+///   P12-密码-新建弹出单.png). HIG Sheets: "A sheet is useful for requesting specific information from people or
+///   presenting a simple task that they can complete before returning to the parent view."
+/// - 清除密钥: an action sheet from its button (P10 / N9). HIG Action sheets: "Use an action sheet — not an alert — to
+///   offer choices related to an intentional action."
+/// - feedback in place, no toast (Pages/Shell/Feedback.swift): the 密钥 row's value is the state after a paste; the
+///   copy button's own label says 「链接已复制」 until the page goes away. HIG Alerts: "Avoid using an alert merely to
+///   provide information … prefer finding an alternative way to communicate it within the relevant context."
 struct PhonePage: View {
     var data: PhonePageData
     var actions: PhonePageActions = PhonePageActions()
 
     @State var pasteShown = false
     @State var pasteText = ""
+    @State var clearShown = false
+    @State var manualLink = ""
+    @State var manualShown = false
     @State var pasteErr = ""
-    @State var discardAsk = false
-    @State var clearAsk = false
+    @State var pasteErrShown = false
+    /// 「没存上」 held until the paste sheet is gone: UIKit presents one thing at a time (SaveBar.swift heldFail).
+    @State var heldPasteErr: String? = nil
+    /// 复制免输入链接 took: its label reads 「链接已复制」 until the page goes away (no timer).
+    @State var linkCopied = false
     /// A reselect of the 手机 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.phone }
@@ -39,155 +62,190 @@ struct PhonePage: View {
     private var pasteEmpty: Bool { pasteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
+        // read here so its change redraws this page (the sheet's Binding is read outside body)
+        let selfCheckShown = SelfCheckRun.shared.shown
         List {
             Section {
-                LabeledContent {
-                    Text(data.pageVersion)
-                } label: {
-                    PhoneRowLabel(title: "页面版本", hint: "这个安装包的版本号；App 里更新过就会变")
+                // a name and a value, no hint under them (HIG Lists: "Keep item text succinct"; P13's rows)
+                PhoneValueRow(title: "版本", value: data.pageVersion)
+                PhoneDiagRows(appVersion: data.pageVersion)
+                Button(linkCopied ? "链接已复制" : "复制免输入链接") {
+                    // view.js #mklink; prompt("长按复制这条链接：", url) when the clipboard refuses
+                    switch actions.copyNoInputLink() {
+                    case .copied: linkCopied = true
+                    case .noConfig: break   // the button is disabled then; the footer says why
+                    case .failed(let link):
+                        manualLink = link
+                        manualShown = true
+                    }
                 }
-                if let link = data.noInputLink, let url = URL(string: link) {
-                    ShareLink("分享免输入链接", item: url)
-                } else {
-                    Button("分享免输入链接") {}
-                        .disabled(true)
-                }
+                // HIG Entering data: "make the button available only after people enter the data you require"
+                .disabled(!data.hasConfig)
             } header: {
                 Text("这台手机")
             } footer: {
-                Text(data.noInputLink == nil
-                     ? "这台手机还没填信箱和 PIN，链接里没东西可带。"
-                     : "用这条链接打开，就不用再填信箱和 PIN。链接里带着这两样和游戏密钥，别转发给别人。")
+                // one sentence of what the link does (HIG Writing: "If you can use fewer words, do so."). The link opens
+                // the App now (PhoneLink.linkBase), not the web page, so no 「存成书签或放到主屏幕」.
+                Text((data.hasConfig ? "" : "这台手机还没填信箱和 PIN，链接里没东西可带。")
+                     + "把链接发到另一台手机，复制后打开遥控，就不用再填信箱和 PIN；别转发给别人。")
             }
-
-            PhoneDiagRows()
 
             Section {
                 // 「密钥」, not the web's 「已配置」 (view.js:608): with none stored the row read 「已配置 … 没有」 (test pass 1, 问题 7)
-                LabeledContent {
-                    Text(hasTokens ? data.staminaStatus : "没有")
-                } label: {
-                    PhoneRowLabel(title: "密钥", hint: "体力数字由这台手机直接问森空岛和库街区，密钥只存在这台手机里")
-                }
+                PhoneValueRow(title: "密钥", value: hasTokens ? data.staminaStatus : "没有")
                 Button("粘贴密钥串") {
                     pasteText = ""
-                    pasteErr = ""
                     pasteShown = true
                 }
-                Button("清除密钥", role: .destructive) { clearAsk = true }
-                    .disabled(!hasTokens)
-                    // view.js #tokclear
-                    .confirmationDialog("清除密钥？", isPresented: $clearAsk, titleVisibility: .visible) {
-                        Button("清除密钥", role: .destructive) { actions.clearTokens() }
-                        Button("取消", role: .cancel) {}
-                    } message: {
-                        Text("体力数字会消失，要再粘贴一次密钥串才回来。")
-                    }
+                if hasTokens {
+                    Button("清除密钥", role: .destructive) { clearShown = true }
+                        // view.js #tokclear; from the button that asks (7b6a3f1's pattern, P10 / N9)
+                        .confirmationDialog("清除密钥？", isPresented: $clearShown, titleVisibility: .visible) {
+                            Button("清除", role: .destructive) { actions.clearTokens() }
+                            Button("取消", role: .cancel) {}
+                        } message: {
+                            Text("清除这台手机里的游戏密钥？体力数字会消失。")
+                        }
+                }
             } header: {
                 Text("游戏账号")
             } footer: {
-                Text("免输入链接会带上这里存着的密钥。森空岛的会话由机器交过来；库街区的用「粘贴密钥串」存进来。")
+                // plain words, no paths or file names (HIG Writing: "Choose simple, plain language … avoiding jargon");
+                // what to paste is the paste field's own prompt now
+                Text("森空岛的密钥由游戏机交过来，库街区的点「粘贴密钥串」填；密钥只存在这台手机里，免输入链接会把它一起带上。")
             }
         }
         // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
         // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
         // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).
         .id(reselect)
-        // On the List, not a row: SwiftUI wants navigationDestination outside lazy containers (StatusPage does the same).
-        .navigationDestination(for: PhoneRoute.self) { route in
-            switch route {
-            case .diagRecord: DiagRecordView()
-            }
+        // A pull here reads the stamina again, the one thing on this tab that comes from outside the phone; asking the
+        // machine (view.js:1150 ping) changed nothing on this page and held the spinner up to 11 s (HIG Refresh content
+        // controls). Inside the sheets below: a sheet's content inherits the refresh action, and the 自检结果 sheet's
+        // ScrollView (DiagSheetBox) then kept room for a refresh control, its title cut at the sheet's top edge
+        // (diagsheet frames4).
+        .refreshable { await StaminaStore.shared.refresh(force: true) }
+        .onDisappear { linkCopied = false }
+        // 运行自检's result (PhoneDiagRows), here outside .id(reselect) so a reselect mid-run keeps it (SelfCheckRun)
+        .sheet(isPresented: Binding(get: { selfCheckShown }, set: { SelfCheckRun.shared.shown = $0 })) {
+            SelfCheckSheet { SelfCheckRun.shared.shown = false }
         }
-        // this phone's own link: the clipboard check on the next open (AppGlue → PhoneLink.takeClipboardLink) skips it
-        .onChange(of: data.noInputLink, initial: true) { _, link in
-            if let link { PhoneLink.markTaken(link) }
-        }
+        // the title (the tab's name, or 「待保存 N 项」 while changes wait, view.js:1283 / 1554) is set by ContentView's EWSaveBar
         // view.js #tokpaste: prompt("把 KUROBBS_TOKEN=… 和 KUROBBS_DID=… 两行粘贴到这里：") — a multi-line field here,
         // so the two lines stay two lines (a one-line field would join them)
-        .sheet(isPresented: $pasteShown) {
+        .sheet(isPresented: $pasteShown, onDismiss: {
+            // view.js:1304: ask("没存上", e.message, "好") — the system alert, once the paste sheet is down
+            if let e = heldPasteErr {
+                heldPasteErr = nil
+                pasteErr = e
+                pasteErrShown = true
+            }
+        }) {
             pasteSheet
+        }
+        .alert("没存上", isPresented: $pasteErrShown) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(pasteErr)
+        }
+        .alert("长按复制这条链接：", isPresented: $manualShown) {
+            TextField("", text: $manualLink)
+            Button("好", role: .cancel) {}
         }
     }
 
-    /// Cancel leading, Done trailing and disabled until there is something to save; a failed save stays in the sheet
-    /// with the reason (HIG Feedback: "display status information in a passive way",
-    /// https://developer.apple.com/design/human-interface-guidelines/feedback).
+    /// Passwords' 「New Password」 sheet (P12): the system's full-height sheet, cancel ✕ leading, confirm ✓ trailing and
+    /// disabled while there is nothing to save (HIG Sheets: "the Cancel button belongs on the leading edge of the top
+    /// toolbar. When present, the Done button belongs on the trailing edge"). The ✕ / ✓ are the system's own glyphs for
+    /// the cancel / confirm roles; their spoken names stay 取消 / 存.
     private var pasteSheet: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("免输入链接，或两行密钥", text: $pasteText, axis: .vertical)
-                        .lineLimit(5, reservesSpace: true)
+                    // what to paste as the field's prompt (HIG Text fields: "Show a hint in a text field to help
+                    // communicate its purpose"; Passwords' grey 「User」 / 「Notes」, P12), not a footer under it
+                    TextField("", text: $pasteText, prompt: Text("免输入链接，或 KUROBBS_TOKEN=… 两行"), axis: .vertical)
+                        .lineLimit(3, reservesSpace: true)
                         .setupPlainInput()
                     #if !os(Android)
-                    // The system paste control: one tap, no paste prompt (PasteButton docs,
-                    // https://developer.apple.com/documentation/swiftui/pastebutton). Android: skip-ui's PasteButton
+                    // The system paste control (P12 row: "Paste 是系统粘贴按钮、随系统语言"): one tap, no paste prompt
+                    // (https://developer.apple.com/documentation/swiftui/pastebutton). Android: skip-ui's PasteButton
                     // fatalErrors (skip-ui System/Transferable.swift:475); the field's own paste is there.
                     PasteButton(payloadType: String.self) { strings in
                         let s = strings.joined(separator: "\n")
                         Task { @MainActor in pasteText = s }
                     }
                     #endif
-                } footer: {
-                    Text("粘贴网页「手机」页复制的免输入链接、电脑上 scripts/mac/phone-link.py 打出来的链接，或 ~/.config/ark/.env 里 KUROBBS_TOKEN 和 KUROBBS_DID 那两行。")
-                }
-                if !pasteErr.isEmpty {
-                    Section {
-                        Label(pasteErr, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red)
-                    } header: {
-                        Text("没存上")
-                    }
                 }
             }
             .navigationTitle("粘贴密钥串")
-            .onChange(of: pasteText) { _, _ in pasteErr = "" }
+            #if !os(macOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .cancel) {
-                        if pasteEmpty { pasteShown = false } else { discardAsk = true }
-                    }
-                    .confirmationDialog("放弃粘贴的内容？", isPresented: $discardAsk, titleVisibility: .visible) {
-                        Button("放弃", role: .destructive) { pasteShown = false }
-                        Button("取消", role: .cancel) {}
-                    }
+                    pasteCancel
+                        .accessibilityLabel("取消")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成", role: .confirm) {
-                        do {
-                            try actions.pasteTokens(pasteText)
-                            pasteShown = false
-                        } catch {
-                            pasteErr = errorMessage(error)
-                        }
-                    }
-                    .disabled(pasteEmpty)
+                    pasteSave
+                        .accessibilityLabel("存")
+                        .disabled(pasteEmpty)
                 }
             }
         }
-        .interactiveDismissDisabled(!pasteEmpty)
+    }
+
+    @ViewBuilder private var pasteCancel: some View {
+        #if os(Android)
+        Button { pasteShown = false } label: { Image(systemName: "xmark") }
+        #else
+        Button(role: .cancel) { pasteShown = false }
+        #endif
+    }
+
+    @ViewBuilder private var pasteSave: some View {
+        #if os(Android)
+        Button { savePaste() } label: { Image(systemName: "checkmark") }
+        #else
+        Button(role: .confirm) { savePaste() }
+        #endif
+    }
+
+    private func savePaste() {
+        let s = pasteText
+        do { try actions.pasteTokens(s) } catch { heldPasteErr = errorMessage(error) }
+        pasteShown = false
     }
 }
 
-/// Pages pushed from the 手机 tab, by value so ContentView's phonePath holds them.
-enum PhoneRoute: Hashable {
-    /// 「分享诊断记录」 → DiagRecordView.
-    case diagRecord
-}
-
-/// A row title with its explanation under it (the web's <label> + .hint), for a LabeledContent / Toggle label.
-/// A VStack, not two bare Texts: skip-ui's LabeledContent composes the label builder into its Row as is
-/// (skip-ui Text/LabeledContent.swift RenderLabel), so two Texts would sit side by side on Android.
+/// A row title with its grey hint under it (the web's <label> + .hint); a switch's one line of what it does.
 struct PhoneRowLabel: View {
     var title: String
     var hint: String
 
     var body: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(title)
             Text(hint)
                 .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// A read-only value on the right of a row (the web's .ro.short), as 0.4.4 drew it. Not LabeledContent: with the
+/// two-line hint its adaptive layout put the value under the label (密钥 「没有」 dropped to a third line, replay
+/// shot after-light-04, 10-13), moving a value the owner reads on the right.
+struct PhoneValueRow: View {
+    var title: String
+    var value: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value)
                 .foregroundStyle(.secondary)
         }
     }

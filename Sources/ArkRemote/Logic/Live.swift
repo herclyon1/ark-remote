@@ -192,15 +192,6 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         busy = false
     }
 
-    /// view.js:2455-2457: after an order went out, ask the machine once, `afterSeconds` later, for a state reported after
-    /// `minAt` (the order's send time). One request, no loop; the caller does not wait for it.
-    func ping(afterSeconds: Double, minAt: Int) {
-        Task {
-            try? await Task.sleep(nanoseconds: UInt64(afterSeconds * 1_000_000_000))
-            await self.ping(minAt: minAt)
-        }
-    }
-
     private static func atOf(_ v: JSONValue?) -> Double? { v?["at"]?.number }
 
     private func pingInner(minAt: Int?, cfg: RelayConfig) async {
@@ -301,9 +292,9 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         let isAlive = lastHb > 0 && (relay.serverNowMs() - lastHb < hbWindowMs())
         if alive != isAlive { alive = isAlive }
         if isAlive {
-            // 「 · 」 separates: the status card's second line = 「实时 · 配置 1 分钟前」
+            // 「 · 」 separates the parts of the device card's grey line: 「开机中 · 实时 · 1 分钟前更新」
             relay.setStatus("开机中 · \(hbEvery > 60 ? "每 \(Int((Double(hbEvery) / 60).rounded())) 分钟报一次" : "实时")"
-                            + (relay.snapAt.map { " · 配置 \(ago($0))" } ?? ""), "on")
+                            + (relay.snapAt.map { " · \(ago($0))更新" } ?? ""), "on")
         } else if nowMs() < pendingUntil {
             relay.setStatus("正在确认是否在线…", "")
         } else if offline() {
@@ -720,29 +711,3 @@ final class NtfyStream: @unchecked Sendable {
     }
 }
 #endif
-
-extension NtfyStream {
-    /// 自检's push check (Pages/Phone/PhoneDiag.swift SelfCheck): ms until a stream on `topic` gets its `open` event, or
-    /// nil when none came within 8 s.
-    @MainActor static func probeOpen(topic: String) async -> Int? {
-        let t0 = nowMs()
-        return await withCheckedContinuation { (cont: CheckedContinuation<Int?, Never>) in
-            let done = OnceFlag()
-            var stream: NtfyStream?
-            stream = NtfyStream(topics: topic, since: "\(Int(t0 / 1000))") { e in
-                if e["event"]?.string == "open", done.take() {
-                    stream?.close()
-                    cont.resume(returning: Int(nowMs() - t0))
-                }
-            }
-            stream?.open()
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-                if done.take() {
-                    stream?.close()
-                    cont.resume(returning: nil)
-                }
-            }
-        }
-    }
-}

@@ -6,14 +6,15 @@
 // user 2026-09-23 08:23 「2.6 人份也行，按原方案走」).
 //
 // Data: Inventory.refresh(force) (inventory.js, ported separately) — the app signs its own 森空岛 request;
-// the game machine being off does not matter. Reads only on open and on pull to refresh; no timers.
+// the game machine being off does not matter. Reads only on open and on 「刷新」; no timers.
 //
 // Sections = the rows' `group`, in games[].groups order, else the order the file first names them (plan
 // §4.1); rows without a group are not shown. Inside a section: servings ascending, ties by stock ascending,
 // rows without a need last (§4.3).
 //
 // M4i (user 2026-09-23 09:20): a row that covers one build drops 「需 N」 from its subtitle; only a short row
-// keeps 「需 N」 and 「差 N」. Numbers from 10,000 up read in thousands, 22,639k (footnote 「k = 千」). The box
+// keeps 「需 N」 and 「差 N」. Numbers from 10,000 up read in thousands, 22,639k (footnote 「k = 千」; his 09-23 09:20
+// 「你们难道不会用k去表示吗」, kept after the 10-13 review asked for whole numbers). The box
 // row is a conversion note, not a 人份: 「133 个 · 换成缺的材料用了 131 个」, 「剩 2 个」.
 //
 // Self-select box (M4g; user 2026-09-23 09:05): Inventory.applyBox tops up the short rows; the right value
@@ -45,6 +46,8 @@ struct StockRow: Identifiable, Sendable, Equatable {
     let origin: String?
     /// Right value: 「2.6 人份」 / 「差 12」 / 「剩 2 个」, or nil.
     let value: String?
+    /// Not enough for one build (the value reads 「差 N」): the page draws the value orange (app-page-references P5).
+    var short = false
 }
 
 struct StockSection: Identifiable, Sendable, Equatable {
@@ -76,11 +79,14 @@ enum StockpileEmptyAction: Sendable, Equatable {
     static let shared = Stockpile()
 
     static let title = "库存"
+    static let refreshLabel = "刷新"
     static let loadingText = "正在从森空岛读取…"
     /// M4g: the box's own last section.
     static let boxSection = "资源箱"
 
     var content: StockpileContent = .loading
+    /// The 刷新 button is disabled while a read runs.
+    var busy = false
 
     /// Inventory.refresh(force) → inventory.js's result object ({取自, games: [...]}).
     @ObservationIgnored var loader: (@MainActor (Bool) async throws -> JSONValue)?
@@ -95,6 +101,8 @@ enum StockpileEmptyAction: Sendable, Equatable {
 
     func load(force: Bool) async {
         if lastGood == nil { content = .loading }
+        busy = true
+        defer { busy = false }
         do {
             guard let loader else { throw AppError("库存还没接上") }
             paint(try await loader(force))
@@ -119,11 +127,9 @@ enum StockpileEmptyAction: Sendable, Equatable {
             lastErr = err
         }
         if let good = lastGood, let gg = good["games"]?[0] {
-            // this read failed and the page keeps the last good one: this read's table note still goes under it
-            let nowNote = err.isEmpty ? nil : g?["needNote"].flatMap { $0.truthy ? $0.jsString : nil }
-            content = Self.list(gg, good, err: lastErr, nowNote: nowNote)
+            content = Self.list(gg, good, err: lastErr)
         } else if err == "没配森空岛" {
-            content = .empty(title: "没配森空岛", text: "库存从森空岛读；在「手机」页填好密钥串再来。", button: "去手机页", action: .phone)
+            content = .empty(title: "没配森空岛", text: "库存从森空岛读，在「手机」页填好密钥串后再来。", button: "去手机页", action: .phone)
         } else {
             content = .empty(title: "读不到库存", text: err, button: "重试", action: .retry)
         }
@@ -188,7 +194,8 @@ enum StockpileEmptyAction: Sendable, Equatable {
         let servings = r["servings"].flatMap { $0.isNull ? nil : $0.number }
         let v: String? = servings == nil ? nil : short > 0 ? "差 \(nf.num(short))" : mult(servings ?? 0)
         return StockRow(id: r["id"]?.jsString ?? "", name: r["name"]?.jsString ?? "", icon: iconOf(r),
-                        subtitle: sub, origin: from.isEmpty ? nil : " · \(from)", value: v)
+                        subtitle: sub, origin: from.isEmpty ? nil : " · \(from)", value: v,
+                        short: servings != nil && short > 0)
     }
 
     /// M4i (user 09-23 09:20 「资源箱为什么也要算人数」): the box is no one's need, only what it was turned into.
@@ -199,12 +206,22 @@ enum StockpileEmptyAction: Sendable, Equatable {
                         origin: nil, value: "剩 \(nf.num(r["boxLeft"]?.number)) 个")
     }
 
+    /// The day the need table was built, so a table that stopped being rebuilt shows its age: the relay rebuilds it every
+    /// server day (maa-automation needtable.py), and `built` reads "2026-10-14 03:36 UTC+8" (older copies: "… JST").
+    /// nil when there is no date at the start.
+    static func builtLine(_ built: String?) -> String? {
+        guard let b = built, b.count >= 10 else { return nil }
+        let parts = b.prefix(10).split(separator: "-")
+        guard parts.count == 3, parts[0].count == 4, let m = Int(parts[1]), let d = Int(parts[2]),
+              (1...12).contains(m), (1...31).contains(d) else { return nil }
+        return "需求表 \(m)月\(d)日 核对过最新六星"
+    }
+
     /// Rows came back but none has a group: the need table's grouping does not match, not 森空岛 (Inventory.needLacks wording).
     static let ungrouped = "需求表里终末地的材料都没有分组，和这次读到的库存对不上（不是森空岛回报的），列不出来"
 
-    /// stockpile.js listHtml(g, d, err): sections and footnote for one game. `nowNote`: the failed read's own
-    /// needNote when the page falls back on an earlier good read.
-    static func list(_ g: JSONValue, _ d: JSONValue, err: String, nowNote: String? = nil) -> StockpileContent {
+    /// stockpile.js listHtml(g, d, err): sections and footnote for one game.
+    static func list(_ g: JSONValue, _ d: JSONValue, err: String) -> StockpileContent {
         var nf = NumFormat()
         let rows = g["rows"]?.array ?? []
         var groups: [(name: String, rows: [JSONValue])] = []
@@ -245,11 +262,10 @@ enum StockpileEmptyAction: Sendable, Equatable {
         let taken = d["取自"]?.jsString ?? ""
         var foot: [String] = []
         foot.append(err.isEmpty ? "\(taken) 从森空岛读取" : "\(taken) 读取的数据；这次没读到：\(err)")
-        if let n = g["needNote"], n.truthy, n.jsString != nowNote { foot.append(n.jsString) }
-        if let nowNote { foot.append(nowNote) }
         // M4i: 人份 speaks of materials only; the box line (games[].box.note) does not
         foot.append("人份 = 材料库存 ÷ 一人所需" + (boxed ? "（缺的先用资源箱补）" : ""))
         if let c = g["caliber"], c.truthy { foot.append("一人所需 = \(c.jsString)") }
+        if let b = builtLine(g["built"]?.string) { foot.append(b) }
         foot.append("差 N = \(boxed ? "补箱后" : "库存")不够一人份，还差 N（需 − 库存\(boxed ? " − 箱" : "")）")
         if let note = box?["note"], note.truthy { foot.append(note.jsString) }
         if nf.usedK { foot.append("k = 千") }

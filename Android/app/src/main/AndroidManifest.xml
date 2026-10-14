@@ -13,10 +13,6 @@
          UPDATE_PACKAGES_WITHOUT_USER_ACTION (API 31+) the app updating itself may skip the confirm sheet -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
-    <!-- .sensoryFeedback (MonthCardRows.swift, the 月卡 登记 / 对准 success haptic): skip-ui plays it through the Vibrator,
-         which throws SecurityException without this ("Allows access to the vibrator.",
-         https://developer.android.com/reference/android/Manifest.permission#VIBRATE); the 10-07 replay crashed there -->
-    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:label="@string/app_name"
@@ -35,7 +31,15 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- the no-input link (PhoneLink.pageURL + #k=...); opens the app only once the domain is verified
+            <!-- the no-input link the App copies (PhoneLink.linkBase, arkremote://link#k=...); skip-ui's onOpenURL
+                 takes the ACTION_VIEW intent -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="arkremote" android:host="link" />
+            </intent-filter>
+            <!-- the old no-input link (PhoneLink.oldPageURL + #k=...); opens the app only once the domain is verified
                  (https://herclyon1.github.io/.well-known/assetlinks.json), otherwise Android 12+ opens the browser -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
@@ -47,6 +51,10 @@
         <!-- PackageInstaller session results for the in-app update (AppUpdater.kt) -->
         <receiver
             android:name=".UpdateStatusReceiver"
+            android:exported="false" />
+        <!-- the share chooser's pick for 分享 on the 诊断记录 sheet (ShareSheet.kt) -->
+        <receiver
+            android:name=".ShareChosenReceiver"
             android:exported="false" />
     </application>
 </manifest>

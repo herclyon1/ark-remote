@@ -1,6 +1,6 @@
-// The 终末地 (MaaEnd) tab: the 库存 row, then 基质刷取, 协议空间, 另一个任务 (schema.js:143-218; the web's 「另外两个任务」 has
-// one, 自动采集). A Settings-style grouped list: each card keeps its task switch and mode, the rest is one level down under
-// 「更多设置」. This page only draws and reports changes; EndfieldTab sends them as they are made.
+// The 终末地 (MaaEnd) tab. Same cards and rows as the web page's 终末地 tab (view.js:753 TABS /^终末地/):
+// the 库存 entry row (view.js:407), then 基质刷取, 协议空间, 另一个任务 (schema.js:143-218; the web's 「另外两个任务」 has one, 自动采集).
+// Data, saving and the tab bar are wired by 验收 once the logic layer lands; this page only draws and reports edits.
 
 import SwiftUI
 
@@ -83,24 +83,31 @@ struct EndfieldPage: View {
         if let c = ewCard(g, data, values: values) {
             let main = c.rows.filter { EndfieldSchema.firstLevel.contains($0.path) }
             let more = c.rows.contains { !EndfieldSchema.firstLevel.contains($0.path) }
+            let foot = ewFoot(main, card: c.rows)   // view.js:976-995: the hints sit under the card, one sentence a line
             // view.js:801-803, 826: a card with no rows this time is not drawn (listSection: a bare `if` leaves an empty
             // grey section on Android, Pages/Shell/SkipFixes.swift).
             listSection("endfield-\(g.title)", if: !c.rows.isEmpty) {
                 Section {
                     ForEach(ewNoteRows(c.notes, "warn-\(g.title)") + main) { row in
                         EWRowView(row: row, values: $values, readonly: c.master.readonly, onChange: onChange,
-                                  tag: data.tags[row.path], onResend: onResend)
+                                  tag: data.tags[row.path], onResend: onResend, showHint: false)
                     }
                     // The rest of the card one level down, as Settings does (HIG-CHECKLIST.maa.md:55). By value, so a reselect
                     // can pop it (D39); not navigationDestination(isPresented:) - see the 库存 row above (7f89811).
                     if more {
+                        // named after its card, so two rows on one screen never read the same and the pushed page's
+                        // title is the row that opened it (HIG Writing: "Be clear"; HIG review 1014)
                         NavigationLink(value: EndfieldRoute.more(g.title)) {
-                            Text("更多设置")
+                            Text(ewMoreName(g.title))
                         }
                         .listRowBackground(rowBackground(nil))   // same row shape as the EWRowView rows beside it (SkipFixes.swift)
                     }
                 } header: {
-                    Text(g.title)
+                    // the page is 终末地 already: 「终末地 · 基质刷取」 → 「基质刷取」 (HIG Writing: "Check each word to be
+                    // sure it needs to be there.")
+                    Text(ewCardName(g.title))
+                } footer: {
+                    if !foot.isEmpty { Text(verbatim: foot) }
                 }
             }
         } else {
@@ -109,7 +116,7 @@ struct EndfieldPage: View {
                 warningLabel("这一段的配置文件读不到（机器上那份母本不在或坏了），这次没法改")
                     .foregroundStyle(.orange)
             } header: {
-                Text(g.title)
+                Text(ewCardName(g.title))
             }
         }
     }
@@ -121,7 +128,7 @@ struct EndfieldPage: View {
 enum EndfieldRoute: Hashable {
     /// 库存 → EndfieldStockpilePage.
     case stockpile
-    /// A card's 「更多设置」 → EndfieldMorePage, by the card's title (EWGroupSpec.title).
+    /// A card's 「…设置」 row (ewMoreName) → EndfieldMorePage, by the card's title (EWGroupSpec.title).
     case more(String)
 }
 
@@ -136,18 +143,29 @@ func ewCard(_ g: EWGroupSpec, _ data: EndfieldPageData, values: [String: EWValue
     return (m, notes, ewRows(g, tm, values: values))
 }
 
+/// 「终末地 · 基质刷取」 → 「基质刷取」: a card's name without the game, which the tab already says. The full title stays
+/// the card's key (EndfieldRoute.more, section ids).
+func ewCardName(_ title: String) -> String { title.components(separatedBy: " · ").last ?? title }
+
+/// The row that pushes a card's EndfieldMorePage, and that page's title: 「基质刷取设置」, 「协议空间设置」. The card
+/// 「另一个任务」 holds one task, 自动采集, so its row is 「自动采集设置」 (EndfieldSchema.otherTasks).
+func ewMoreName(_ title: String) -> String {
+    let n = ewCardName(title)
+    return (title == EndfieldSchema.otherTasks.title ? "自动采集" : n) + "设置"
+}
+
 /// The warnings as rows; `prefix` keeps their ids apart between pages.
 func ewNoteRows(_ notes: [String], _ prefix: String) -> [EWRow] {
     notes.enumerated().map { EWRow(id: "\(prefix)-\($0.offset)", kind: .warning, path: "", label: $0.element) }
 }
 
 /// A card's rows past its first level (EndfieldSchema.firstLevel), titled by the task. The rows are worked out here from
-/// the page's own `values`, kept to the shown master (machine + sent + going out, ewShown) as the 终末地 page keeps its own,
-/// so a mode changed on either page shows the rows it opens; changes go through the same `onChange` (EndfieldTab sends them).
+/// the page's own `values`, kept to the shown master (machine + 已寄出 + 待保存, ewShown) as the 终末地 page keeps its own,
+/// so a mode changed on either page shows the rows it opens; edits go through the same `onChange` into EWEdits.
 ///
 /// Its own state, not the 终末地 page's `$values`: on Android the 终末地 page's resync (its onChange of data.master.values)
 /// did not reach this page while it was pushed - a binding captured by the navigationDestination closure skip-ui keeps
-/// from its first registration (Navigation.swift:869-872) - so the rows kept values the machine had since replaced
+/// from its first registration (Navigation.swift:869-872) - so after ✕ here the rows kept the discarded values
 /// (执行周期 「已选 6/7」 for 7/7, 使用刻写券 off for on) until a trip back to the root (0.4.4 second test pass).
 struct EndfieldMorePage: View {
     var group: EWGroupSpec
@@ -167,27 +185,35 @@ struct EndfieldMorePage: View {
         _values = State(initialValue: ewEffectiveMaster(d.master, lastGood: d.lastGoodMaster).0?.values ?? [:])
     }
 
-    /// 「终末地 · 基质刷取」 → 「基质刷取」.
-    private var name: String { group.title.components(separatedBy: " · ").last ?? group.title }
+    private var name: String { ewMoreName(group.title) }
 
     var body: some View {
         let data = self.data()
         let c = ewCard(group, data, values: values)
         let rest = c?.rows.filter { !EndfieldSchema.firstLevel.contains($0.path) } ?? []
+        let foot = ewFoot(rest, card: c?.rows ?? [])   // view.js:976-995, as on the 终末地 page
         List {
             // listSection: rows a mode opened can all go while this page is open (SkipFixes.swift)
             listSection("endfield-more-\(group.title)", if: !rest.isEmpty) {
                 Section {
                     ForEach(ewNoteRows(c?.notes ?? [], "more-warn-\(group.title)") + rest) { row in
                         EWRowView(row: row, values: $values, readonly: c?.master.readonly ?? [:], onChange: onChange,
-                                  tag: data.tags[row.path], onResend: onResend)
+                                  tag: data.tags[row.path], onResend: onResend, showHint: false)
                     }
+                } footer: {
+                    if !foot.isEmpty { Text(verbatim: foot) }
                 }
             }
         }
         .keyboardDone()
-        .navigationTitle(name)
-        // a send, a dropped change, a newer machine state: back to what the master now shows (EndfieldPage's own onChange)
+        // the ✕ / ✓ of 「待保存」 here too, so a change made on this page is saved from it
+        .modifier(EWSaveBar(title: name))
+        #if os(iOS)
+        // a pushed page's title small and centred, as Shortcuts' pushed editors and Health's pushed lists (P5); iOS only
+        // (MonthCardPage says why)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        // ✕ (edits dropped), a send, a newer machine state: back to what the master now shows (EndfieldPage's own onChange)
         .onChange(of: data.master.values) { _, _ in
             let d = self.data()
             values = ewEffectiveMaster(d.master, lastGood: d.lastGoodMaster).0?.values ?? [:]

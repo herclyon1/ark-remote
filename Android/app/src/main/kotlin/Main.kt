@@ -54,6 +54,8 @@ open class AndroidAppMain: Application {
         }
         // crash-rec: earlier runs' ANRs (AnrScan below; CrashRec.start runs the scan) and the version this run leaves for the next scan
         AnrScan.start(this)
+        // the system share panel with its result for the 诊断记录 / 自检结果 sheet (ShareSheet.kt)
+        ShareSheet.start(this)
         watchNetwork()
         // in-app update from GitHub Releases (AppUpdater.kt); hands Swift the check / install entry points
         AppUpdater.start(this)
@@ -89,6 +91,7 @@ open class MainActivity: AppCompatActivity {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         logger.info("starting activity")
+        ShareSheet.activity = java.lang.ref.WeakReference(this)
         UIApplication.launch(this)
         enableEdgeToEdge()
 
@@ -149,11 +152,14 @@ open class MainActivity: AppCompatActivity {
 
     override fun onResume() {
         super.onResume()
+        ShareSheet.activity = java.lang.ref.WeakReference(this)
+        ShareSheet.resumed()
         AppDelegate.shared.onResume()
     }
 
     override fun onPause() {
         super.onPause()
+        ShareSheet.paused()
         AppDelegate.shared.onPause()
     }
 

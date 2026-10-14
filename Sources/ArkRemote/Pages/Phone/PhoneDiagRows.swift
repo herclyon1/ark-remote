@@ -1,249 +1,219 @@
 import SwiftUI
 import SkipFuse
+#if !os(Android) && canImport(UIKit)
+import UIKit
+#endif
 
-/// 诊断记录 switch, its record, 运行自检 and 清空 as one section of the 手机 tab (web: #diagsw, #selfcheck,
-/// view.js:600-602, 1310-1322). A Toggle shows its own state; the record and the self check are handed over with the
-/// share sheet, which carries Copy (HIG Activity views: "Activity views present sharing activities like messaging and
-/// actions like Copy and Print", https://developer.apple.com/design/human-interface-guidelines/activity-views).
+/// 诊断记录 switch, 运行自检 and the record sheet, in the 这台手机 section (web: #diagsw, #selfcheck, view.js:600-602, 1310-1322).
+/// The Apple page of the same use: Settings › Privacy & Security › Analytics & Improvements (P13,
+/// evidence/app-pages-1007/apple/P13-设置-分析数据列表.png): a switch that starts recording on this device and the
+/// records to look at and share. The switch is its own feedback (no 「诊断记录已开 / 已关」 toast, shell API id 266; HIG
+/// Alerts: "Avoid using an alert merely to provide information"); 运行自检 shows the system spinner in its row while it
+/// runs, as Settings › General › Software Update does while it checks.
 struct PhoneDiagRows: View {
+    var appVersion: String
+
     @State var diagOn = DiagLog.shared.enabled
-    /// 「清空诊断记录」 asks first: one stray tap wiped the record that was to be sent (edge audit 40).
+    /// 「清空诊断记录」 asks first: right under 「分享诊断记录」, one stray tap wiped the record that was to be sent (edge audit 40).
     @State var clearAsk = false
 
     var body: some View {
-        // the count is observed so the rows below are redrawn after each new event
+        // the count is observed so the row below is redrawn after each new event
         let count = DiagCounter.shared.count >= 0 ? DiagLog.shared.count : 0
-        let run = SelfCheckRun.shared
-        Section {
-            Toggle("诊断记录", isOn: $diagOn)
-                .onChange(of: diagOn) { _, on in
-                    DiagLog.shared.setEnabled(on)
-                    if on { DiagWatch.start() }
-                }
-                // on the row, not the Section: skip-ui's List finds its sections by type, so a modifier around the
-                // Section is not safe (MonthCardRows.swift)
-                .onAppear { if diagOn { DiagWatch.start(); DiagUI.shared.start() } }
-            if diagOn {
-                // the web opens this from a tap on the bottom line (DiagAccessory); here it is pushed from the page, by
-                // value (PhoneRoute, PhonePage's navigationDestination) so ContentView's path pops it on a reselect (D39)
-                NavigationLink(value: PhoneRoute.diagRecord) {
-                    LabeledContent("分享诊断记录", value: "\(count) 条")
-                }
-                // view.js:602 #selfcheck is hidden while 诊断记录 is off. The running flag and the result live in
-                // SelfCheckRun: a reselect of 手机 rebuilds this List on Android (D39) and drops this view's @State.
-                Button {
-                    run.run()
-                } label: {
-                    LabeledContent("运行自检") {
-                        if run.checking { ProgressView() }
-                    }
-                }
-                .disabled(run.checking)
-                if let rec = run.record {
-                    selfCheckResult(rec)
-                }
-                Button("清空诊断记录", role: .destructive) { clearAsk = true }
-                    .disabled(count == 0)
-                    .confirmationDialog("清空诊断记录？", isPresented: $clearAsk, titleVisibility: .visible) {
-                        Button("清空 \(count) 条", role: .destructive) { DiagLog.shared.clear() }
-                        Button("取消", role: .cancel) {}
-                    } message: {
-                        Text("还没分享的就找不回来了。")
-                    }
-            }
-        } footer: {
-            Text("开着时记下这台手机收发消息、网络通断和机器状态的变化；出问题时按「就是这里」送出整份记录，或在这里分享给我们。")
+        Toggle(isOn: Binding(get: { diagOn }, set: { v in
+            diagOn = v
+            DiagLog.shared.setEnabled(v)
+            if v { DiagWatch.start() }
+        })) {
+            PhoneRowLabel(title: "诊断记录", hint: "开着时记下这台手机收发消息、网络通断和机器状态的变化，可以复制或分享。")
         }
-    }
-
-    /// The last 运行自检 (LastSelfCheck): 通过 N / M as the value, the failed checks under the label, and the whole
-    /// JSON to share (the web's 自检结果 sheet: 「通过 x / y，不通过 n 项」, copy / share).
-    @ViewBuilder
-    private func selfCheckResult(_ rec: JSONValue) -> some View {
-        let total = Int(rec["total"]?.number ?? 0), fails = Int(rec["fails"]?.number ?? 0)
-        let failed = (rec["rows"]?.array ?? []).filter { $0["ok"]?.bool == false }.compactMap { $0["name"]?.string }
-        LabeledContent {
-            Text("通过 \(total - fails) / \(total)")
-        } label: {
-            if failed.isEmpty {
-                Text("自检结果")
-            } else {
-                PhoneRowLabel(title: "自检结果", hint: "没过：" + failed.joined(separator: "、"))
+        .onAppear { if diagOn { DiagWatch.start(); DiagUI.shared.start() } }
+        if diagOn {
+            // the same sheet a tap on the 诊断记录 bar opens (Pages/Shell/DiagAccessory.swift DiagSheet presents it on the
+            // TabView), so the two ways in show one thing and the page's pull to refresh never reaches the sheet's list
+            // the count as the row's grey value, as P13 puts a number on the right of its row
+            Button { DiagUI.shared.openSheet() } label: {
+                LabeledContent("分享诊断记录", value: "\(count) 条")
             }
+            Button("清空诊断记录", role: .destructive) { clearAsk = true }
+                // as 清除密钥: an action sheet from the button (P10 / N9; HIG Action sheets "Use an action sheet — not
+                // an alert — to offer choices related to an intentional action")
+                .confirmationDialog("清空诊断记录？", isPresented: $clearAsk, titleVisibility: .visible) {
+                    Button("清空", role: .destructive) { DiagLog.shared.clear() }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    // no count: the record keeps growing while the dialog is up, and a number frozen in it did not
+                    // match the row behind (HIG Action sheets: "Provide a message only if necessary.")
+                    Text("记下的都会删掉，还没分享的找不回来。")
+                }
+            // view.js:602 #selfcheck is hidden while 诊断记录 is off. The running flag and the result sheet live in
+            // SelfCheckRun and the sheet is on PhonePage outside its .id(reselect): a reselect of 手机 rebuilds this List
+            // on Android (D39), and @State here went back to 「运行自检」 mid-run, the result sheet never coming up.
+            let run = SelfCheckRun.shared
+            Button {
+                guard !run.checking else { return }
+                run.checking = true
+                Task {
+                    _ = await SelfCheck.run()   // kept in LastSelfCheck; the sheet reads it from there
+                    run.checking = false
+                    run.shown = true
+                }
+            } label: {
+                if run.checking {
+                    LabeledContent("正在自检…") { ProgressView() }
+                } else {
+                    Text("运行自检")
+                }
+            }
+            .disabled(run.checking)
         }
-        ShareLink("分享自检结果", item: rec.encodedString(), subject: Text("自检结果"))
     }
 }
 
-/// view.js showDiagSheet as a page: what the record is (rows) and the share sheet for it. Pushed from the 手机 tab;
-/// in a sheet from the status line (DiagRecordSheet). The record is taken once when the view appears
-/// (DiagUI.prepareSheet), not in body: an export writes the log to storage (DiagLog.exportObject → persist).
-struct DiagRecordView: View {
+/// view.js showDiagSheet(rec, "accept"): 「自检结果」 with the pass count, 复制 / 分享 / 关闭.
+/// The web's last clause 「关闭后页面重新打开，换回你自己的数据」 is left out: the app's self check runs on its own data
+/// and closing reopens nothing.
+struct SelfCheckSheet: View {
+    var close: () -> Void
+
     var body: some View {
-        let ui = DiagUI.shared
-        List {
-            if let rec = ui.sheetRecord {
-                let f = DiagUI.facts(rec)
-                Section {
-                    LabeledContent("条数", value: "\(f.events) 条")
-                    LabeledContent("大小", value: "\(f.kb) KB")
-                    if !f.marks.isEmpty {
-                        LabeledContent("你标的", value: f.marks)
-                    }
-                    LabeledContent("上传", value: f.upload)
-                }
-                Section {
-                    ShareLink("分享诊断记录", item: f.json, subject: Text("诊断记录"))
-                        .disabled(f.sent)
-                } footer: {
-                    Text(f.sent ? "这份已经送到，不用再分享。" : "送不到时分享出去，比如粘到聊天里。")
-                }
-            } else {
-                ProgressView()
-            }
+        let rec = LastSelfCheck.stored() ?? .null
+        let json = rec.encodedString()
+        // one row per check, so a failure says which check and why (BOARD/App-待他定项-从记录定-1014.md P5; his 09-07
+        // 14:59 「描述模糊是第一大禁止」); no file format or size (HIG Writing: "avoiding jargon")
+        let rows = (rec["rows"]?.array ?? []).map {
+            SelfCheckItem(name: $0["name"]?.jsString ?? "", ok: $0["ok"]?.truthy ?? false, detail: $0["detail"]?.jsString ?? "")
         }
-        .navigationTitle("诊断记录")
-        .onAppear { ui.prepareSheet() }
+        DiagSheetBox(title: "自检结果", message: "复制后粘到聊天里，或用分享发出。", json: json, canShare: true,
+                     checks: rows, close: close)
     }
 }
 
-/// DiagRecordView in a sheet, Close leading (opened from the status line, which is outside every NavigationStack).
+/// view.js showDiagSheet(rec): 「诊断记录」 for DiagUI.sheetRecord, redrawn while its upload moves on (the web's
+/// 「诊断记录已生成」; HIG Toolbars: "Aim for a word or short phrase that distills the purpose of the window").
 struct DiagRecordSheet: View {
+    var close: () -> Void
+
+    var body: some View {
+        let rec = DiagUI.shared.sheetRecord ?? .null
+        let m = DiagUI.sheetMessage(rec)
+        // once the record is in the bucket there is nothing left to hand over: 分享 goes (view.js sent())
+        DiagSheetBox(title: "诊断记录", message: m.text, json: m.json, canShare: !m.sent, close: close)
+    }
+}
+
+/// index.html #diagsheet: title, message, then 复制 / 分享 / 关闭.
+/// The system's sheet as P12 / P13 have it: a navigation bar with the title and the close ✕ leading (HIG Sheets: "the
+/// Cancel button belongs on the leading edge of the top toolbar"), the message as the grey text over the two actions
+/// (P13 puts its explanation above the rows, not in a card), the sheet at half height first and pulled up for more
+/// (自检结果, whose rows would hide 复制 / 分享, opens at full height)
+/// (HIG Sheets: "In an iPhone app, consider supporting the medium detent to allow progressive disclosure of the
+/// sheet's content."). Nothing measured: the list scrolls a long 自检结果 by itself, never cut (no lineLimit).
+/// 复制's own label says 「已复制整份记录」 once it took (shell API id 272: "a button whose label turns into 「已复制」"),
+/// no toast; 分享 is the system share sheet (DiagShare), and only its failure is said, in this sheet's own alert
+/// (view.js ask("分享没成", …, "好", false, { single: true })).
+struct DiagSheetBox: View {
+    var title: String
+    var message: String
+    var json: String
+    var canShare: Bool
+    /// 自检结果: one row per check above the buttons.
+    var checks: [SelfCheckItem] = []
+    var close: () -> Void
+
+    @State var copied = false
+    #if !os(Android)
+    /// 自检结果 opens at full height: its rows fill the half-height sheet and pushed 复制 / 分享, its only actions, below
+    /// the fold (HIG review 1014). 诊断记录 has no rows and opens at half height.
+    @State var detent: PresentationDetent
+    #endif
+
+    init(title: String, message: String, json: String, canShare: Bool, checks: [SelfCheckItem] = [],
+         close: @escaping () -> Void) {
+        self.title = title
+        self.message = message
+        self.json = json
+        self.canShare = canShare
+        self.checks = checks
+        self.close = close
+        #if !os(Android)
+        _detent = State(initialValue: checks.isEmpty ? .medium : .large)
+        #endif
+    }
+
     var body: some View {
         NavigationStack {
-            DiagRecordView()
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(role: .close) { DiagUI.shared.sheetOpen = false }
+            List {
+                listSection("diag-checks", if: !checks.isEmpty) {
+                    Section {
+                        ForEach(checks.indices, id: \.self) { i in checkRow(checks[i]) }
                     }
                 }
-        }
-    }
-}
-
-/// seg-frames-logger.js 件 B 「就是这里」 and its word panel (MARK_WORDS) as a system Menu. The mark itself has no
-/// system equivalent (a one-tap "send what you see now" control); it is a system bordered button tinted red.
-struct DiagMarkMenu: View {
-    var body: some View {
-        Menu {
-            ForEach(DiagUI.markWords, id: \.self) { w in
-                Button(w) { DiagUI.shared.mark(w) }
+                Section {
+                    Button(copied ? "已复制整份记录" : "复制") {
+                        PhoneLink.copy(json)
+                        copied = true
+                    }
+                    if canShare {
+                        // view.js share.onclick (DiagShare)
+                        Button("分享") { DiagShare.shared.share(json, title: title == "自检结果" ? "自检结果" : "诊断记录") }
+                    }
+                } header: {
+                    Text(verbatim: message).textCase(nil)
+                }
             }
-            Button("直接发（不选词）") { DiagUI.shared.mark(nil) }
-        } label: {
-            Text("就是这里")
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(.red)
-    }
-}
-
-/// #diagline and #diagmark as one bar: the status line (a tap opens the record sheet) and 「就是这里」.
-/// On iOS it is the tab view's bottom accessory ("Places a view as the bottom accessory of the tab view",
-/// https://developer.apple.com/documentation/swiftui/view/tabviewbottomaccessory(content:)), via DiagBottomAccessory.
-struct DiagAccessory: View {
-    #if os(iOS)
-    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
-    private var lines: Int { placement == .inline ? 1 : 2 }
-    #else
-    private var lines: Int { 2 }
-    #endif
-
-    var body: some View {
-        let ui = DiagUI.shared
-        HStack {
-            Button {
-                ui.openSheet()
-            } label: {
-                Text(ui.line)
-                    .font(.footnote)
-                    .lineLimit(lines)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            .navigationTitle(title)
+            #if !os(macOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    closeButton
+                        .accessibilityLabel("关闭")
+                }
             }
-            .buttonStyle(.plain)
-            DiagMarkMenu()
         }
-        .padding(.horizontal)
-    }
-}
-
-/// What ContentView puts on its TabView in place of `.overlay { DiagOverlay() }`: on iOS the bar is the tab view's
-/// bottom accessory while 诊断记录 is on, and the record sheet opens from the TabView; on Android (skip-ui has no
-/// tabViewBottomAccessory, Containers/TabView.swift:1236-1239 unavailable) it is DiagOverlay.
-struct DiagBottomAccessory: ViewModifier {
-    func body(content: Content) -> some View {
-        #if os(iOS)
-        let ui = DiagUI.shared
-        content
-            .tabViewBottomAccessory(isEnabled: ui.on) { DiagAccessory() }
-            .sheet(isPresented: Binding(get: { DiagUI.shared.sheetOpen }, set: { DiagUI.shared.sheetOpen = $0 })) {
-                DiagRecordSheet()
-            }
-            .onAppear { if ui.on { DiagWatch.start(); ui.start() } }
-        #else
-        content.overlay { DiagOverlay() }
-        #endif
-    }
-}
-
-/// Android: the bar over every tab, above the navigation bar, while 诊断记录 is on. skip-ui has neither
-/// tabViewBottomAccessory (Containers/TabView.swift:1236-1239) nor safeAreaInset (skip-fuse-ui Layout/SafeArea.swift:19-22,
-/// unavailable), so it is placed over the TabView from the bottom edge. iOS / macOS: nothing drawn (DiagBottomAccessory
-/// carries the bar); it only starts the recorder at launch while ContentView still overlays it.
-struct DiagOverlay: View {
-    #if os(Android)
-    /// The Material 3 navigation bar's container height, 80 dp (https://m3.material.io/components/navigation-bar/specs),
-    /// which skip-ui's TabView draws at the bottom.
-    private static let navigationBar: CGFloat = 80
-    #endif
-
-    var body: some View {
-        let ui = DiagUI.shared
         #if os(Android)
-        ZStack {
-            if ui.on {
-                DiagAccessory()
-                    .padding(.vertical, 8)
-                    .background(.regularMaterial)
-                    .clipShape(Capsule())
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { DiagBarHeight.shared.value = $0 }
-                    .padding(.horizontal)
-                    .padding(.bottom, Self.navigationBar + 8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .presentationDetents([.medium, .large])
+        #else
+        .presentationDetents([.medium, .large], selection: $detent)
+        #endif
+        // a new record (the line's upload moved on, or another 分享诊断记录) is not the one that was copied
+        .onChange(of: json) { _, _ in copied = false }
+        .alert("分享没成", isPresented: Binding(get: { DiagShare.shared.failNote != nil },
+                                                set: { if !$0 { DiagShare.shared.failNote = nil } })) {
+            Button("好") {}
+        } message: {
+            Text(verbatim: DiagShare.shared.failNote ?? "")
+        }
+    }
+
+    /// A passed check: its name and a grey 「通过」, no colour. A failed one: its name with what failed under it, and the
+    /// system red ✗ (an error in Apple's system colours; named 没通过 for VoiceOver).
+    @ViewBuilder private func checkRow(_ c: SelfCheckItem) -> some View {
+        if c.ok {
+            LabeledContent(c.name) { Text("通过").foregroundStyle(.secondary) }
+        } else {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(c.name)
+                    Text(c.detail).font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer()
+                symbol("xmark.circle.fill", android: "Icons.Filled.Close").foregroundStyle(Color.red)
+                    .accessibilityLabel("没通过")
             }
         }
-        .onAppear { if ui.on { DiagWatch.start(); ui.start() } }
-        .sheet(isPresented: Binding(get: { DiagUI.shared.sheetOpen }, set: { DiagUI.shared.sheetOpen = $0 })) {
-            DiagRecordSheet()
-        }
-        #else
-        Color.clear
-            .allowsHitTesting(false)
-            .onAppear { if ui.on { DiagWatch.start(); ui.start() } }
-        #endif
     }
-}
 
-#if os(Android)
-/// The Android bar's measured height (DiagOverlay), for DiagRoom's bottom margin.
-@MainActor @Observable final class DiagBarHeight {
-    static let shared = DiagBarHeight()
-    var value: CGFloat = 0
-}
-#endif
-
-/// Android: bottom room under each tab's pages while 诊断记录 is on, so the last row scrolls up past DiagOverlay (the
-/// bar sat over 状态 「查看全部」 and 鸣潮 「周本打第几个」 with nothing to scroll them clear, test pass 3). skip-ui's
-/// contentMargins reaches the LazyColumn contentPadding (List.swift:290-294; ScrollView.swift:322-336). On each tab's
-/// NavigationStack (ContentView.tabs), so pushed pages get it too; DiagUI.shared.on is read here, in body(content:),
-/// because a read in ContentView's body does not redraw the tab roots. iOS: nothing — the system insets the content
-/// for the tab view's bottom accessory.
-struct DiagRoom: ViewModifier {
-    func body(content: Content) -> some View {
+    /// The system's close ✕ (iOS 26 ButtonRole.close), as SaveBar's ✕; Android: the same glyph, skip has no close role.
+    @ViewBuilder private var closeButton: some View {
         #if os(Android)
-        content.contentMargins(.bottom, DiagUI.shared.on ? DiagBarHeight.shared.value + 8 : 0)
+        Button { close() } label: { Image(systemName: "xmark") }
         #else
-        content
+        Button(role: .close) { close() }
         #endif
     }
 }
+
+// The 诊断记录 bar over every tab (DiagOverlay, DiagRoom) is the shell's now: Pages/Shell/DiagAccessory.swift.

@@ -263,6 +263,12 @@ struct RelayConfig: Codable, Sendable, Equatable {
     var pin: String
 }
 
+/// view.js ask(title, msg, "好", false, { single: true }): an alert with one 「好」 (a reason is a sentence, not a toast).
+struct AlertNote: Sendable, Equatable {
+    let title: String
+    let message: String
+}
+
 /// net.js pinScan: how many states the mailbox held and how many matched the PIN.
 struct PinScan: Sendable, Equatable {
     var seen = 0
@@ -283,6 +289,8 @@ struct PinScan: Sendable, Equatable {
     /// view.js setStatus(text, state): the status line and its dot ("on" / "off" / "").
     var statusText = ""
     var statusState = ""
+    /// view.js ask(..., { single: true }): the alert for the page to present; nil when none is up.
+    var alert: AlertNote?
     /// net.js pinScan.
     var pinScan = PinScan()
     /// The state on COS carries another PIN (cosState). Kept apart from pinScan, which latestState() zeroes and counts
@@ -362,6 +370,20 @@ struct PinScan: Sendable, Equatable {
     func setStatus(_ text: String, _ state: String) {
         if statusText != text { statusText = text }
         if statusState != state { statusState = state }
+    }
+
+    /// The web page's toast. There is no toast in the App: the text goes to the status line under the tab titles
+    /// (Feedback.status). Each remaining call picks its native pattern instead (Pages/Shell/Feedback.swift).
+    @available(*, deprecated, message: "no toasts: Feedback.status, a disabled button with its footer, ShareLink, or the control's own state (Pages/Shell/Feedback.swift)")
+    func showToast(_ text: String, ms: Int = 2600) {
+        Feedback.status(text)
+    }
+
+    /// view.js ask(title, msg, "好", false, { single: true }). One alert at a time (view.js:46, UIAlertController presents
+    /// one): the page's single `.alert` shows `alert`; a newer note replaces it rather than being dropped, so a failure is
+    /// never swallowed when nothing has cleared an earlier one.
+    func showAlert(_ title: String, _ message: String) {
+        alert = AlertNote(title: title, message: message)
     }
 
     // MARK: mailbox
@@ -450,6 +472,12 @@ struct PinScan: Sendable, Equatable {
     /// phone.py hb_key(topic): the heartbeat object next to the state, `state/<same hash>.hb.json`.
     nonisolated static func hbURL(topic: String) -> String {
         String(stateURL(topic: topic).dropLast(".json".count)) + ".hb.json"
+    }
+
+    /// needtable.py need_key(topic): the need table the relay rebuilds every server day, `state/<same hash>.need.json`
+    /// (maa-automation relay/ark_relay/features/needtable/needtable.py; public-read like the state).
+    nonisolated static func needURL(topic: String) -> String {
+        String(stateURL(topic: topic).dropLast(".json".count)) + ".need.json"
     }
 
     /// The GET cosHb() makes; tests replace it so no request leaves the Mac.

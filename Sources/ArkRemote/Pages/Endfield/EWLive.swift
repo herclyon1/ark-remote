@@ -1,9 +1,7 @@
-// Live data and saving for the 终末地 and 鸣潮 tabs: snap → page data, and sending the changes. Each change goes out as
-// its own command (the web's #go handler, view.js:2402-2440) and is recorded in Pending (`pending[e._id] = {...}`).
-// The 终末地 tab applies a change as soon as it is made (EWSave.apply), as Settings does: no 「待保存」 batch, no review.
+// Live data and saving for the 终末地 and 鸣潮 tabs: snap → page data, and the web page's save flow
+// (maa-automation/web/view.js): edits wait in 「待保存」, one review, then each goes out as its own command
+// (#go handler, view.js:2402-2440) and is recorded in Pending (`pending[e._id] = {...}`).
 
-import Observation
-import SkipFuse   // @Observable types only drive the Android UI with SkipFuse imported
 import SwiftUI
 
 extension EWMaster {
@@ -106,7 +104,7 @@ func ewBase(game: String, path: String, machine: EWValue?) -> EWValue? {
     return p.to.ewValue
 }
 
-/// Puts a change into the pool of changes not yet sent (nil drops it) where a JS object would: a key already there keeps its place in the
+/// Puts a change into 「待保存」 (nil drops it) where a JS object would: a key already there keeps its place in the
 /// change order (`edits[id] = …` on an existing key), a new or re-added one goes last (view.js note / delete edits[id]).
 @MainActor
 func ewPutEdit(_ key: String, _ edit: EWEdit?) {
@@ -115,7 +113,7 @@ func ewPutEdit(_ key: String, _ edit: EWEdit?) {
     EWEdits.shared.items[key] = e
 }
 
-/// The status under a row (pending.js:47-70, view.js:1268-1275): going out / did not go out, then the receipt.
+/// The small lines under a row (pending.js:47-70, view.js:1268-1275): 「待保存」 while unsaved, then the receipt tag.
 struct EWRowTag: Equatable {
     var unsaved = false
     var text: String? = nil
@@ -125,30 +123,20 @@ struct EWRowTag: Equatable {
     var bad = false
     /// sent and waiting (`.posted`, view.js:60).
     var posted = false
-    /// The change is going out now (EWSave.apply / EWSave.resend): a spinner in the row.
-    var sending = false
-    /// Why the last send of this change did not go out (EWEdit.failure); the row offers 再发一次 / 不改了.
-    var failure: String? = nil
-    /// The pool key behind `failure`, for EWSave.retry / EWSave.drop.
-    var retryKey: String? = nil
 }
 
 /// The tag for one Pending key; nil when the row has nothing under it.
 @MainActor
 func ewTag(_ key: String, edits: [String: EWEdit]) -> EWRowTag? {
-    let edit = edits[key]
-    let unsaved = edit != nil
+    let unsaved = edits[key] != nil
     var t = EWRowTag(unsaved: unsaved)
-    let q = EWSendQueue.shared
-    t.sending = (edit != nil && edit?.failure == nil && q.queued.contains(key)) || q.resending.contains(key)
-    if let f = edit?.failure { t.failure = f; t.retryKey = key }
     switch Pending.shared.tag(for: key, editing: unsaved) {
     case .sent(let text)?: t.text = text; t.resendKey = Pending.shared.staleResendKey(for: key); t.posted = true
     case .mismatch(let text, let k)?: t.text = text; t.resendKey = k; t.posted = true; t.bad = true
     case .applied(let text)?: t.text = text
     case nil: break
     }
-    return t.unsaved || t.text != nil || t.sending ? t : nil
+    return t.unsaved || t.text != nil ? t : nil
 }
 
 /// Tags for every config path of a game, keyed by path (the rows' own key).
@@ -218,326 +206,13 @@ enum EWLastGood {
     }
 }
 
-/// One change not yet sent (view.js `edits[id]`). src: "master", "relay" or "wb".
-struct EWEdit: Equatable {
-    var label: String
-    var src: String
-    var owner: String = ""
-    var path: String = ""
-    var from: JSONValue?
-    var to: JSONValue
-    /// relay switches: the command body (sw.on / sw.off).
-    var body: JSONValue? = nil
-    /// When the change was made (ms): the review lists and sends in this order, as the web page's `edits` object keeps
-    /// its keys in insertion order (view.js doSave :1609, #go :2962).
-    var at: Double = nowMs()
-    /// Set by EWSave.apply's drain when this change did not go out: the row says why and offers 再发一次. A newer change
-    /// of the same row replaces the edit, and with it this note.
-    var failure: String? = nil
-}
-
-/// One entry of a review of several changes (view.js doSave :1612-1615; no page shows one now, EWSave.review): a shift skip in plain words (red, bold), or a change
-/// 「卡名 · 行名」 (bold) with old → new by option names.
-struct EWReviewLine: Identifiable {
-    var id: String
-    var title: String
-    var old: String? = nil
-    var new: String? = nil
-    var skip = false
-}
-
-@MainActor
-enum EWSave {
-    /// A config edit, keyed like the web page (`${g.src}|${g.game}|${p}`). Returns nil when the value is back
-    /// to what the machine has (the web page then drops the edit). Box rows keep only the changed boxes (view.js:1120-1127).
-    static func masterEdit(game: String, path: String, label: String, to v: EWValue, machine: EWValue?) -> (String, EWEdit?) {
-        let key = "master|\(game)|\(path)"
-        if case .boxes(let d) = v {
-            let now = machine?.boxValues ?? [:]
-            var to: [String: JSONValue] = [:]
-            var from: [String: JSONValue] = [:]
-            for (k, x) in d {
-                let t = x.trimmingCharacters(in: .whitespacesAndNewlines)
-                if (now[k] ?? "") != t {
-                    to[k] = .string(t)
-                    from[k] = .string(now[k] ?? "")
-                }
-            }
-            if to.isEmpty { return (key, nil) }
-            return (key, EWEdit(label: label, src: "master", owner: game, path: path, from: .object(from), to: .object(to)))
-        }
-        var v = v
-        // view.js:1097-1099: the machine's type wins — MaaEnd stores some numbers as text ("5"), so a text value stays text.
-        if case .text? = machine, case .number = v { v = .text(v.key) }
-        if let machine, machine == v { return (key, nil) }
-        return (key, EWEdit(label: label, src: "master", owner: game, path: path, from: machine?.json, to: v.json))
-    }
-
-    /// What is wrong with a change, in words, or nil when it can go (send). Number rows: the schema's `number` fields
-    /// (Logic/Schema.swift, EndfieldSchema, WuwaSchema). An emptied box is null (EWRowView.setNumber, ArknightsBridge
-    /// outgoing) and text the machine keeps as text stays text (masterEdit), so a number may arrive as "5".
-    static func problem(_ e: EWEdit) -> String? {
-        func int(_ v: JSONValue) -> Int? {
-            switch v {
-            case .int(let i): return i
-            case .double(let d): return d == d.rounded() && abs(d) < 1e9 ? Int(d) : nil
-            case .string(let s): return Int(s.trimmingCharacters(in: .whitespacesAndNewlines))
-            default: return nil
-            }
-        }
-        if e.src == "wb" {
-            guard let n = int(e.to), (1...20).contains(n) else { return "要填 1–20" }   // weeklyboss.py:219
-            return nil
-        }
-        if e.src == "mas" && e.path == "Info.Stage" {
-            return stageOK(e.to.string ?? "") ? nil : "要写成 1-7、CE-6 这种"   // set_stage's check, commands.py:58 / 160-163
-        }
-        if e.src == "mas" && e.path == "Info.MedicineNumb" {
-            guard let n = int(e.to), (0...999).contains(n) else { return "要填 0–999 的整数" }   // set_medicine, commands.py:186
-            return nil
-        }
-        if numberPaths.contains("\(e.src)|\(e.owner)|\(e.path)") && int(e.to) == nil { return "要填整数" }
-        return nil
-    }
-
-    /// commands.py _STAGE_RE `^[A-Za-z0-9]{1,4}-[A-Za-z0-9]{1,3}$` (the stage is trimmed and upper-cased before, outgoing).
-    static func stageOK(_ s: String) -> Bool {
-        let p = s.split(separator: "-", omittingEmptySubsequences: false)
-        guard p.count == 2, (1...4).contains(p[0].count), (1...3).contains(p[1].count) else { return false }
-        return s.unicodeScalars.allSatisfy { $0 == "-" || ($0.isASCII && CharacterSet.alphanumerics.contains($0)) }
-    }
-
-    /// `src|owner|path` of every number row.
-    static let numberPaths: Set<String> = {
-        var out = Set<String>()
-        for sec in schema {
-            for f in sec.fields where f.type == "number" { out.insert("\(sec.src)|\(sec.game ?? sec.script ?? "")|\(f.path)") }
-        }
-        for f in EndfieldSchema.groups.flatMap({ $0.fields }) where f.type == .number { out.insert("master|MaaEnd|\(f.path)") }
-        for f in WuwaSchema.group.fields where f.type == .number { out.insert("master|OK-WW|\(f.path)") }
-        return out
-    }()
-
-    /// A 状态 shift switch: skip_today / unskip_today (view.js:1606 isSkipEdit).
-    static func isSkip(_ e: EWEdit) -> Bool {
-        guard e.src == "relay", let a = e.body?["action"]?.string else { return false }
-        return a == "skip_today" || a == "unskip_today"
-    }
-
-    /// The changes in the order they were made (the web page's `Object.values(edits)` / `Object.entries(edits)`).
-    static func ordered(_ edits: [String: EWEdit]) -> [String] {
-        edits.keys.sorted { a, b in
-            let x = edits[a]?.at ?? 0
-            let y = edits[b]?.at ?? 0
-            return x != y ? x < y : a < b
-        }
-    }
-
-    /// The review list (view.js doSave, 1609-1616): the shift skips first, in plain words (skipLine, view.js:1608:
-    /// 「今天不跑：早班（09:00）」); then the other changes in the order they were made, 「卡名 · 行名」 with old → new by
-    /// their option names (valLabel).
-    static func review(_ edits: [String: EWEdit]) -> [EWReviewLine] {
-        let keys = ordered(edits)
-        let skips = keys.compactMap { k -> EWReviewLine? in
-            guard let e = edits[k], isSkip(e) else { return nil }
-            let parts = e.label.components(separatedBy: " · ")
-            let verb = e.body?["action"]?.string == "skip_today" ? "今天不跑" : "今天照常跑"
-            return EWReviewLine(id: k, title: "\(verb)：\(parts[0])\(parts.count > 1 ? "（\(parts[1])）" : "")", skip: true)
-        }
-        let rest = keys.compactMap { k -> EWReviewLine? in
-            guard let e = edits[k], !isSkip(e) else { return nil }
-            let p = PendingEdit(label: e.label, src: e.src, owner: e.owner, path: e.path, from: e.from, to: e.to, sentAt: 0,
-                                body: e.body)
-            return EWReviewLine(id: k, title: e.label, old: Pending.shared.valueLabel(p, e.from),
-                                new: Pending.shared.valueLabel(p, e.to))
-        }
-        return skips + rest
-    }
-
-    /// view.js #go: send each change. Returns the changes still unsent and, when something did not go out, a sentence
-    /// saying so (the caller shows it where the change is; EWSave.apply puts it under the row).
-    static func send(_ edits: [String: EWEdit]) async -> (left: [String: EWEdit], failure: String?) {
-        // 审查 A5 / B11 / B15: a value the relay refuses (周本 outside 1–20, weeklyboss.py:219; a MaaEnd number its verify
-        // rule rejects, mastercfg.py:465-482) or hands to AUTO-MAS unchecked (set_config checks nothing, commands.py:417-449)
-        // is not sent; nothing in this call goes until it is fixed
-        let bad = ordered(edits).compactMap { k -> String? in
-            guard let e = edits[k], let why = problem(e) else { return nil }
-            return "「\(e.label)」\(why)"
-        }
-        if !bad.isEmpty {
-            return (edits, bad.count == 1 ? "没寄出：\(bad[0])。" : "有几项填得不对，一项都没寄出：\(bad.joined(separator: "；"))。")
-        }
-        let relay = Relay.shared
-        #if !os(Android) && canImport(UIKit)
-        // the orders go one after another: leaving the app mid-send must not suspend the rest (edge audit 15)
-        let grace = BackgroundGrace("save")
-        defer { grace.end() }
-        #endif
-        var left = edits
-        var sent = 0
-        var failed: Error? = nil
-        // view.js:2964-2973: everything that is not a switch or 周本 is a config field — set_master for a master copy
-        // (终末地 / 鸣潮 / 方舟 基建 and 奖励), set_config for AUTO-MAS (方舟 「明日方舟」, src "mas").
-        for k in ordered(edits) {
-            guard let e = edits[k], e.src == "master" || e.src == "mas" else { continue }
-            let body: JSONValue = e.src == "master"
-                ? .object(["action": .string("set_master"), "confirmed": .bool(true), "game": .string(e.owner),
-                           "path": .string(e.path), "value": e.to])
-                : .object(["action": .string("set_config"), "confirmed": .bool(true), "script": .string(e.owner),
-                           "path": .string(e.path), "value": e.to])
-            do {
-                try await relay.send(body)
-                sent += 1
-                left[k] = nil
-                Pending.shared.add(k, PendingEdit(label: e.label, src: e.src, owner: e.owner, path: e.path,
-                                                  from: e.from, to: e.to, sentAt: nowSec()))
-            } catch { failed = error; break }
-        }
-        for k in ordered(edits) {
-            guard let e = edits[k], e.src == "relay", let raw = e.body else { continue }
-            // a skip's day is the Beijing day it goes out on, as the review just said 「今天不跑」: stamped when the switch
-            // was flipped, one flipped at 23:59 and saved at 00:01 carried yesterday and the relay refused it (edge audit 17,
-            // 审查 B10)
-            let body = Pending.skipDayNow(raw)
-            do {
-                try await relay.send(body)
-                sent += 1
-                left[k] = nil
-                Pending.shared.add(k, PendingEdit(label: e.label, src: "relay", to: e.to, sentAt: nowSec(), body: body))
-            } catch { if failed == nil { failed = error } }
-        }
-        // 周本 has one editable item, sent as weekly_boss (view.js:2984-2998). It gets the same receipt as the switches
-        // (user 09-29 13:39: after saving, the number box showed neither 「已寄出」 nor the new number): Pending keeps the
-        // body for 「再发一次」 and `to` for the check against snap.relay 周常.周本.第几个周本 (view.js:576).
-        let wb = ordered(edits).filter { edits[$0]?.src == "wb" }
-        if let lastKey = wb.last, let last = edits[lastKey] {
-            do {
-                let n = Int(last.to.number ?? 1)   // view.js: Number(...) || 1
-                let idx = n == 0 ? 1 : n
-                let body: JSONValue = .object(["action": .string("weekly_boss"), "index": .int(idx)])
-                try await relay.send(body)
-                sent += wb.count
-                for k in wb {
-                    left[k] = nil
-                    guard let w = edits[k] else { continue }
-                    Pending.shared.add(k, PendingEdit(label: w.label, src: "wb", from: w.from, to: .int(idx), sentAt: nowSec(),
-                                                      body: body))
-                }
-            } catch { if failed == nil { failed = error } }
-        }
-        // A failure is a sentence the caller shows where the change is (the 终末地 rows: under the row, with 再发一次); a
-        // success needs no message: each row's own 「已寄出」 line says it (no toast, HIG Feedback).
-        var failure: String? = nil
-        if let failed {
-            failure = sent > 0
-                ? "发出去 \(sent) 项，剩下 \(left.count) 项没发出去（\(Live.why(failed))）。"
-                : "没发出去（\(Live.why(failed))）。"
-        }
-        // view.js:2455-2457: ask the machine once, 2 s later, for a state reported after the send
-        if sent > 0 { Live.shared.ping(afterSeconds: 2, minAt: nowSec()) }
-        return (left, failure)
-    }
-}
-
-/// Where EWSave.apply's changes stand: which keys it queued, and which Pending entries are being sent again. Observed,
-/// so a row's spinner comes and goes with them.
-@MainActor @Observable final class EWSendQueue {
-    static let shared = EWSendQueue()
-
-    /// Pool keys handed to EWSave.apply. Only these are sent by its drain: the other tabs' changes in the same pool
-    /// (EWEdits) keep their own way out.
-    var queued: Set<String> = []
-    /// Pending keys whose 再发一次 is out (EWSave.resend).
-    var resending: Set<String> = []
-    /// A drain is running; one at a time, so the orders go out one after another, in the order the changes were made.
-    @ObservationIgnored var draining = false
-    /// The key whose order is out now.
-    @ObservationIgnored var current: String? = nil
-}
-
-extension EWSave {
-    /// Applies one change now, as a Toggle / Picker in Settings does (decision 验收 10-07: native settings apply when
-    /// changed). The change goes into the pool (so the row shows it at once, ewShown) and out through `send` as a one-item
-    /// send; nil drops a queued or failed change of that row. A row changed again while its order is out waits and goes
-    /// next with the newest value (the pool keeps one change per key); orders never overlap, so the machine ends on the
-    /// last value.
-    static func apply(_ key: String, _ edit: EWEdit?) {
-        ewPutEdit(key, edit)
-        if edit != nil { EWSendQueue.shared.queued.insert(key) }
-        drain()
-    }
-
-    /// The change behind a row's 「没发出去」, sent again.
-    static func retry(_ key: String) {
-        guard EWEdits.shared.items[key]?.failure != nil else { return }
-        EWEdits.shared.items[key]?.failure = nil
-        EWSendQueue.shared.queued.insert(key)
-        drain()
-    }
-
-    /// The change behind a row's 「没发出去」, dropped: the row goes back to the machine's value.
-    static func drop(_ key: String) {
-        guard EWEdits.shared.items[key]?.failure != nil else { return }
-        EWEdits.shared.items[key] = nil
-        EWSendQueue.shared.queued.remove(key)
-    }
-
-    /// Whether this key's order is out right now (EndfieldTab: a change back to the value being sent is no change).
-    static func isSending(_ key: String) -> Bool { EWSendQueue.shared.current == key }
-
-    /// 「再发一次」 of a sent change (Pending), with the row's spinner while it is out.
-    static func resend(_ key: String) {
-        let q = EWSendQueue.shared
-        guard !q.resending.contains(key) else { return }
-        q.resending.insert(key)
-        Task {
-            await Pending.shared.resend(key)
-            q.resending.remove(key)
-        }
-    }
-
-    /// Sends the queued changes one at a time, oldest first, until none is left that has not failed.
-    private static func drain() {
-        let q = EWSendQueue.shared
-        guard !q.draining else { return }
-        q.draining = true
-        Task {
-            while let k = nextQueued() {
-                guard let e = EWEdits.shared.items[k] else { continue }
-                q.current = k
-                let r = await send([k: e])
-                q.current = nil
-                let pool = EWEdits.shared
-                // Only a key that still holds the value sent is settled: a newer change made while this one was out stays
-                // and goes next (the same rule as the batch send had, edge audit 1a).
-                if pool.items[k]?.to == e.to && pool.items[k]?.body == e.body {
-                    if r.left[k] == nil {
-                        pool.items[k] = nil
-                    } else {
-                        pool.items[k]?.failure = r.failure ?? "没发出去。"
-                    }
-                }
-                if pool.items[k] == nil { q.queued.remove(k) }
-            }
-            q.draining = false
-        }
-    }
-
-    private static func nextQueued() -> String? {
-        let q = EWSendQueue.shared
-        let pool = EWEdits.shared.items
-        let live = q.queued.filter { pool[$0] != nil }
-        if live != q.queued { q.queued = live }   // an observed write redraws the tab: only when something left
-        return ordered(pool).first { q.queued.contains($0) && pool[$0]?.failure == nil }
-    }
-}
-
-/// The 库存 page (stockpile.js): sections of materials, or a loading / empty state.
+/// The 库存 page (stockpile.js): sections of materials, or a loading / empty state. Apple counterpart (app-page-references
+/// P5 / N4): 健康 › 步数 › All Recorded Data, a plain system List of rows with the reading in the label colour.
 struct EndfieldStockpilePage: View {
     /// ContentView's tab selection (same AppStorage key), for 「去手机页」.
     @AppStorage("tab") var tab = ContentTab.status
     @Environment(\.dismiss) var dismiss
-    /// The material's picture, 28 pt at the default text size, growing with Dynamic Type.
+    /// The material's picture, 28 pt at the default text size, growing with Dynamic Type (was a fixed 28 pt frame).
     @ScaledMetric(relativeTo: .body) var iconSize: CGFloat = 28
 
     var body: some View {
@@ -562,19 +237,25 @@ struct EndfieldStockpilePage: View {
                     Section {
                         ForEach(sec.rows) { r in
                             LabeledContent {
-                                if let v = r.value { Text(v) }
+                                // P5 (app-page-references): the reading in the label colour, as Health's numbers; a
+                                // row short of one build (「差 N」) in the system orange
+                                if let v = r.value { Text(v).foregroundStyle(r.short ? Color.orange : Color.primary) }
                             } label: {
                                 Label {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(r.name)
-                                        Text(r.subtitle + (r.origin ?? "")).font(.footnote).foregroundStyle(.secondary)
+                                        Text(r.subtitle + (r.origin ?? "")).font(.caption).foregroundStyle(.secondary)
                                     }
                                 } icon: {
-                                    // stockpile.js:74, 98: the material's picture, fit; a picture that fails leaves the space empty
-                                    AsyncImage(url: r.icon.flatMap { URL(string: $0) }) { img in
-                                        img.resizable().scaledToFit()
-                                    } placeholder: {
-                                        Color.clear
+                                    // stockpile.js:74, 98: the material's picture, fit. One that is not there or does not
+                                    // load is a grey system picture, not an empty space before the name (HIG Lists: "a
+                                    // small image in the leading end of a row"; Health's rows line up with the header)
+                                    AsyncImage(url: r.icon.flatMap { URL(string: $0) }) { phase in
+                                        if let img = phase.image {
+                                            img.resizable().scaledToFit()
+                                        } else {
+                                            missingPicture
+                                        }
                                     }
                                     .frame(width: iconSize, height: iconSize)
                                     .accessibilityHidden(true)   // r.name beside names it (HIG VoiceOver: decorative)
@@ -592,9 +273,9 @@ struct EndfieldStockpilePage: View {
             }
         }
         #if !os(Android)
-        // the system empty state over the (empty) List, centred on the page, the way the
-        // ContentUnavailableView documentation places it (`.overlay { if … { ContentUnavailableView.search } }`); the
-        // List under it keeps pull to refresh
+        // the system empty state over the (empty) List, centred on the page, the way the ContentUnavailableView
+        // documentation places it (`.overlay { if … { ContentUnavailableView.search } }`, 7b6a3f1); the List under it
+        // keeps pull to refresh
         .overlay {
             if case .empty(let title, let text, let button, let action) = s.content {
                 empty(title: title, text: text, button: button, action: action)
@@ -602,17 +283,34 @@ struct EndfieldStockpilePage: View {
         }
         #endif
         .navigationTitle(Stockpile.title)
-        // pull to refresh is the page's one refresh (HIG Refresh content controls); no 刷新 button beside it
+        #if os(iOS)
+        // a pushed page's title small and centred, as Health › All Recorded Data (P5); iOS only (MonthCardPage says why)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        // refreshed by pulling down only, as every other page (BOARD/App-待他定项-从记录定-1014.md E4: the toolbar 刷新
+        // was a duplicate found only here; the page loads itself on open, .task below, and his 09-02 10:29 asks for manual
+        // refresh as a fallback); under the empty state too, whose own button stays
         .refreshable { await s.load(force: true) }
         .task { await s.open() }
+    }
+
+    /// The stand-in for a material picture that is not there.
+    @ViewBuilder private var missingPicture: some View {
+        #if os(Android)
+        Color.clear   // skip-ui maps no picture symbol to a Material icon (Components/Image.swift table)
+        #else
+        Image(systemName: "photo").resizable().scaledToFit().foregroundStyle(.secondary)
+        #endif
     }
 
     /// No stock to show: the system empty state (ContentUnavailableView) with its one action.
     @ViewBuilder
     private func empty(title: String, text: String, button: String, action: StockpileEmptyAction) -> some View {
         #if os(Android)
-        // skip-fuse-ui has no ContentUnavailableView, and skip-ui's init is fatalError() (System/ContentUnavailableView.swift:59)
+        // skip-fuse-ui has no ContentUnavailableView and skip-ui's init is fatalError() (System/ContentUnavailableView.swift:59);
+        // Skip maps no box symbol to a Material icon (Components/Image.swift symbol table), so the web page's box stays here
         VStack(alignment: .leading, spacing: 6) {
+            EWStockBox()   // stockpile.js:146 the empty-state box
             Text(title).font(.headline)
             Text(text).foregroundStyle(.secondary)
             emptyAction(button: button, action: action)
@@ -639,5 +337,30 @@ struct EndfieldStockpilePage: View {
                 tab = .phone
             }
         }
+    }
+}
+
+/// Android's empty-state box, traced from stockpile.js:146's SVG (viewBox 24, stroke 1.2, secondary label colour), 60 pt
+/// at the default text size. iOS shows the system symbol shippingbox in ContentUnavailableView instead.
+struct EWStockBox: View {
+    @ScaledMetric(relativeTo: .largeTitle) var side: CGFloat = 60
+
+    var body: some View {
+        let k: CGFloat = side / 24.0
+        var p = Path()
+        p.move(to: CGPoint(x: 3 * k, y: 7.5 * k))
+        p.addLine(to: CGPoint(x: 12 * k, y: 3 * k))
+        p.addLine(to: CGPoint(x: 21 * k, y: 7.5 * k))
+        p.addLine(to: CGPoint(x: 21 * k, y: 16.5 * k))
+        p.addLine(to: CGPoint(x: 12 * k, y: 21 * k))
+        p.addLine(to: CGPoint(x: 3 * k, y: 16.5 * k))
+        p.closeSubpath()
+        p.move(to: CGPoint(x: 3 * k, y: 7.5 * k))
+        p.addLine(to: CGPoint(x: 12 * k, y: 12 * k))
+        p.addLine(to: CGPoint(x: 21 * k, y: 7.5 * k))
+        p.move(to: CGPoint(x: 12 * k, y: 12 * k))
+        p.addLine(to: CGPoint(x: 12 * k, y: 21 * k))
+        return p.stroke(Color.secondary, style: StrokeStyle(lineWidth: 1.2 * k, lineJoin: .round))
+            .frame(width: side, height: side)
     }
 }

@@ -4,14 +4,17 @@ import PackageDescription
 
 let package = Package(
     name: "ark-remote",
-    defaultLocalization: "en",
+    defaultLocalization: "zh-Hans",
     platforms: [.iOS("27.0"), .macOS("27.0")],
     products: [
         .library(name: "ArkRemote", type: .dynamic, targets: ["ArkRemote"]),
     ],
     dependencies: [
         .package(url: "https://github.com/skiptools/skip.git", from: "1.9.12"),
-        .package(url: "https://github.com/skiptools/skip-fuse-ui.git", from: "1.0.0")
+        .package(url: "https://github.com/skiptools/skip-fuse-ui.git", from: "1.0.0"),
+        // skip-ui 1.61.0 with one patch to List's section gap on Android (Vendor/skip-ui/VENDORED.md); as a root path
+        // dependency with skip-fuse-ui's identity for it, it stands in for the remote skip-ui
+        .package(path: "Vendor/skip-ui")
     ],
     targets: [
         .target(name: "ArkRemote", dependencies: [

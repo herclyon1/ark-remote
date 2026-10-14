@@ -59,10 +59,11 @@ enum PendingTag: Sendable, Equatable {
     case applied(text: String)
 }
 
-/// The #pendbar line: text, and whether any item was refused (PendingBarView offers 「不再等待」 beside it).
+/// The #pendbar line: text, whether any item was refused (the red xmark), and the 「不等了，清掉」 button.
 struct PendingBar: Sendable, Equatable {
     let text: String
     let hasMismatch: Bool
+    static let clearLabel = "不等了，清掉"
 }
 
 @MainActor @Observable final class Pending {
@@ -78,11 +79,6 @@ struct PendingBar: Sendable, Equatable {
     /// The value of every field on the machine at the last render: id -> value. The page's render sets it,
     /// then calls `reconcile()`.
     var liveVals: [String: JSONValue] = [:]
-    /// id -> why the last 「再发一次」 of that change did not go out (pending.js:118 「发不出去」), or why it was not sent
-    /// again (a past day's skip). Shown in the row's own line (`tag(for:)`) instead of an alert (HIG Feedback: "Consider
-    /// integrating status feedback into your interface."; HIG Alerts: "Avoid using an alert merely to provide
-    /// information."). In memory only; a new send, a receipt or 「不再等待」 clears it.
-    var resendNotes: [String: String] = [:]
 
     @ObservationIgnored let relay: Relay
     /// Keys whose 「再发一次」 is out: a second tap meanwhile sent a 周本 / skip twice (edge audit 16).
@@ -116,7 +112,6 @@ struct PendingBar: Sendable, Equatable {
     /// Records a change that was just sent (the save flow in view.js writes `pending[id] = {...}`).
     func add(_ key: String, _ edit: PendingEdit) {
         items[key] = edit
-        if resendNotes[key] != nil { resendNotes[key] = nil }
         savePending()
     }
 
@@ -157,8 +152,6 @@ struct PendingBar: Sendable, Equatable {
     /// The tag under a row, or nil. `editing` = the field has an unsaved edit (view.js `key in edits`).
     func tag(for key: String, editing: Bool = false) -> PendingTag? {
         if let p = items[key] {
-            // the last 「再发一次」 did not go out: red, and it can be tapped again
-            if let note = resendNotes[key] { return .mismatch(text: note, key: key) }
             if let mm = p.mismatchAt {
                 // no 「再发一次」 here: a tap put this older change back over the newer one (edge audit 13)
                 if p.elsewhere == true {
@@ -177,8 +170,6 @@ struct PendingBar: Sendable, Equatable {
             return .sent(text: "已寄出 \(Self.hhmm(at)) · \(waitNote)")
         }
         if editing { return nil }
-        // a past day's skip that was not sent again (resend): the row says so where the line was
-        if let note = resendNotes[key] { return .sent(text: note) }
         guard let a = acked[key], nowSec() - a.at <= 24 * 3600 else { return nil }
         return .applied(text: "已应用 \(Self.hhmm(a.at))")
     }
@@ -262,10 +253,9 @@ struct PendingBar: Sendable, Equatable {
         return PendingBar(text: text, hasMismatch: bad > 0)
     }
 
-    /// 「不再等待」 (PendingBarView), and a new mailbox (Live).
+    /// 「不等了，清掉」.
     func clearAll() {
         items = [:]
-        resendNotes = [:]
         savePending()
     }
 
@@ -282,11 +272,12 @@ struct PendingBar: Sendable, Equatable {
             guard let live = liveVals[key] else { continue }   // this state does not carry the field; wait for the next
             if Self.sameVal(live, p.to) {
                 items[key] = nil
-                if resendNotes[key] != nil { resendNotes[key] = nil }
                 changed = true
                 acked[key] = AckedEdit(at: at, label: p.label)
                 saveAcked()
-                // pending.js:101's 「已生效」 toast: the row's own line now reads 「已应用 HH:MM」 (tag)
+                // pending.js:101 「「X」已生效」: the status line under the tab titles (Pages/Shell/Feedback.swift); the row
+                // itself says 「已应用 HH:MM」
+                Feedback.status("「\(p.label)」已生效")
             } else if p.mismatchAt != at && machineActed(on: p) {
                 items[key]?.mismatchAt = at
                 items[key]?.elsewhere = p.from.map { !Self.sameVal(live, $0) }
@@ -352,8 +343,7 @@ struct PendingBar: Sendable, Equatable {
         }
     }
 
-    /// 「再发一次」. The outcome is in the row's line: 「已寄出 HH:MM」 with the new time when it went out, else the reason
-    /// (resendNotes).
+    /// 「再发一次」.
     func resend(_ key: String) async {
         guard let p = items[key], !resending.contains(key) else { return }
         // a skip carries its Beijing day and the relay refuses another day's (commands.py _skip_today): resent the next
@@ -362,7 +352,7 @@ struct PendingBar: Sendable, Equatable {
            day != statusBeijingToday() {
             items[key] = nil
             savePending()
-            resendNotes[key] = "没再发：这是 \(day) 那天的跳过，那天已经过了，机器不会再收。要跳过今天，再关一次开关。"
+            Feedback.alert("不再发", "这是 \(day) 那天的跳过，那天已经过了，机器不会再收。要跳过今天，重新关一次开关再保存。")
             return
         }
         resending.insert(key)
@@ -383,12 +373,11 @@ struct PendingBar: Sendable, Equatable {
             if p.src == "relay" { items[key]?.body = body }
             items[key]?.mismatchAt = nil
             items[key]?.elsewhere = nil
-            resendNotes[key] = nil
             savePending()
-            // pending.js:117's 「又发了一次」 toast: the row's 「已寄出 HH:MM」 now carries the resend's time
+            Feedback.status("又发了一次")   // pending.js:117; the row's own line says 「已寄出 HH:MM」 again
         } catch {
-            // pending.js:118 「发不出去」: in the row, red, with 「再发一次」 still offered
-            resendNotes[key] = "没发出去（\(Live.why(error))）"
+            // pending.js:118: a reason is a sentence: alert, not the one-line HUD
+            Feedback.alert("发不出去", Live.why(error))
         }
     }
 

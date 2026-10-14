@@ -42,6 +42,9 @@ class Abort(Exception):
 
 
 DISCARD_SEL = ["放弃", "xmark"]       # the save bar's ✕ (steps.DISCARD)
+DISCARD_OK = "放弃改动"                # its confirmation (Pages/Shell/SaveBar.swift)
+CLEAR_SEL = "不等了，清掉"             # steps.CLEAR
+PENDING_LINE = "re:项改动"             # the pending line under the title, iOS (Pages/Shell/PendingBarView.swift)
 
 
 # ---------------------------------------------------------------- selectors
@@ -116,6 +119,8 @@ class Runner:
             if reg == "bottom" and n["y"] < H * 0.8:
                 continue
             if reg == "top" and n["y"] > H * 0.2:
+                continue
+            if reg == "upper" and n["y"] >= H * 0.8:   # anywhere above the tab bar (a page title, not the tab's label)
                 continue
             hits.append(n)
         hits.sort(key=lambda n: (n["y"], n["x"]))
@@ -196,17 +201,37 @@ class Runner:
 
     def scroll(self, direction, short=False):
         W, H = self.drv.size
-        top, bottom = self.drv.content_box(self.dump(False)["nodes"] if self.cache else [])
+        android = self.drv.platform == "android"
+        nodes = self.dump(False)["nodes"] if (self.cache or android) else []
+        top, bottom = self.drv.content_box(nodes)
         span = (bottom - top) * (0.35 if short else 0.6)
         x = W // 2
         y0 = int(top + (bottom - top) * 0.8)
         if direction == "up":       # content moves up = scroll down the page
+            if android:
+                y0 = self.free_y(nodes, x, y0, -1, top, bottom)
             self.drv.swipe(x, y0, x, int(y0 - span), 300)
         else:
             y1 = int(top + (bottom - top) * 0.2)
+            if android:
+                y1 = self.free_y(nodes, x, y1, 1, top, bottom)
             self.drv.swipe(x, y1, x, int(y1 + span), 300)
         time.sleep(0.6)
         self.invalidate()
+
+    def free_y(self, nodes, x, y, step, top, bottom):
+        """Android: a swipe's start height near y (moving by step toward the middle) that is on no clickable row.
+        An `input swipe` from a row now and then reads as a tap on that row: the ("top", 3) of ef.ticket.open started at
+        0.2 of the content area, on the 终末地 page's 库存 row, and opened 库存 (ark37 10-14, run 7 step 79 and a probe:
+        tab 终末地 + top 3 -> the 库存 page). Containers taller than half the content area (the list itself) are not rows."""
+        rows = [n for n in nodes if n["clickable"] and 0 < n["h"] < (bottom - top) / 2
+                and abs(n["x"] - x) <= n["w"] / 2]
+        lo, hi = top + 20, bottom - 20
+        for i in range(0, int((bottom - top) * 0.4), 12):
+            yy = y + step * i
+            if lo <= yy <= hi and not any(abs(n["y"] - yy) <= n["h"] / 2 + 6 for n in rows):
+                return int(yy)
+        return y
 
     # ---- actions
     def act(self, a, step):
@@ -227,6 +252,30 @@ class Runner:
             if opts.get("right"):
                 x = n["x"] + n["w"] // 2 - opts["right"]
             self.drv.tap(x, y, opts.get("hold", 50))
+        elif kind == "discard":
+            # the save bar's ✕ asks first (Pages/Shell/SaveBar.swift: 「放弃这 N 项改动？」 → 放弃改动)
+            self.act(("tap", DISCARD_SEL, {"region": "top"}), step)
+            # the action sheet takes no touch while it is still coming up (UIKit): tap 放弃改动 until the sheet is gone
+            self.tap_until_gone(DISCARD_OK, step)
+        elif kind == "clear":
+            # 「不等了，清掉」: iOS asks from the pending line under the title (Pages/Shell/PendingBarView.swift
+            # SubtitleLine); Android keeps the button on the row
+            if self.drv.platform == "ios":
+                # right after a send the review sheet is still closing and a tap on the line can be lost (app-r1 local
+                # ntfy run, step 75 ef.protocol right after ef.send): tap the line again while its sheet is not up
+                for _ in range(3):
+                    self.act(("tap", PENDING_LINE), step)
+                    if self.wait_for(CLEAR_SEL, 4):
+                        break
+                self.tap_until_gone(CLEAR_SEL, step)
+                # the action sheet leaves the element tree as its dismissal starts, and the line under the title goes
+                # with it, so the list moves up; a touch during that transition is not delivered to the page (app-r1
+                # fix round 2: ark.battle.discard's 作战开关 toggle right after the clear was lost 2 of 2 times, and
+                # passed once the step waited about a second). Wait for the line to go, then for the transition.
+                self.wait_for(PENDING_LINE, 4, gone=True)
+                time.sleep(0.6)
+            else:
+                self.act(("tap", CLEAR_SEL), step)
         elif kind == "tab":
             hits = self.find({"t": rest[0], "region": "bottom"}, self.dump(self.cache is None))
             if not hits:
@@ -277,10 +326,12 @@ class Runner:
         elif kind == "bottom":
             # ("bottom", most): scroll down until the screen stops changing (the page end), at most `most` swipes
             prev = None
+            self.ctx["at_end"] = False
             for _ in range(rest[0] if rest else 8):
                 self.scroll("up")
                 sig = [(n["label"], n["y"]) for n in self.dump(True)["nodes"] if n["label"] and self.on_screen(n)]
                 if sig == prev:
+                    self.ctx["at_end"] = True   # a swipe moved nothing: the page is at its end (check_last)
                     break
                 prev = sig
         elif kind == "top":
@@ -381,6 +432,8 @@ class Runner:
         elif kind == "clipboard":
             if rest and rest[0] == "@link":
                 self.drv.set_clipboard(self.own_link())
+            elif rest and rest[0] == "@oldlink":
+                self.drv.set_clipboard(self.own_link(old=True))
             elif rest and rest[0]:
                 self.drv.set_clipboard(rest[0])
             else:
@@ -482,13 +535,31 @@ class Runner:
         throw the edits away (✕), so the next step starts from the page as it was."""
         for _ in range(4):
             dump = self.dump(True)
-            for sel in ("再想想", "取消", "好"):
+            for sel in ("放弃改动", "再想想", "取消", "好"):
                 hits = [h for h in self.find(sel, dump) if self.on_screen(h)]
                 if hits:
                     self.drv.tap(hits[-1]["x"], hits[-1]["y"])
-                    time.sleep(0.8)
+                    # wait until it is really gone before looking again: a closing popover still lists 放弃改动 for a
+                    # moment, and SwiftUI runs the button's action only after the close, so the ✕ also stays up till
+                    # then. A second tap at that place went to the 状态 page under it, the 开始刷 row (y 146 pt), and
+                    # brought the 「机器关着」 notice back (simulator video of the app-r1 offline run, 100.0-102.5 s:
+                    # 放弃改动 tapped, popover gone at 101.5 with 待保存 2 项 still shown, edits gone and the notice up
+                    # at 102.5)
+                    self.invalidate()
+                    if not self.wait_for(sel, 4, gone=True):
+                        break
+                    if sel == "放弃改动":
+                        self.wait_for(DISCARD_SEL, 4, gone=True, region="top")
+                    time.sleep(0.3)
                     break
             else:
+                # iOS 27 draws a confirmationDialog attached to its button as a popover with no 取消 ("the cancel action
+                # is implicit by tapping anywhere else", WWDC25 284): tap the right margin, outside the popover and the rows
+                if self.drv.platform == "ios" and any(n.get("id") == "PopoverDismissRegion" or n["kind"] == "Popover"
+                                                      for n in dump["nodes"]):
+                    self.drv.tap(self.drv.size[0] - 6, self.drv.size[1] // 2)
+                    time.sleep(0.8)
+                    continue
                 hits = self.find(DISCARD_SEL, dump, "top")
                 if hits:
                     self.drv.tap(hits[0]["x"], hits[0]["y"])
@@ -548,13 +619,14 @@ class Runner:
                      f"落在「首帧已画完且不到 400 ms」的 {len(inwin)} 次")
         self.ctx["gate_rows"] = rows
 
-    def own_link(self):
-        """A 免输入链接 for the THROWAWAY mailbox (PhoneTab.swift PhoneLink.make: pageURL#k=base64url({"t","p"})); never
-        the real one, so the app taking it from the clipboard keeps talking to the throwaway mailbox."""
+    def own_link(self, old=False):
+        """A 免输入链接 for the THROWAWAY mailbox (PhoneTab.swift PhoneLink.make: linkBase#k=base64url({"t","p"})); never
+        the real one, so the app taking it from the clipboard keeps talking to the throwaway mailbox. old=True: the
+        form copied before (PhoneLink.oldPageURL, the web page), which must still be taken."""
         import base64
         self.guard.check_publish(self.guard.topic)
         k = base64.urlsafe_b64encode(json.dumps({"t": self.guard.topic, "p": self.mb.pin}, separators=(",", ":")).encode()).decode().rstrip("=")
-        return "https://herclyon1.github.io/maa/#k=" + k
+        return ("https://herclyon1.github.io/maa/" if old else "arkremote://link") + "#k=" + k
 
     def fluency(self, cycles=3):
         """Android: switch the five tabs `cycles` times (1.5 s apart) and read the app's own FluencyRec lines for those
@@ -694,6 +766,20 @@ class Runner:
                 return m
             n = m
         return n
+
+    def tap_until_gone(self, sel, step):
+        """Tap a confirmation's button (放弃改动 / 不等了，清掉) until its sheet is gone. A sheet that comes up takes no
+        touch for a moment (UIKit), so a first tap can be lost; but a sheet that is only closing slowly (a loaded Mac)
+        still lists its button for a while, and a second tap at that place lands on the page under it (see dismiss()).
+        So the button is tapped again only when the sheet is still up well after the last tap."""
+        for _ in range(3):
+            if not self.wait_for(sel, 4):
+                raise StepFail(f"找不到「{sel}」")
+            time.sleep(0.5)
+            self.act(("tap", sel, {"last": True}), step)
+            if self.wait_for(sel, 3, gone=True) or self.wait_for(sel, 6, gone=True):
+                return
+        raise StepFail(f"「{sel}」点了没关")
 
     def wait_for(self, sel, secs, gone=False, region="any"):
         """Poll the element tree until sel is on screen (or, gone=True, off it); False on timeout."""
@@ -850,6 +936,8 @@ class Runner:
                     miss.append(f"「{sel_text(low)}」（上边 {lo[0]['y'] - lo[0]['h'] / 2:g}）压着「{sel_text(up)}」（下边 {u[0]['y'] + u[0]['h'] / 2:g}）")
             if step.get("last_above") or step.get("last_bottom"):
                 miss += self.check_last(step, dump)
+            if step.get("group_gap") or step.get("header_gap") or step.get("large_title"):
+                miss += self.check_layout(step, dump)
             if kb is not None and self.drv.keyboard_up(dump["nodes"]) != kb:
                 k = [n for n in dump["nodes"] if n["kind"] == "Keyboard"]
                 miss.append(("键盘还在" + (f"（y {k[0]['y']} 高 {k[0]['h']}）" if k else "")) if not kb else "键盘没出来")
@@ -881,13 +969,63 @@ class Runner:
             if not hits:
                 return [f"没有「{sel_text(step['last_above'])}」"]
             top = hits[0]["y"] - hits[0]["h"] / 2
-            if not (top - 60 <= b <= top + 1):
+            # within 60 pt of it proves the page was scrolled to its end; a page shorter than the screen (鸣潮 since its
+            # 周本 row is a Stepper, app-r1: footer at 767.5, 就是这里 at 830) ends higher, and the ("bottom") action
+            # already saw a swipe move nothing, so only "above" is judged then
+            near = self.ctx.get("at_end") or top - 60 <= b
+            if not (near and b <= top + 1):
                 return [f"最后一行下边 {b:g}，「{sel_text(step['last_above'])}」上边 {top:g}"]
         if step.get("last_bottom"):
             lo, hi = step["last_bottom"]
             if not (lo <= b <= hi):
                 return [f"最后一行下边 {b:g}，应在 {lo}–{hi}"]
         return []
+
+    def check_layout(self, step, dump):
+        """Android only (regression list 0108 item 29, 「安卓那个间距太丑了」 10-07 21:0x).
+
+        group_gap: [lo, hi] dp - every gap between two grouped sections with no header or footer text in it is in
+        the range. header_gap: [lo, hi] dp - in every gap with text in it, the lowest text (the next section's header)
+        ends this far above the next card (Settings, Android 17: 26 px = 9.9 dp under 「Lock display」). The cards are not in the uiautomator tree (Compose draws them), so the screenshot is read down one
+        pixel column 22 dp inside the right edge (inside the cards' 16 dp inset and right of every row's own control):
+        a pixel is ground when it matches the page ground at x = 8 px on the same row. Ground runs under 3 dp are row
+        dividers. Reference: Settings on Android 17 (ark37, 10-14) draws its groups 16 dp apart (42 px at 420 dpi).
+        large_title: sel - the tab's title is the large one in the top bar's second row (skip-ui's MediumTopAppBar with
+        headlineLarge bold, Containers/Navigation.swift:505-515; AppBarMediumTokens.ContainerHeight = 112.0.dp), not an
+        inline one: at least 40 dp tall, its top at
+        least 100 dp down (status bar + Material's 64 dp collapsed row), its left edge 14-18 dp in (Material 3
+        TopAppBarTitleInset = 16.dp, compose material3 AppBar.kt)."""
+        if self.drv.platform != "android":
+            return []
+        d = self.drv.density
+        miss, said = [], []
+        if step.get("large_title"):
+            hits = [n for n in self.find(step["large_title"], dump, "upper") if self.on_screen(n)]
+            if not hits:
+                miss.append(f"没有大标题「{sel_text(step['large_title'])}」")
+            else:
+                n = hits[0]
+                left, top, h = (n["x"] - n["w"] / 2) / d, (n["y"] - n["h"] / 2) / d, n["h"] / d
+                said.append(f"大标题 高 {h:.1f} dp、上边 {top:.1f} dp、左边 {left:.1f} dp")
+                if h < 40 or top < 100 or not 14 <= left <= 18:
+                    miss.append(f"「{sel_text(step['large_title'])}」不是大标题（高 {h:.1f}、上边 {top:.1f}、左边 {left:.1f} dp）")
+        if step.get("group_gap") or step.get("header_gap"):
+            path = os.path.join(self.out, f"layout-{step['id']}.png")
+            self.drv.screenshot(path)
+            texts = [n for n in dump["nodes"] if (n["texts"] or n["label"]) and n["h"] > 0]
+            plain, titled = group_gaps(path, d, self.drv.content_box(dump["nodes"]), texts)
+            for key, gaps, name in (("group_gap", plain, "分组间距"), ("header_gap", titled, "组标题到下一组")):
+                if not step.get(key):
+                    continue
+                lo, hi = step[key]
+                said.append(f"{name} " + ("、".join(f"{g:.1f}" for g in gaps) or "无") + " dp")
+                if not gaps:
+                    miss.append(f"屏幕上量不到{name}")
+                bad = [g for g in gaps if not lo <= g <= hi]
+                if bad:
+                    miss.append(f"{name} {'、'.join(f'{g:.1f}' for g in bad)} dp，应在 {lo}–{hi}")
+        self.note = "；".join(said) or None
+        return miss
 
     def check_cmds(self, step, t0):
         want = step.get("cmd")
@@ -995,10 +1133,44 @@ class Runner:
 
 ACTIONS = {"bottom", "until", "gone", "nokb", "retry", "tap", "tab", "toggle", "field", "type", "enter", "hidekb", "swipe", "top", "back", "wait", "relaunch", "state",
            "receipt", "clear_receipts", "hb", "remember", "gate", "gate_trials", "app_posts", "shot", "clipboard", "forget_config", "restore_config", "fluency",
-           "dismiss", "pick", "tapout", "time", "see", "point", "allow_paste"}
+           "dismiss", "discard", "clear", "pick", "tapout", "time", "see", "point", "allow_paste"}
 STEP_KEYS = {"id", "page", "say", "do", "on", "expect", "absent", "visible", "keyboard", "cmd", "nocmd", "timeout", "cmd_timeout",
              "ios", "android", "always", "settle", "pause", "relaunch_on_crash", "switch", "offline",
-             "skip", "nojudge", "nojudge_fail", "below", "last_above", "last_bottom"}
+             "skip", "nojudge", "nojudge_fail", "below", "last_above", "last_bottom", "group_gap", "header_gap", "large_title"}
+
+
+def group_gaps(png, density, box, texts):
+    """Down one pixel column 22 dp inside the right edge, within box (top, bottom): (plain, titled) in dp - plain, the
+    gaps between two cards with no text node centred in them; titled, for each gap with text in it (a footer and / or
+    the next section's header), the lowest text's bottom edge to the next card's top. Ground runs under 3 dp (row
+    dividers) and runs not closed by a card on both sides are left out. See Runner.check_layout."""
+    from PIL import Image   # Pillow: in Homebrew's python3 and ~/.local/bin/python3.14 on this Mac
+    im = Image.open(png).convert("RGB")
+    px = im.load()
+    W = im.size[0]
+    X, M = W - round(22 * density), 8
+    top, bottom = box
+    runs, cur, start = [], None, top
+    for y in range(top, bottom):
+        a, b = px[X, y], px[M, y]
+        kind = "ground" if sum(abs(a[k] - b[k]) for k in range(3)) <= 6 else "card"
+        if kind != cur:
+            if cur:
+                runs.append((cur, start, y))
+            cur, start = kind, y
+    runs.append((cur, start, bottom))
+    plain, titled = [], []
+    for k in range(1, len(runs) - 1):
+        kind, a, b = runs[k]
+        if kind != "ground" or runs[k - 1][0] != "card" or runs[k + 1][0] != "card" or b - a < 3 * density:
+            continue
+        inside = [n for n in texts if a <= n["y"] <= b]
+        if not inside:
+            plain.append((b - a) / density)
+        else:
+            # the lowest text in the gap is the next section's header: its bottom edge to the next card's top
+            titled.append((b - max(n["y"] + n["h"] / 2 for n in inside)) / density)
+    return plain, titled
 
 
 def validate(all_steps):
@@ -1152,6 +1324,7 @@ def main():
             base = json.load(open(cache, encoding="utf-8"))
         else:
             base = mbmod.fetch_real_state(g.real_topic_for_read())
+            os.makedirs(os.path.dirname(cache), exist_ok=True)   # with --out elsewhere, out/ may not exist yet
             with open(cache, "w", encoding="utf-8") as f:
                 json.dump(base, f, ensure_ascii=False)
     local = None
@@ -1241,6 +1414,11 @@ def main():
             drv.terminate()
         except Exception:
             pass
+        try:   # 复制免输入链接 leaves this run's throwaway link on the clipboard and the app takes a #k= link on its next
+            # cold start: on ark37 10-14 an arkremote://link intent opened after a full run was overridden by it
+            drv.clear_clipboard()
+        except Exception as e:
+            print("剪贴板没清掉：", e)
         if prefs_saved:
             try:
                 drv.prefs_restore(prefs_saved, launch=False)

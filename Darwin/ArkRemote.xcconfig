@@ -15,7 +15,8 @@ INFOPLIST_FILE = Info.plist
 GENERATE_INFOPLIST_FILE = YES
 
 // The user-visible name of the app (localizable)
-//INFOPLIST_KEY_CFBundleDisplayName = App Name
+// the name under the icon: 「遥控」 (his 10-02 17:06 「然后就是名字改成遥控。」; Android strings.xml app_name is the same)
+INFOPLIST_KEY_CFBundleDisplayName = 遥控
 //INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.utilities
 
 // iOS-specific Info.plist property keys

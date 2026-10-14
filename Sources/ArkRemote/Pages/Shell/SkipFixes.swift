@@ -29,28 +29,6 @@ func symbol(_ ios: String, android: String) -> Image {
     #endif
 }
 
-extension View {
-    /// `.controlSize(.small)` (a row's in-place ProgressView). Android: skip-fuse-ui marks controlSize unavailable
-    /// (View/AdditionalViewModifiers.swift:224-226), so the Material indicator keeps its own size there.
-    @ViewBuilder func smallControl() -> some View {
-        #if os(Android)
-        self
-        #else
-        self.controlSize(.small)
-        #endif
-    }
-
-    /// `.monospacedDigit()` (numbers that change in place). Android: skip-fuse-ui marks it unavailable
-    /// (Text/Text.swift:347-350 and :433-436), so the digits keep the font's own widths there.
-    @ViewBuilder func digitsMonospaced() -> some View {
-        #if os(Android)
-        self
-        #else
-        self.monospacedDigit()
-        #endif
-    }
-}
-
 /// The row background for `.listRowBackground`, never nil on Android: skip-ui composes a row with a background inside an
 /// extra layout and one without it directly (List.swift:692-722), so a row whose tint comes and goes (「待保存」 on the first
 /// keystroke) is rebuilt and its text field loses the keyboard. With no tint the row gets the colour skip-ui would have
@@ -85,60 +63,23 @@ func menuPicker<Selection: Hashable, Content: View, Title: View>(selection: Bind
     #else
     Picker(selection: selection, content: content, label: title)
         .pickerStyle(.menu)
+        .tint(Color.secondary)   // the value grey (menuValueGrey says why); this branch is iOS only
     #endif
 }
 
-#if os(Android)
-/// SwiftUI's LabeledContent on Android, laid out as iOS lays out a list row with a value: the value keeps its own width
-/// on the right and the label takes the rest, wrapping. This module's type shadows the SwiftUI one on Android only, so
-/// every `LabeledContent` in Sources/ gets it; iOS keeps the system view.
-///
-/// skip-ui's LabeledContent composes label and value into a plain Compose Row with neither child weighted (skip-ui
-/// Text/LabeledContent.swift:54-57). A Row measures its children in order, each against the width left, so a label whose
-/// hint wraps took the whole row: the 方舟 page's 关卡 and 活动关序号 fields got no width at all and were not drawn
-/// (10-07 replay, probe-android/ark-fresh.png), and short values such as 「本周已打满」, 「已选 6/7」 and 「没有」 were
-/// squeezed to one character a line (n1007-ark/008-ark.mail.png, n1007-ef/009-ef.days.back.png). In skip-ui's HStack a
-/// child framed to `maxWidth: .infinity` is weighted (Containers/HStack.swift:98), and Compose measures weighted children
-/// after the others, so the value is measured first at its own width; a text field (skip-ui fills its width) shares the
-/// row with the label. menuPicker below is the same fix for a picker row.
-struct LabeledContent<Label: View, Content: View>: View {
-    let content: Content
-    let label: Label
-
-    init(@ViewBuilder content: () -> Content, @ViewBuilder label: () -> Label) {
-        self.content = content()
-        self.label = label()
-    }
-
-    var body: some View {
-        HStack {
-            label.frame(maxWidth: .infinity, alignment: .leading)
-            content
-        }
+extension View {
+    /// iOS: a menu row's value and its ⌃⌄ in the secondary label colour, as Calendar's 「Alert  None」 and Shortcuts'
+    /// 「Weekly」 (P4); SwiftUI draws them in the accent colour, which marks the value as more than it is (HIG Color:
+    /// "reserve it for elements that truly benefit from emphasis"; app-1013 review 鸣潮 4). Android: as it is (the
+    /// Material dropdown keeps its own colours).
+    func menuValueGrey() -> some View {
+        #if os(Android)
+        self
+        #else
+        tint(Color.secondary)
+        #endif
     }
 }
-
-extension LabeledContent where Label == Text {
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.init(content: content) { Text(title) }
-    }
-}
-
-extension LabeledContent where Label == Text, Content == LabeledValueText {
-    init<S: StringProtocol>(_ title: String, value: S) {
-        self.init(content: { LabeledValueText(value: String(value)) }) { Text(title) }
-    }
-}
-
-/// `LabeledContent(_:value:)`'s value, in the secondary colour as iOS draws it in a list row.
-struct LabeledValueText: View {
-    let value: String
-
-    var body: some View {
-        Text(value).foregroundStyle(.secondary)
-    }
-}
-#endif
 
 /// `if shown { Section … }` for the top level of a List.
 ///
@@ -158,12 +99,21 @@ func listSection<Value, Content: View>(_ id: String, ifLet value: Value?, @ViewB
     }
 }
 
-/// A list row that pushes its page, as a settings row with a value does (HIG Lists and tables / Settings: a row that
-/// leads to a choice list pushes it; the system draws the row's disclosure indicator and the page's back button). Kept
-/// under its old name with the call site of `NavigationLink`: `SheetLink { EWChoiceList(…) } label: { … }`.
+/// A list row that opens its page as a sheet from the bottom instead of pushing it: the web page's 勾选页 (#picker,
+/// index.html:957-963; view.js:1458 openPicker, sheet.js) is a page sheet over the tab, not a pushed page. Used as
+/// `NavigationLink` is: `SheetLink { EWChoiceList(…) } label: { … }`.
+///
+/// The sheet has its own navigation bar as #picker's .pnav: 「返回」 (view.js:1484 `.pback` = close, nothing applied) on
+/// the left, the page's title small in the middle, and the page's own ✓ (完成, `.pdone`) on the right. A swipe down
+/// closes it the same way (sheet.js drag-to-dismiss). 「返回」 is the system's cancel button of a sheet (iOS 26
+/// `Button(role: .cancel)`, drawn as ✕), not a hand-made back chevron: HIG Sheets "The Cancel (or Close) button
+/// dismisses a sheet without saving any changes" and "the Cancel button belongs on the leading edge of the top
+/// toolbar"; a back arrow belongs to a pushed page. The row keeps the disclosure chevron the pushed row
+/// had (the web value row reads 「已选 N/M ›」).
 struct SheetLink<Destination: View, Label: View>: View {
     let destination: () -> Destination
     let label: () -> Label
+    @State var shown = false
 
     init(@ViewBuilder destination: @escaping () -> Destination, @ViewBuilder label: @escaping () -> Label) {
         self.destination = destination
@@ -171,53 +121,84 @@ struct SheetLink<Destination: View, Label: View>: View {
     }
 
     var body: some View {
-        NavigationLink(destination: destination, label: label)
+        Button {
+            shown = true
+        } label: {
+            HStack {
+                label()
+                #if os(Android)
+                Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
+                #else
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    #if os(iOS)
+                    // the disclosure indicator's own colour (UITableViewCell's chevron is tertiaryLabel). `.tertiary`
+                    // is a level of the Button's accent here and drew the chevron light blue (鸣潮 无音区 row, app-r1)
+                    .foregroundStyle(Color(uiColor: .tertiaryLabel))
+                    #else
+                    .foregroundStyle(.tertiary)
+                    #endif
+                    .accessibilityHidden(true)
+                #endif
+            }
+            // a row, not a tinted button: the label keeps the list's text colour (its own secondary parts stay secondary)
+            .foregroundStyle(.primary)
+            #if !os(Android)
+            .contentShape(Rectangle())   // the whole row takes the tap (skip-fuse-ui has no contentShape; a Compose row is whole already)
+            #endif
+        }
+        .sheet(isPresented: $shown) {
+            NavigationStack {
+                destination()
+                    #if !os(macOS)
+                    .navigationBarTitleDisplayMode(.inline)   // .ptitle: the small centred title of a sheet's bar
+                    #endif
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            sheetCancel
+                                .accessibilityLabel("返回")   // index.html:960 .pback aria-label 返回
+                        }
+                    }
+            }
+        }
+    }
+
+    @ViewBuilder private var sheetCancel: some View {
+        #if os(Android)
+        Button { shown = false } label: { Image(systemName: "xmark") }   // a Material full-screen dialog's close
+        #else
+        Button(role: .cancel) { shown = false }
+        #endif
     }
 }
 
 extension View {
-    /// The keyboard's 完成 key and drag-to-dismiss, once per page on its List. The number pads (.numberPad) have no return
-    /// key, and a drag of the list did not hide them either: the keyboard covered the tab bar until the App was restarted
-    /// (test pass 1, 问题 3). `.scrollDismissesKeyboard(.interactively)` lets a drag of the list take the keyboard down
-    /// (SwiftUI scrollDismissesKeyboard; skip-ui List.swift:181 reads it too). Keyboard toolbar items from several views
-    /// add up, hence one per page. 完成 ends the editing of whichever field has focus; a page that owns its fields'
-    /// `@FocusState` should use `keyboardDone(_:)` instead, which clears that state. Android's keypad has its own ✓ (IME
-    /// action) and clearsFocusOnOutsideTap.
+    /// iOS: a 完成 key over the keyboard. The number pads (.numberPad) have no return key, and tapping blank space or
+    /// dragging the list did not hide them either: the keyboard covered the tab bar until the App was restarted (test
+    /// pass 1, 问题 3). One per page, on its List: keyboard toolbar items from several views add up. resignFirstResponder
+    /// sent to the first responder, so no page has to bind its fields' @FocusState here (their blur checks still run on
+    /// the focus change). Android's keypad has its own ✓ (IME action) and clearsFocusOnOutsideTap.
     func keyboardDone() -> some View {
         #if !os(Android) && canImport(UIKit)
-        scrollDismissesKeyboard(.interactively).modifier(KeyboardDoneBar(done: nil))
+        modifier(KeyboardDoneBar())
         #else
-        scrollDismissesKeyboard(.interactively)
-        #endif
-    }
-
-    /// `keyboardDone()` for a page whose fields are bound to `focus`: 完成 sets it to nil (SwiftUI FocusState: "set the
-    /// focused value to nil to remove focus from all bound fields").
-    func keyboardDone<Value: Hashable>(_ focus: FocusState<Value?>.Binding) -> some View {
-        #if !os(Android) && canImport(UIKit)
-        scrollDismissesKeyboard(.interactively).modifier(KeyboardDoneBar(done: { focus.wrappedValue = nil }))
-        #else
-        scrollDismissesKeyboard(.interactively)
+        self
         #endif
     }
 }
 
 #if !os(Android) && canImport(UIKit)
-/// keyboardDone() on iOS: the system .keyboard toolbar with 完成, plus room for its capsule. Since iOS 26 the .keyboard toolbar is a floating glass capsule that is not part of the
+/// keyboardDone() on iOS. Since iOS 26 the .keyboard toolbar is a floating glass capsule that is not part of the
 /// keyboard's safe area (developer.apple.com/forums/thread/797250 and /thread/799692), so the List scrolled a focused
 /// field near the page end only to the keyboard's top edge, under the capsule: 鸣潮 「周本打第几个」 at y 599–621 behind
-/// 完成 at 593–629, the typed number unseen (test pass 6, iOS 27). While a keyboard is up the List gets that much more
+/// 完成 at 593–629, the typed number unseen (test pass 6, iOS 27; that row is a Stepper since app-r1, the other number
+/// and text fields still need it). While a keyboard is up the List gets that much more
 /// bottom safe area, so a last row can scroll above the capsule. That room alone did not keep fields clear: the system
 /// scroll stops at a List edge that moves from test to test (the 0.4.4 final pass had 终末地 循环执行 behind 完成 with
 /// it), so KeyboardRowReveal moves the focused row above the keyboard's end frame. The toolbar stays the system one:
 /// no API puts it into the keyboard safe area or gives its height (DTS on thread/797250 suggests safeAreaBar instead,
-/// whose @FocusState does not work on iOS 26.1, release notes 158720838). Checked again 10-07 (iPhone 18 Pro Max, iOS 27)
-/// with only the system .keyboard toolbar and the List's own keyboard avoidance (no room, no reveal): 终末地 基质刷取 ·
-/// 循环执行 and 方舟 优先刷取的活动关卡序号 both ended with the value behind 完成.
+/// whose @FocusState does not work on iOS 26.1, release notes 158720838).
 private struct KeyboardDoneBar: ViewModifier {
-    /// What 完成 does: clear the page's @FocusState, or (nil) end the editing of the focused field, for the pages that
-    /// do not bind one here.
-    let done: (() -> Void)?
     @State private var keyboardUp = false
     /// The 完成 capsule over the keyboard plus a gap: the capsule is 47 pt tall and sits on the keyboard's top edge
     /// (test pass 6 screenshot W1-3-kbd.png, iPhone 18 Pro Max, iOS 27). Measured, not from a system value (近似).
@@ -237,11 +218,11 @@ private struct KeyboardDoneBar: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { note in
                 KeyboardRowReveal.shown(note)
             }
-            // the List's own scroll to the focused field can still run after keyboardDidShow and stop with the row under
-            // the capsule; when that scroll ends (the scroll phase goes back to idle) the row is checked again. A drag by
-            // the user ends this: a row scrolled away on purpose is not pulled back.
+            // the List's own scroll to the field can still follow keyboardDidShow (seen: the row still at its old place
+            // then) and stop with the row under the capsule: look again when that scroll has come to rest
+            // (onScrollPhaseChange, iOS 18), instead of after a guessed 0.4 s
             .onScrollPhaseChange { _, phase in
-                KeyboardRowReveal.phaseChanged(phase)
+                if phase == .idle, keyboardUp { KeyboardRowReveal.reveal() }
             }
             // the first keystroke adds the row's 「待保存」 line and the row grows downwards
             .onReceive(NotificationCenter.default.publisher(for: UITextField.textDidChangeNotification)) { _ in
@@ -251,7 +232,7 @@ private struct KeyboardDoneBar: ViewModifier {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("完成") {
-                        if let done { done() } else { endEditing() }
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     }
                 }
             }
@@ -267,26 +248,13 @@ private struct KeyboardDoneBar: ViewModifier {
 /// keyboardDone() may call it for the same keyboard.
 @MainActor enum KeyboardRowReveal {
     /// The keyboard's top edge in window coordinates while it is up (its end frame), nil while it is down.
-    static var keyboardTop: CGFloat? {
-        didSet { if keyboardTop == nil { settling = false } }
-    }
-    /// From keyboardDidShow until the user drags the List: the List's own scroll to the field may still be on its way.
-    private static var settling = false
+    static var keyboardTop: CGFloat?
     private static let gap: CGFloat = 8
 
     static func shown(_ note: Notification) {
         guard let kb = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         keyboardTop = kb.minY
-        settling = true
-        reveal()
-    }
-
-    /// The List's own scroll to the field can still follow keyboardDidShow (seen: the row still at its old place then)
-    /// and stop with the row under the capsule; look again when a scroll ends (SwiftUI onScrollPhaseChange, phase idle),
-    /// not after a fixed delay. A user's drag (phase interacting) stops the looking.
-    static func phaseChanged(_ phase: ScrollPhase) {
-        if phase == .interacting { settling = false }
-        if phase == .idle, settling { reveal() }
+        reveal()   // a later system scroll is caught when it comes to rest (KeyboardDoneBar's onScrollPhaseChange)
     }
 
     static func reveal() {

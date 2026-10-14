@@ -248,7 +248,7 @@ let schema: [SchemaSection] = [
         SchemaField(path: "DailyTask.json/Which Tacet Suppression to Farm", type: "icons", label: "无音区打哪个", tacet: tacet,
                     hint: "按想要的声骸套装挑。只在上面选「无音区」时才有用"),
         SchemaField(path: "NightmareNestTask.json/Only Farm These Nests", type: "text", label: "残象聚落点位", ro: true,
-                    hint: "只刷落渊南丘，这是定好的。要换点位在电脑上改"),
+                    hint: "只刷列表里的前两个聚落，这是定好的，要换在电脑上改。"),
     ]),
 ]
 
@@ -265,12 +265,18 @@ struct RelaySwitch: Sendable {
 }
 
 /// 调试模式's rule as the relay applies it (modes.py set_debug); the end moment itself is shown once the machine reports it
-/// (relay.调试模式, in the phone's time: StatusMapping).
-let debugModeRule = "打开后跑完都不关机，一直到下一次预定开机前 10 分钟才自动关掉（两个半小时内就要到的那次开机不算），可能开十几个小时"
+/// (relay.调试模式, in the phone's time: StatusMapping). One line (design rule 8); the 150-minute exception of
+/// modes.py is left to the end time the row shows once it is on.
+let debugModeRule = "跑完都不关机，到下次预定开机前 10 分钟自动关掉。"
 
 /// 下次跑完不关机 as the relay applies it (modes.py skip_armed / set_skip_shutdown): a one-shot mark with no time,
-/// spent when the next 早班/晚班 run finishes; the run after that shuts down. Same words as web/schema.js.
-let skipShutdownRule = "一次性：接下来第一趟早班/晚班跑完不关，开到再下一趟跑完才关；用掉就没了"
+/// spent when the next 早班/晚班 run finishes; the run after that shuts down. One line of what switching it on does
+/// (design rule 8, HIG Toggles: "Describe what it does when turned on"); the web's longer wording is not kept.
+let skipShutdownRule = "下一趟跑完不关机，再下一趟跑完照常关。"
+
+/// 无音区结算截图: what switching it on does, one sentence (HIG Toggles: "Describe what it does when turned on, and people
+/// can infer the opposite."; the old 「开着：」 put a colon after the footer's 「无音区结算截图：」).
+let tacetShotsHint = "日报后面带上无音区打完的两张结算图。"
 
 let relaySwitches: [RelaySwitch] = [
     RelaySwitch(id: "relay|skip_shutdown", key: "下次别关机", tab: "状态", label: "下次跑完不关机",
@@ -286,7 +292,7 @@ let relaySwitches: [RelaySwitch] = [
                 off: .object(["action": .string("debug_mode"), "off": .bool(true), "confirmed": .bool(true)]),
                 hintOn: { v in "开着，到 \(v)——这期间跑完不关机" }),
     RelaySwitch(id: "relay|tacet_shots", key: "无音区截图", tab: "OK-WW", label: "无音区结算截图",
-                hint: "开着：日报后面带上无音区打完的两张结算图",
+                hint: tacetShotsHint,
                 on: .object(["action": .string("tacet_shots"), "on": .bool(true)]),
                 off: .object(["action": .string("tacet_shots"), "on": .bool(false)])),
 ]

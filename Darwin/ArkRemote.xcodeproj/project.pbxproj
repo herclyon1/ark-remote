@@ -134,14 +134,11 @@
 			};
 			buildConfigurationList = 49F90C232A52156200F06D93 /* Build configuration list for PBXProject "ArkRemote" */;
 			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = en;
+			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
-				Base,
-				es,
-				ja,
 				"zh-Hans",
+				Base,
 			);
 			mainGroup = 49F90C1F2A52156200F06D93;
 			packageReferences = (

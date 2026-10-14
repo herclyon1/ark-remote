@@ -5,39 +5,64 @@ import AppKit
 #endif
 
 /// The 手机 tab wired to the stores: StaminaStore (the game tokens) and Relay (the mailbox config).
-/// Nothing here says "saved" or "copied" in a toast: the 密钥 row's value is the store's own state, and the link goes
-/// through the share sheet, which has its own Copy (HIG Feedback, Activity views).
 struct PhoneTab: View {
     var body: some View {
         let stamina = StaminaStore.shared
         // tokens is loaded in StaminaStore.init; reading it here makes the page redraw when it changes
         let status = stamina.tokens == nil ? "" : stamina.status()
         PhonePage(data: PhonePageData(pageVersion: PhoneLink.appVersion, staminaStatus: status,
-                                      noInputLink: PhoneLink.make()),
+                                      hasConfig: Relay.shared.config != nil),
                   actions: PhonePageActions(
                     pasteTokens: { s in
-                        // A 免输入链接 (…#k=…&t=…) pasted here goes the way an opened link goes: on Android a tapped link
-                        // opens the browser, not the app (no assetlinks.json), so pasting is the only way in once set up.
+                        // A 免输入链接 (…#k=…&t=…) pasted here goes the way an opened link goes: an old web page link
+                        // (PhoneLink.oldPageURL) opens the browser when tapped on Android (no assetlinks.json), so pasting
+                        // is its way in once set up.
                         let str = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                        // No 「密钥已存到这台手机」 toast: the 密钥 row's value (森空岛、库街区) is the state (shell API id 289).
                         if str.contains("#"), let u = URL(string: str), PhoneLink.open(u) { return }
                         // view.js #tokpaste: fromPaste, then a forced refresh
                         try stamina.fromPaste(s)
                         Task { await stamina.refresh(force: true) }
                     },
-                    clearTokens: { stamina.clear() }))
+                    clearTokens: { stamina.clear() },
+                    copyNoInputLink: {
+                        guard let link = PhoneLink.make() else { return .noConfig }
+                        PhoneLink.copy(link)
+                        // this phone's own link: nothing to take back from the clipboard on the next open
+                        if let u = URL(string: link) { UserDefaults.standard.set(PhoneLink.linkHash(u), forKey: PhoneLink.takenKey) }
+                        // read back: navigator.clipboard.writeText can reject, UIPasteboard just does nothing
+                        return PhoneLink.pasted() == link ? .copied : .failed(link)
+                    }))
     }
 }
 
 /// The no-input link (view.js myLink / fromLink).
 enum PhoneLink {
-    /// The web page the link opens (view.js uses location.origin + location.pathname of the page itself).
-    static let pageURL = "https://herclyon1.github.io/maa/"
+    /// The start of the link 复制免输入链接 copies: the App's own URL scheme (Darwin/Info.plist CFBundleURLTypes,
+    /// Android/app/src/main/AndroidManifest.xml intent-filter), so a tapped link opens the App, not the old web page.
+    /// With a host: iOS's clipboard check (detectPatterns .probableWebURL, AppGlue.takeClipboardIfDue) and
+    /// NSDataDetector see `arkremote://link#…` as a link, `arkremote:#…` not.
+    static let linkBase = "arkremote://link"
+    /// The web page the old links open (view.js myLink: location.origin + location.pathname). Links copied before
+    /// still work: open() reads only the `#k=` / `&t=` fragment, whatever the scheme and host.
+    static let oldPageURL = "https://herclyon1.github.io/maa/"
 
     static var appVersion: String {
         let info = Bundle.main.infoDictionary
         let v = info?["CFBundleShortVersionString"] as? String ?? ""
         let b = info?["CFBundleVersion"] as? String ?? ""
         return b.isEmpty || b == v ? v : "\(v) (\(b))"
+    }
+
+    /// navigator.clipboard.writeText: UIPasteboard on Android (SkipUI maps it to the system clipboard) and iOS;
+    /// NSPasteboard only for the macOS host build.
+    static func copy(_ s: String) {
+        #if os(Android) || canImport(UIKit)
+        UIPasteboard.general.string = s
+        #elseif canImport(AppKit)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
+        #endif
     }
 
     /// The clipboard's text (SetupScreen's 「第一次使用」 and takeClipboardLink read it).
@@ -68,7 +93,7 @@ enum PhoneLink {
         let k = enc("{\"t\":\(jsonQuote(cfg.topic)),\"p\":\(jsonQuote(cfg.pin))}")
         let stamina = StaminaStore.shared
         let tok = stamina.tokens ?? stamina.loadTokens()
-        return pageURL + "#k=" + k + (tok.map { "&t=" + enc($0.encodedString()) } ?? "")
+        return linkBase + "#k=" + k + (tok.map { "&t=" + enc($0.encodedString()) } ?? "")
     }
 
     /// The last link this phone took (its SHA-256, not the link: the link carries the PIN and the game tokens).
@@ -78,23 +103,17 @@ enum PhoneLink {
         Hash.hex(Hash.sha256(Array(url.absoluteString.utf8)))
     }
 
-    /// This phone's own link, as the 手机 page offers it for sharing: a copy of it on the clipboard is nothing to take
-    /// back on the next open (the page sets it whenever the link changes; it was set on 复制免输入链接 before).
-    static func markTaken(_ link: String) {
-        guard let u = URL(string: link) else { return }
-        UserDefaults.standard.set(linkHash(u), forKey: takenKey)
-    }
-
     /// App back in front with a mailbox already set (AppGlue.enterForeground): a 免输入链接 copied since is taken the
-    /// way SetupScreen takes it on 「第一次使用」 (the use the user set 10-02 20:47, DECISIONS: copy the link, open the
-    /// app). One clipboard read per foreground, no timer; the same link is taken once (takenKey); anything else on the
-    /// clipboard is left alone. What it took shows as the 密钥 row's value on the 手机 tab; no toast.
+    /// way SetupScreen takes it on 「第一次使用」 (the use the user set 10-02 20:47: copy the link, open the app). One
+    /// clipboard read per foreground, no timer; the same link is taken once (takenKey); anything else on the
+    /// clipboard is left alone.
     @MainActor static func takeClipboardLink() {
         guard Relay.shared.config != nil,
               let s = pasted()?.trimmingCharacters(in: .whitespacesAndNewlines), s.contains("#k="),
               let u = URL(string: s),
               UserDefaults.standard.string(forKey: takenKey) != linkHash(u) else { return }
-        open(u)
+        // a background event: the status line under the tab title (Pages/Shell/Feedback.swift, shell API id 22)
+        if open(u) { Feedback.status("已从剪贴板的链接更新密钥") }
     }
 
     /// An opened link (.onOpenURL): view.js fromLink() for `#k=` and Stamina.fromLink() for `&t=`.

@@ -1,8 +1,8 @@
 // Ported from maa-automation/web/inventory.js
 //
 // Inventory (库存): the app asks the game's official API itself, on the user's action only, and lays
-// the answer next to the static "one full build needs" table (data/need.json, built by
-// scripts/mac/build-need-tables.py). Endfield only for now; the result is shaped per game so
+// the answer next to the "one full build needs" table (the relay rebuilds it every server day,
+// maa-automation relay/ark_relay/features/needtable/). Endfield only for now; the result is shaped per game so
 // 明日方舟 / 鸣潮 can be added later without changing the shape. Field meanings are the ones in the
 // header of inventory.js (section, group, owner, uses, origin, footnote, lagNote, have, need,
 // standards, servings, box, short, boxUsed / boxLeft, virtual, icon).
@@ -15,9 +15,11 @@
 // early only when the inventory names an id the cache does not know.
 //
 // Not a straight port:
-// - The page fetched the relative "data/need.json" from its own origin; the app has no origin, so it
-//   reads the deployed copy (`needURL`). Both the plain and the forced read skip the HTTP cache
-//   (the page used `no-cache` / `reload`; both end up with the server's current file).
+// - The page fetched the relative "data/need.json" from its own origin. The app reads the copy the relay
+//   rebuilds every server day next to the phone state on COS (`Relay.needURL(topic:)`, maa-automation
+//   needtable.py, since 2026-10-14), and the old deployed copy (`needURL`, last built 09-23) only when that is
+//   not there (no topic yet, an older relay). Both reads skip the HTTP cache (the page used `no-cache` /
+//   `reload`; both end up with the server's current file).
 // - The "森空岛没给终末地的仓库：…" message lists the first six keys of an unordered dictionary, so
 //   the order of the names may differ from the page's.
 
@@ -125,8 +127,6 @@ struct InventoryGame: Codable, Sendable, Equatable {
     var originSource: String?
     var lagMinutes: Int?
     var lagNote: String?
-    /// Set when this read's need.json fetch failed and an earlier table was used: why, and when that table was read.
-    var needNote: String?
     var standard: InventoryStandard?
     var standards: [StandardOption] = []
     var box: InventoryBox?
@@ -135,7 +135,7 @@ struct InventoryGame: Codable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case game, gameId, error = "错误", caliber, footnote, source, built, gameLevel, sections, groups, useSource,
-             originSource, lagMinutes, lagNote, needNote, standard, standards, box, boxUse, rows
+             originSource, lagMinutes, lagNote, standard, standards, box, boxUse, rows
     }
 }
 
@@ -321,7 +321,8 @@ enum InventoryCalc {
 
     static let zonaiInventory = "/web/v1/game/endfield/calculate/user-game-data"
     static let zonaiMaterials = "/web/v1/game/endfield/calculate/material-list"
-    /// The page read "data/need.json" next to itself; this is that file on the deployed site.
+    /// The page read "data/need.json" next to itself; this is that file on the deployed site. Since the relay
+    /// rebuilds the table itself (`relayNeedURL`), this is the fallback: it was last built 2026-09-23.
     static let needURL = "https://herclyon1.github.io/maa/data/need.json"
     static let matKey = "ark-remote-matlist"
     static let standardKey = "ark-remote-need-standard"
@@ -337,11 +338,9 @@ enum InventoryCalc {
     var busy = false
     /// need.json as read, `{built, games: [...]}`.
     var need: JSONValue?
-    /// The last need.json error (the reading still goes ahead without it).
+    /// This read's need.json error, "" when the table was read (cleared at the start of each read).
     var err = ""
-    /// When `need` was read (ms since the epoch); 0 = never.
-    var needAt: Double = 0
-    /// How need.json is fetched; tests swap it for one that fails without the network.
+    /// The GETs loadNeed makes; tests replace it so no request leaves the Mac.
     @ObservationIgnored var fetchNeed: (String) async throws -> (Data, Int) = { try await httpFetch($0, noStore: true) }
 
     /// Where the 森空岛 session and signing live.
@@ -349,17 +348,31 @@ enum InventoryCalc {
 
     // MARK: need table
 
-    /// inventory.js loadNeed(force): the static need table, read fresh on every refresh.
+    /// The relay's daily copy of the table next to the phone state (Relay.needURL); nil without a topic.
+    var relayNeedURL: String? {
+        let t = (Relay.shared.config?.topic ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : Relay.needURL(topic: t)
+    }
+
+    /// inventory.js loadNeed(force): the need table, read fresh on every refresh - the relay's daily copy first, the old
+    /// deployed one when that cannot be read. The error is the last one's.
     @discardableResult
     func loadNeed(force: Bool = false) async throws -> JSONValue {
-        let (body, status) = try await fetchNeed(Self.needURL)
-        guard (200..<300).contains(status) else { throw AppError("需求表拿不到（\(status)）") }
-        let j: JSONValue
-        do { j = try JSONValue.parse(body) } catch { throw AppError("需求表格式不对") }
-        guard j["games"]?.array != nil else { throw AppError("需求表格式不对") }
-        need = j
-        needAt = nowMs()
-        return j
+        var last: Error = AppError("需求表拿不到")
+        for url in [relayNeedURL, Self.needURL].compactMap({ $0 }) {
+            do {
+                let (body, status) = try await fetchNeed(url)
+                guard (200..<300).contains(status) else { throw AppError("需求表拿不到（\(status)）") }
+                let j: JSONValue
+                do { j = try JSONValue.parse(body) } catch { throw AppError("需求表格式不对") }
+                guard j["games"]?.array != nil else { throw AppError("需求表格式不对") }
+                need = j
+                return j
+            } catch {
+                last = error
+            }
+        }
+        throw last
     }
 
     /// inventory.js needFor(gameId).
@@ -494,12 +507,9 @@ enum InventoryCalc {
         do { try await loadNeed(force: force) } catch { err = errorMessage(error) }
         if let sk = t?["sk"], sk.truthy {
             // no usable need table: the rows would carry no group and the page would blame 森空岛
-            var g: InventoryGame
-            if need == nil { g = Self.needMissing(err) }
-            else if let gap = needGap() { g = Self.needLacks(gap) }
-            else { g = await endfield(sk) }
-            if need != nil, !err.isEmpty { g.needNote = staleNote() }
-            out.games.append(g)
+            if need == nil { out.games.append(Self.needMissing(err)) }
+            else if let gap = needGap() { out.games.append(Self.needLacks(gap)) }
+            else { out.games.append(await endfield(sk)) }
         } else {
             out.games.append(InventoryGame(game: Self.gameName, gameId: Self.gameIdEndfield, error: "没配森空岛"))
         }
@@ -508,8 +518,8 @@ enum InventoryCalc {
         return out
     }
 
-    /// The game shown when need.json could not be read and none is held from an earlier read: says the
-    /// table is what is missing, not 森空岛 (森空岛 is not asked, since nothing could be worked out from it).
+    /// The game shown when no need table could be read (neither copy) and none is held from an earlier read: says the
+    /// table is what is missing, not 森空岛 (森空岛 is not asked, since nothing could be worked out from its answer).
     static func needMissing(_ err: String) -> InventoryGame {
         InventoryGame(game: gameName, gameId: gameIdEndfield,
                       error: "这次是需求表没拿到（不是森空岛回报的），算不出人份：" + (err.isEmpty ? "原因不明" : err))
@@ -525,19 +535,6 @@ enum InventoryCalc {
     /// The game shown when the need table is held but lacks 终末地 or its rows (森空岛 is not asked).
     static func needLacks(_ gap: String) -> InventoryGame {
         InventoryGame(game: gameName, gameId: gameIdEndfield, error: gap + "（不是森空岛回报的），算不出人份")
-    }
-
-    /// The line for a read that fell back on an earlier need table: this fetch's error and when the held table was read.
-    func staleNote() -> String {
-        "需求表这次没拿到（\(err.isEmpty ? "原因不明" : err)），人份按 \(Self.readAt(needAt)) 拿到的旧表算"
-    }
-
-    /// HH:MM today, else M月d日 HH:MM.
-    static func readAt(_ ms: Double) -> String {
-        let d = Date(timeIntervalSince1970: ms / 1000)
-        if Calendar.current.isDateInToday(d) { return clockHHMM(ms: ms) }
-        let c = Calendar.current.dateComponents([.month, .day], from: d)
-        return "\(c.month ?? 0)月\(c.day ?? 0)日 " + clockHHMM(ms: ms)
     }
 
     /// inventory.js status(): "森空岛" when a 森空岛 session is stored, else "".

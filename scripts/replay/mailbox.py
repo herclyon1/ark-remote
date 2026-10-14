@@ -154,7 +154,11 @@ class Mailbox:
         """The base state with the parts the steps depend on put in a known shape: nothing running, no skip,
         no 'keep on', debug off, no echo farming."""
         b = copy.deepcopy(self.base)
-        b["at"] = int(time.time())
+        # strictly newer than the last state of this run: the app adopts only a state whose 「at」 (whole seconds) is
+        # after the one it holds (Net.swift adopt), and status.queued / status.queued.final post two states 0.7 s
+        # apart; in the same second the final one was dropped and 「排队中」 stayed (app-r1 local ntfy run 3, step 19)
+        b["at"] = max(int(time.time()), getattr(self, "_last_at", 0) + 1)
+        self._last_at = b["at"]
         b.setdefault("run", {})["在跑的"] = []
         r = b.setdefault("relay", {})
         r["今天跳过"] = ""
@@ -162,6 +166,11 @@ class Mailbox:
         r["下次别关机"] = False
         r["调试模式"] = ""
         r["刷声骸"] = {}
+        # 今天: failed runs and the last run are present, so status.noresult checks a page that would show them
+        # (regression #26; a count of 0 hid 「失败 N 趟」 even on the code that drew it)
+        t = b.setdefault("今天", {})
+        t["失败"] = max(int(t.get("失败") or 0), 2)
+        t["最近"] = t.get("最近") or "OK-WW"
         return b
 
     def variant(self, name, extra_receipts=None):
