@@ -410,7 +410,10 @@ DIAG_SHEET = "复制"
 step("ph.share", "phone", "分享诊断记录 → 「诊断记录」单（复制 / 分享 / 关闭）",
      [tap("~分享诊断记录")], expect=[DIAG_SHEET, "分享", "关闭"], timeout=10)
 step("ph.share.sys", "phone", "单里「分享」→ 系统分享面板 → 取消 → 不闪退、单还在（62ba009）",
-     [tap("分享", last=True), ("wait", 2.5), ("back",), ("wait", 5)], expect=[DIAG_SHEET], timeout=10,
+     # Android too: wait for the share panel to take the screen (the sheet's 复制 leaves the tree) before back; a fixed
+     # 2.5 s was too short with the emulator at 540 % CPU (10-14, twice) and back then closed the sheet itself
+     [CONFIRM_WAIT, tap("分享", last=True), ("gone", DIAG_SHEET, 8), ("wait", 0.8), ("back",), ("wait", 5)],
+     expect=[DIAG_SHEET], timeout=10,
      ios={"say": "单里「分享」→ 系统分享面板 → 点面板外面 → 不闪退、单还在（62ba009；取消不再弹提示，面板本身就是反馈）",
           # while the share panel is up the app's tree hides the 诊断记录 sheet: its 复制 gone = panel up, back = closed
           "do": [CONFIRM_WAIT, tap("分享", last=True), ("gone", DIAG_SHEET, 8), ("wait", 0.8),
