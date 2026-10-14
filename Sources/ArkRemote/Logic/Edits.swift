@@ -142,7 +142,7 @@ enum EWSave {
         let skips = keys.compactMap { k -> EWReviewLine? in
             guard let e = edits[k], isSkip(e) else { return nil }
             let parts = e.label.components(separatedBy: " · ")
-            let verb = e.body?["action"]?.string == "skip_today" ? "今天不跑" : "今天照常跑"
+            let verb = e.body?["action"]?.string == "skip_today" ? "今天不跑" : "今天跑"
             return EWReviewLine(id: k, title: "\(verb)：\(parts[0])\(parts.count > 1 ? "（\(parts[1])）" : "")", skip: true)
         }
         let rest = keys.compactMap { k -> EWReviewLine? in

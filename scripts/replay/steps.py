@@ -87,6 +87,8 @@ SEND_N = "re:^寄出 \\d+ 项$"
 
 import mailbox as _mb                        # noqa: E402  (the injected farm's end, machine time)
 FARM_HHMM = _mb.farm_until_hhmm()
+FARM_PHONE = _mb.farm_until_hhmm(phone=True)  # the same end on the phone's (this Mac's) clock, as the page shows it
+FARM_0005 = _mb.machine_hhmm_of_phone("00:05")  # what 00:05 picked on the phone is sent as
 
 
 def tap(sel, **opts):
@@ -104,9 +106,9 @@ def step(id, page, say, do=(), **kw):
 
 # ------------------------------------------------------------------ setup
 step("setup.launch", "setup", "冷启动（一次性信箱已写好）→ 状态页数据齐、设备卡「开机中」",
-     [("relaunch",)], expect=[STATUS_ROOT, "刷新", "停止一切", "这一趟", "~开机中"], timeout=45, always=True,
+     [("relaunch",)], expect=[STATUS_ROOT, "刷新", "停止一切", "班次", "~开机中"], timeout=45, always=True,
      offline={"say": "冷启动（一次性信箱 + 缓存注入的状态）→ 状态页数据齐、设备卡「关机」（离线没有心跳）",
-              "expect": [STATUS_ROOT, "刷新", "停止一切", "这一趟", "~关机"]})
+              "expect": [STATUS_ROOT, "刷新", "停止一切", "班次", "~关机"]})
 
 # ------------------------------------------------------------------ status page
 step("status.refresh", "status", "状态 · 刷新 → 寄出 refresh，设备卡仍「开机中」",
@@ -121,10 +123,11 @@ step("status.stop.ask", "status", "状态 · 停止一切 → 弹「停止一切
 step("status.stop.cancel", "status", "弹窗 · 取消 → 关掉，没寄出",
      [CONFIRM_WAIT, ("dismiss",)], absent=["停止一切？"], nocmd=3,
      offline={"say": "提示 · 好 → 关掉", "do": [CONFIRM_WAIT, tap("好", last=True)], "absent": [OFF_NOTE]})
-step("status.4c.menu", "status", "刷 4C 声骸 · 打哪个（点当前值）→ 菜单列出 boss",
-     [tap({"t": "re:^\\d\\. ", "kind": ["StaticText", "TextView"]})], expect=["re:^3\\. "])
-step("status.4c.pick", "status", "菜单 · 选第 3 个 boss → 菜单收起，行显示第 3 个",
-     [tap("re:^3\\. ", last=True)], expect=["re:^3\\. "], absent=[{"t": "re:^4\\. "}])
+# the 刷声骸（4 费） menu shows the boss's name alone, without its list number (Calendar's Repeat menu: the option name)
+step("status.4c.menu", "status", "刷声骸（4 费）· 打哪个（点当前值「天傀劫煞」）→ 菜单列出 boss",
+     [tap({"t": "天傀劫煞", "kind": ["StaticText", "TextView", "Button"]})], expect=["梦魇亚当·重锤", "无铭探索者"])
+step("status.4c.pick", "status", "菜单 · 选第 3 个 boss → 菜单收起，行显示「梦魇亚当·重锤」",
+     [tap("梦魇亚当·重锤", last=True)], expect=["梦魇亚当·重锤"], absent=["无铭探索者", "re:^\\d\\. "])
 step("status.until.2330", "status", "刷到几点 · 点胶囊拨转盘 23 / 30 → 点外面关掉 → 胶囊「23:30」（796103b）",
      [("time", "刷到几点", 23, 30)], expect=["23:30"], absent=[{"t": "", "kind": "PickerWheel"}],
      android={"say": "刷到几点 · 点时间 → 系统时间对话框拨 23:30 → 返回 → 行上「11:30 PM」/「23:30」（跟手机 12/24 小时）",
@@ -135,8 +138,9 @@ step("status.until.0005", "status", "刷到几点 · 拨 0 / 05 → 胶囊「0:0
 step("status.echo.ask", "status", "开始刷 → 弹「开始刷？」（到 00:05）",
      [tap("开始刷", region="content")], expect=["开始刷？", "~00:05"],
      offline={"say": "开始刷（关机）→ 提示「机器关着…所以这次没有发」", "expect": [OFF_NOTE]})
-step("status.echo.go", "status", "弹窗 · 开始刷（等过 400 ms 门）→ 寄出 echo_farm（第 3 个，到 00:05）",
-     [CONFIRM_WAIT, tap("开始刷", last=True)], absent=["开始刷？"], cmd={"action": "echo_farm", "boss": 3, "until": "00:05"},
+# picked on the phone's clock (Tokyo, the simulator's zone), sent on the machine's (Beijing): 00:05 → 23:05
+step("status.echo.go", "status", "弹窗 · 开始刷（等过 400 ms 门）→ 寄出 echo_farm（第 3 个，手机 00:05 = 机器 23:05）",
+     [CONFIRM_WAIT, tap("开始刷", last=True)], absent=["开始刷？"], cmd={"action": "echo_farm", "boss": 3, "until": FARM_0005},
      offline={"say": "提示 · 好 → 关掉", "do": [CONFIRM_WAIT, tap("好", last=True)], "absent": [OFF_NOTE]})
 step("status.keepon.discard", "status", "下次跑完不关机 打开 → 待保存 1 项 → ✕ 放弃 → 回原样、没寄出",
      [("retry", 2, [("toggle", "下次跑完不关机")], ("until", DISCARD, 5, {"region": "top"})), ("discard",),
@@ -163,8 +167,8 @@ step("status.queued.final", "status", "机器回最终回执 → 「排队中」
 step("status.clear", "status", "顶上条「不等了，清掉」→ 待回执全清",
      [("clear_receipts",), ("state", "base"), ("clear",)], absent=[CLEAR, "~已寄出"], timeout=15,
      offline={"do": [], "absent": [], "skip": "额度"})
-step("status.skip.pending", "status", "早班开关关掉 → 「今天跳过，明天照常」+ 待保存 1 项",
-     [("toggle", "re:(^|, |、)早班 · (机器|今天)")], expect=["~今天跳过，明天照常", "~待保存 1 项"])
+step("status.skip.pending", "status", "早班开关关掉 → 「今天不跑，明天照常」+ 待保存 1 项",
+     [("toggle", "re:(^|, |、)早班 · (机器|今天)")], expect=["~今天不跑，明天照常", "~待保存 1 项"])
 step("status.skip.review", "status", "✓ → 确认单红字「今天不跑：早班」",
      [("remember", SAVE, "save", {"region": "top"}), tap(SAVE, region="top")], expect=["确认这次修改", "~今天不跑：早班", "寄出 1 项"])
 step("status.skip.think", "status", "再想想 → 关单，改动还在",
@@ -186,7 +190,7 @@ step("gate.late", "gate", "✓ 等单子停稳再点「寄出」→ 寄出 skip_
      [tap(SAVE, region="top"), tap("寄出 1 项", stable=True)], absent=["确认这次修改"], cmd={"action": "skip_today"},
      timeout=10)
 step("gate.clear", "gate", "不等了，清掉 → 早班开关回到开",
-     [("clear",)], absent=[CLEAR], expect=["~今天照常"], timeout=15,   # iOS: line → action sheet → 不等了，清掉
+     [("clear",)], absent=[CLEAR], expect=["~早班 · 今天跑"], timeout=15,   # iOS: line → action sheet → 不等了，清掉
      offline={"say": "（上一步已放弃改动）早班开关回到开、没有待保存", "do": [], "absent": ["~待保存"]})
 step("gate.diag.check", "gate", "App 自己的发送记录（打开分享诊断记录让它存盘）：门测试 0 条、停稳后寄出 ≥1 条",
      [("tab", "手机"), tap("~分享诊断记录"), ("wait", 1.5), ("back",), ("app_posts", {"gate.early": 0, "gate.late": 1})],
@@ -209,8 +213,10 @@ step("status.off.ok", "status", "好 → 关提示；心跳回来 → 「开机�
               "absent": [OFF_NOTE]})
 
 # ------------------------------------------------------------------ shifts
-step("shift.night", "shift", "班次切「晚班」→ 只剩明日方舟，底栏没有终末地",
-     [tap("晚班")], expect=["~晚班 · 下一趟"], absent=[TAB_EF])
+# the base state puts 晚班 at 00:01 machine time (mailbox.normalized), so its run today is over: the tile says 明天, and
+# its row says so with its switch off-limits (skip_today acts on today only)
+step("shift.night", "shift", "班次切「晚班」→ 只剩明日方舟，底栏没有终末地；下一趟写「明天」",
+     [tap("晚班")], expect=["~晚班 · 下一趟 明天", "~今天这班已过"], absent=[TAB_EF])
 step("shift.morning", "shift", "切回「早班」→ 五个标签回来", [tap("早班", region="content")], expect=[TAB_EF])
 
 # ------------------------------------------------------------------ receipts + D39 on 状态
@@ -344,7 +350,7 @@ step("ef.loop.x", "endfield", "循环执行改 20（键盘开着）→ 点 ✕ �
      [("field", "循环执行", "20"), ("wait", 0.6), ("discard",)], keyboard=False,
      expect=[{"t": "99", "kind": ["TextField", "EditText"]}, "循环执行"], absent=["~待保存", "库存"], nocmd=2)
 step("ef.home", "endfield", "回「状态」标签（只跑 endfield 时，收尾的冷启动从状态页开始）", [("tab", "状态")],
-     expect=[[STATUS_ROOT, "~明日安排", "~查看全部"]],   # any of them: the 状态 page may be scrolled down (d39 runs before)
+     expect=[[STATUS_ROOT, "~明天要跑的内容", "~查看全部"]],   # any of them: the 状态 page may be scrolled down (d39 runs before)
      # Android: a lazy list has nodes for the rows on screen only; scrolled to the 月卡 rows none of the three is there
      android={"expect": [HOME], "absent": [BACK_BTN]})
 step("d39.ef.top", "d39", "D39：终末地根页滑到底再点「终末地」→ 回顶",
@@ -491,11 +497,11 @@ step("layout.title.phone", "layout", "手机页（安卓）：大标题、组标
 step("noef.jump", "layout", "人在终末地，机器发来早班不含终末地的状态（实时分片，不刷新）→ 终末地标签消失、跳到状态",
      # any of them: the 状态 page keeps where it was scrolled (d39 / diag steps scroll it down), and 现在跑一趟 is in the
      # tree only near the top of the lazy list
-     [("tab", "终末地"), ("wait", 1.0), ("state", "noef")], expect=[[STATUS_ROOT, "~明日安排", "~查看全部"]], absent=[TAB_EF],
+     [("tab", "终末地"), ("wait", 1.0), ("state", "noef")], expect=[[STATUS_ROOT, "~明天要跑的内容", "~查看全部"]], absent=[TAB_EF],
      timeout=30,
      offline={"say": "人在终末地，缓存注入早班不含终末地的状态、冷启动 → 终末地标签没了、停在状态（记住的标签改回状态）"})
 step("noef.back", "layout", "机器发回原状态 → 终末地标签回来，App 留在状态",
-     [("state", "base"), ("wait", 6)], expect=[TAB_EF, [STATUS_ROOT, "~明日安排", "~查看全部"]], timeout=30)
+     [("state", "base"), ("wait", 6)], expect=[TAB_EF, [STATUS_ROOT, "~明天要跑的内容", "~查看全部"]], timeout=30)
 
 # ------------------------------------------------------------------ duplicate receipts (pass-1 item 5, fix 3)
 step("dup.status", "receipts", "同一分钟两条一样的回执 → 状态页两行都在、不崩",
@@ -507,23 +513,23 @@ step("dup.page", "receipts", "查看全部 → 回执页也有这两行（不是
 step("dup.done", "receipts", "回状态，发回原状态", [("tab", "状态"), ("state", "base")], expect=[HOME], absent=[BACK_BTN])
 
 # ------------------------------------------------------------------ 刷声骸 in progress (cache / state injection; 796103b)
-FH, FM = FARM_HHMM.split(":")
-step("farm.show", "farm", f"机器正在刷声骸（到机器时间 {FARM_HHMM}）→ 「正在刷」「改收工时刻」「提前收工」",
+FH, FM = FARM_PHONE.split(":")
+step("farm.show", "farm", f"机器正在刷声骸（到机器时间 {FARM_HHMM} = 手机 {FARM_PHONE}）→ 「正在刷」「改收工时刻」「提前收工」，只写手机时间",
      [("tab", "状态"), ("state", "farm"), ("wait", 1.0), ("see", "~正在刷「回放Boss」")],
-     expect=["~正在刷「回放Boss」", f"~机器时间 {FARM_HHMM}", "改收工时刻", "提前收工"], timeout=30)
-step("farm.row", "farm", "4C 段只剩「改成刷到几点」：没有「打哪个」「刷到几点」「开始刷」",
-     [("see", "改成刷到几点（机器时间）")], expect=["改成刷到几点（机器时间）"],
-     absent=["刷到几点（机器时间）", "开始刷", "~打哪个"])
-step("farm.capsule", "farm", f"「改成刷到几点」胶囊显示机器时间的「到」{FARM_HHMM}（不随手机时区）",
+     expect=["~正在刷「回放Boss」", f"~{FARM_PHONE} 为止", "改收工时刻", "提前收工"], absent=["~机器时间"], timeout=30)
+step("farm.row", "farm", "刷声骸段只剩「改成刷到几点」：没有「打哪个」「刷到几点」「开始刷」",
+     [("see", "改成刷到几点")], expect=["改成刷到几点"],
+     absent=["刷到几点", "开始刷", "~打哪个"])
+step("farm.capsule", "farm", f"「改成刷到几点」胶囊显示手机时间的「到」{FARM_PHONE}（页上只用手机时间）",
      [], expect=[{"t": f"re:^0?{int(FH)}:{FM}$", "kind": "Button"}],
      android={"expect": [f"re:^(0?{int(FH)}:{FM}|{int(FH) % 12 or 12}:{FM} {'AM' if int(FH) < 12 else 'PM'})$"]})
 step("farm.pick", "farm", "改成刷到几点 · 拨 23 / 30 → 点外面关掉 → 胶囊「23:30」，没进别的页",
-     [("time", "改成刷到几点", 23, 30)], expect=["23:30", "改成刷到几点（机器时间）"], absent=["终末地月卡"],
-     android={"expect": ["re:^(23:30|11:30 PM)$", "改成刷到几点（机器时间）"]})
+     [("time", "改成刷到几点", 23, 30)], expect=["23:30", "改成刷到几点"], absent=["终末地月卡"],
+     android={"expect": ["re:^(23:30|11:30 PM)$", "改成刷到几点"]})
 step("farm.done", "farm", "发回原状态 → 「刷到几点」「开始刷」回来",
-     [("state", "base"), ("wait", 1.0), ("see", "刷到几点（机器时间）"), ("see", "开始刷")],
-     expect=["刷到几点（机器时间）", "开始刷"],
-     absent=["~正在刷「回放Boss」", "改成刷到几点（机器时间）"], timeout=30)
+     [("state", "base"), ("wait", 1.0), ("see", "刷到几点"), ("see", "开始刷")],
+     expect=["刷到几点", "开始刷"],
+     absent=["~正在刷「回放Boss」", "改成刷到几点"], timeout=30)
 
 # ------------------------------------------------------------------ two-time receipts (ce8ebc3)
 TWO_T = "re:\\d\\d:\\d\\d 发出 · .*执行"

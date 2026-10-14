@@ -57,10 +57,11 @@ enum StatusCommands {
                 return nil
             }
             // each confirmation says one sentence (HIG Action sheets: "Provide a message only if necessary"; reference P10,
-            // Calendar's discard confirmation) that keeps what the press really does: it spends sanity, and the mailbox
-            // holds the order 12 hours (S5 in BOARD/App-待他定项-从记录定-1014.md)
+            // Calendar's discard confirmation) that keeps what the press really does: it spends sanity; the mailbox holds
+            // the order 12 hours, which matters only while the machine is off, so only then is it said
             return StatusAsk(
-                title: "现在跑一趟？", message: "「\(queue)」多跑一趟，会真的花掉理智和波片；机器 12 小时内没开机就作废。",
+                title: "现在跑一趟？",
+                message: "\(queue)现在多跑一趟，会花掉理智和波片。" + (data.machineOff ? "机器 12 小时内没开机就作废。" : ""),
                 ok: "跑一趟",
                 body: .object(["action": .string("run_now"), "confirmed": .bool(true), "queue": .string(queue)]),
                 // the mailbox keeps a message 12 hours (ntfy.sh's cache; Pending.swift isStale) and nothing tracks a one-shot
@@ -93,7 +94,9 @@ enum StatusCommands {
         a.startEchoFarm = { boss, until in
             // 开始刷 stays disabled until both are valid, with the reason under the section (echoFarmProblem); this guard
             // only keeps a stray call from sending (view.js:1228 / :1239 said it in a toast)
-            guard echoFarmProblem(boss: boss, until: until) == nil, let t = statusTimeHHMM(until) else { return nil }
+            // `until` is the phone's clock (the page's one clock); the relay reads the machine's (echofarm.py resolve_until)
+            guard echoFarmProblem(boss: boss, until: until) == nil, let t = statusTimeHHMM(until),
+                  let m = machineHHMM(fromPhone: t) else { return nil }
             let nm = statusBosses.first(where: { $0.index == boss })?.name ?? "第 \(boss) 个"
             // sent while the machine is off it ran at the next boot, with the time resolved at that moment: 08:30 asked at
             // 23:00 became the next day's 08:30, a farm of ~24 h over the morning shift (审查 A3; boot_stages.py:692-694,
@@ -105,22 +108,24 @@ enum StatusCommands {
             return StatusAsk(
                 // the relay holds no queue back for a farm (审查 B14: echofarm is read only by commands / engine tick / shutdown /
                 // phone, relay grep): a shift that comes due runs as usual
-                title: "开始刷？", message: "刷「\(nm)」到机器时间 \(t)，期间到点的班次可能和它抢游戏。", ok: "开始刷",
+                title: "开始刷？", message: "刷「\(nm)」到 \(t)，期间到点的班次可能和它抢游戏。", ok: "开始刷",
                 body: .object(["action": .string("echo_farm"), "confirmed": .bool(true), "boss": .int(boss),
-                               "until": .string(t), "name": .string(nm)]),
+                               "until": .string(m), "name": .string(nm)]),
                 okText: "已派：刷到 \(t)", anchor: "echo_farm")   // view.js:1230
         }
         a.changeEchoFarmUntil = { until in
             // 改收工时刻 is disabled while the time is not a valid one (the reason is under the 刷声骸 section)
-            guard let v = statusTimeHHMM(until) else { return nil }
-            // echofarm.py retime → resolve_until (114-124): a time not after the machine's clock now is tomorrow's (审查 A2)
-            let past = v <= machineNowHHMM()
+            guard let v = statusTimeHHMM(until), let m = machineHHMM(fromPhone: v) else { return nil }
+            // echofarm.py retime → resolve_until (114-124): a time not after the machine's clock now is tomorrow's (审查 A2).
+            // machineHHMM(fromPhone:) takes the phone time's next coming moment, which resolve_until reads the same way, so
+            // 「already past」 is judged on the phone's clock the user picked on
+            let past = v <= phoneHHMM(Date())
             return StatusAsk(
                 title: "改收工时刻？",
-                message: past ? "机器时间已过 \(v)，会到明天 \(v) 才收工。"
-                    : "收工改到机器时间 \(v)。",
+                message: past ? "已过 \(v)，会到明天 \(v) 才收工。"
+                    : "收工改到 \(v)。",
                 ok: "改",
-                body: .object(["action": .string("echo_farm_until"), "until": .string(v)]), okText: "收工时刻已改",
+                body: .object(["action": .string("echo_farm_until"), "until": .string(m)]), okText: "收工时刻已改",
                 anchor: "echo_farm_until")
         }
         a.stopEchoFarm = {

@@ -407,9 +407,10 @@ struct PendingBar: Sendable, Equatable {
     /// view.js valLabel(e, v): internal value → what a person reads, in the same order the dropdown is named:
     /// the machine's option list → valueZh → as is (2026-09-01: the confirm box showed a raw UUID).
     func valueLabel(_ e: PendingEdit, _ v: JSONValue?) -> String {
-        // view.js:1584-1587: a queue row's switch is 「今天照常 / 今天跳过」, not on / off
+        // a queue row's switch is 「今天跑 / 今天不跑」, not on / off: the words its row uses (HIG Writing: "Use consistent
+        // terminology")
         if e.src == "relay", let a = e.body?["action"]?.string, a == "skip_today" || a == "unskip_today" {
-            return (v?.truthy ?? false) ? "今天照常" : "今天跳过"
+            return (v?.truthy ?? false) ? "今天跑" : "今天不跑"
         }
         if e.src == "relay" { return (v?.truthy ?? false) ? "开" : "关" }
         if e.src == "wb" {   // String(v ?? "")

@@ -59,3 +59,56 @@ func localClockWithDay(_ d: Date) -> String {
 func machineNowHHMM() -> String {
     timeFormatter("HH:mm", machineZone).string(from: Date())
 }
+
+/// `now` on the machine's clock, "HH:mm" (machineNowHHMM with the moment given, for tests).
+func machineHHMM(_ now: Date) -> String {
+    timeFormatter("HH:mm", machineZone).string(from: now)
+}
+
+/// The moment the machine's clock reads `hhmm` on its own day of `now`, `days` days later; nil when `hhmm` is unreadable.
+/// A shift's time is a machine "HH:MM" (plan.py), so its next run is today's or tomorrow's on that clock.
+func machineMoment(_ hhmm: String, days: Int = 0, now: Date = Date()) -> Date? {
+    let day = timeFormatter("yyyy-MM-dd", machineZone).string(from: now)
+    guard let d = machineDate(full: "\(day) \(hhmm)") else { return nil }
+    return d.addingTimeInterval(TimeInterval(days) * 86400)
+}
+
+/// The phone's "HH:mm" with the day always said: 「今天 22:30」 / 「明天 10:00」 / 「昨天 23:10」, else 「10月3日 08:30」. For a
+/// time that has to say which day it is (Clock's alarm list says 「Tomorrow」 for the next ring; HIG Writing: "Be clear").
+func phoneDayClock(_ d: Date, now: Date = Date()) -> String {
+    let cal = Calendar.current
+    let hm = timeFormatter("HH:mm", TimeZone.current).string(from: d)
+    let days = cal.dateComponents([.day], from: cal.startOfDay(for: now), to: cal.startOfDay(for: d)).day ?? 99
+    switch days {
+    case 0: return "今天 \(hm)"
+    case 1: return "明天 \(hm)"
+    case -1: return "昨天 \(hm)"
+    default:
+        let c = cal.dateComponents([.month, .day], from: d)
+        return "\(c.month ?? 0)月\(c.day ?? 0)日 \(hm)"
+    }
+}
+
+/// A machine "HH:MM" as the phone's "HH:mm" (no day); an unreadable one as given.
+func phoneHHMM(fromMachine hhmm: String, now: Date = Date()) -> String {
+    guard let d = machineMoment(hhmm, now: now) else { return hhmm }
+    return timeFormatter("HH:mm", TimeZone.current).string(from: d)
+}
+
+/// A phone "HH:MM" as the machine's "HH:mm" (the inverse of phoneHHMM): the 刷声骸 time is picked on the phone's clock and
+/// sent on the machine's, which echofarm.py resolve_until reads (a time not after its clock now is tomorrow's there).
+/// The phone time is taken as the next one to come (today's when still ahead, else tomorrow's), so 00:30 picked at
+/// 23:00 Tokyo is 23:30 on the machine, which is still ahead on its clock too. nil when unreadable.
+func machineHHMM(fromPhone hhmm: String, now: Date = Date()) -> String? {
+    let p = hhmm.split(separator: ":")
+    guard p.count == 2, let h = Int(p[0]), let m = Int(p[1]), (0...23).contains(h), (0...59).contains(m) else { return nil }
+    let cal = Calendar.current
+    guard var d = cal.date(bySettingHour: h, minute: m, second: 0, of: now) else { return nil }
+    if d <= now { d = cal.date(byAdding: .day, value: 1, to: d) ?? d.addingTimeInterval(86400) }
+    return machineHHMM(d)
+}
+
+/// `now` on the phone's clock, "HH:mm".
+func phoneHHMM(_ now: Date) -> String {
+    timeFormatter("HH:mm", TimeZone.current).string(from: now)
+}

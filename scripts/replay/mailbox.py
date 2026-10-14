@@ -91,8 +91,36 @@ def farm_entry(now=None):
     return {"名字": "回放Boss", "从": fmt(now - 7200), "到": fmt(until)}
 
 
-def farm_until_hhmm(now=None):
-    return farm_entry(now)["到"][-5:]
+def farm_until_hhmm(now=None, phone=False):
+    """The farm's end "HH:MM" on the machine's clock, or with phone=True on this Mac's (the simulator's / emulator's) clock,
+    which is the one the page shows."""
+    if not phone:
+        return farm_entry(now)["到"][-5:]
+    e = farm_entry(now)["到"]
+    ts = time.mktime(time.strptime(e, "%Y-%m-%d %H:%M")) - time.timezone - SHANGHAI   # Beijing wall clock -> epoch
+    return time.strftime("%H:%M", time.localtime(ts))
+
+
+def machine_hhmm_of_phone(hhmm):
+    """A phone "HH:MM" as the App sends it (MachineTime.swift machineHHMM(fromPhone:)): its next coming moment, on the
+    machine's clock."""
+    h, m = (int(x) for x in hhmm.split(":"))
+    lt = time.localtime()
+    ts = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, h, m, 0, 0, 0, -1))
+    if ts <= time.time():
+        ts += 86400
+    return time.strftime("%H:%M", time.gmtime(ts + SHANGHAI))
+
+
+# The shift times the base state is given: the first 🕘 row (早班 on the real machine) still to come today, the second
+# (晚班) already over, both on the machine's clock, so the steps find a usable switch (早班) and an off-limits one (晚班)
+# whatever the hour of the run (the switch acts on today only; StatusMapping passedToday).
+SHIFT_LATER, SHIFT_EARLIER = "23:58", "00:01"
+
+
+def _tokyo(hhmm):
+    h, m = (int(x) for x in hhmm.split(":"))
+    return f"{(h + 1) % 24:02d}:{m:02d}"
 
 
 class Mailbox:
@@ -168,6 +196,14 @@ class Mailbox:
         r["刷声骸"] = {}
         # 今天: failed runs and the last run are present, so status.noresult checks a page that would show them
         # (regression #26; a count of 0 hid 「失败 N 趟」 even on the code that drew it)
+        # shift times: see SHIFT_LATER; the queues' 时刻 (plan.py queue_rows) follow the plan rows
+        import re
+        rows = re.findall(r"🕘 (\d\d:\d\d)　东京 \d\d:\d\d", b.get("plan") or "")
+        for old, new in zip(rows, [SHIFT_LATER, SHIFT_EARLIER]):
+            b["plan"] = b["plan"].replace(f"🕘 {old}　东京 ", f"🕘 {new}　东京 ", 1)
+            b["plan"] = re.sub(f"(🕘 {new}　东京 )\\d\\d:\\d\\d", lambda mo: mo.group(1) + _tokyo(new), b["plan"], count=1)
+        for q, t in zip(b.get("queues") or [], [SHIFT_LATER, SHIFT_EARLIER]):
+            q["时刻"] = [t]
         t = b.setdefault("今天", {})
         t["失败"] = max(int(t.get("失败") or 0), 2)
         t["最近"] = t.get("最近") or "OK-WW"

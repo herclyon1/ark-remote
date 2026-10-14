@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The 状态 tab: same blocks, rows and wording as the web page (maa-automation/web/view.js render(), 状态 part), in order:
-/// device card, notices (现在在跑 / 刷声骸), action tiles, stamina, 停止一切 note, shift segmented control, 这一趟,
-/// 刷 4C 声骸, 机器 switches, 明日安排, 机器最近的回执. Standard controls only; Skip maps them to Android ones.
+/// device card, notices (现在在跑 / 刷声骸), action tiles, stamina, 停止一切 note, shift segmented control, 班次,
+/// 刷声骸, 机器 switches, 月卡, 机器最近的回执. Standard controls only; Skip maps them to Android ones.
 struct StatusPage: View {
     var data: StatusData
     var actions = StatusActions()
@@ -12,7 +12,9 @@ struct StatusPage: View {
     var live: (() -> StatusData)? = nil
 
     @State var bossIndex = 1
-    @State var echoUntil = "08:30"
+    /// The 刷声骸 end on the phone's clock (the page uses one clock, the phone's); sent converted to the machine's. Starts at
+    /// the moment the old machine-clock default 08:30 named.
+    @State var echoUntil = phoneHHMM(fromMachine: "08:30")
     @State var echoNewUntil = ""
     /// The question of the command button just pressed, shown as a confirmationDialog drawn from that button (`StatusAsking`;
     /// reference P10 / N9: Calendar's discard confirmation; HIG Action sheets "Use an action sheet — not an alert — to
@@ -79,12 +81,12 @@ struct StatusPage: View {
                     #endif
                 }
             }
-            thisShift
+            // every shift in one list right after the actions, as Clock's alarms (HIG Layout: "Group related items"): the
+            // shifts were split into 这一趟 and 明日安排 with 刷声骸, 机器 and 月卡 between them
+            shifts
             echoFarmSection
             machineSection
-            // view.js:404: the 月卡 rows, after the 机器 section (and its config note) and before 明日安排
             MonthCardRows(today: MonthCardStore.today())
-            tomorrow
             receiptsSection
         }
         // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
@@ -179,8 +181,8 @@ struct StatusPage: View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("正在刷「\(ef.name)」")
-                    // the phone's clock, with the machine's 到 the 改收工 field below uses (审查 B4)
-                    Text("刷到 \(ef.untilLocal) 为止（机器时间 \(ef.until)）" + (ef.fromLocal.isEmpty ? "" : "，\(ef.fromLocal) 开始"))
+                    // the phone's clock only, as every time on the page (审查 B4)
+                    Text("刷到 \(ef.untilLocal) 为止" + (ef.fromLocal.isEmpty ? "" : "，\(ef.fromLocal) 开始"))
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Button("改收工时刻") { confirm = actions.changeEchoFarmUntil(newUntil(ef)) }
@@ -197,8 +199,8 @@ struct StatusPage: View {
         }
     }
 
-    /// The 收工 time 改收工时刻 sends: the one picked below, else the machine's current 到.
-    private func newUntil(_ ef: StatusEchoFarm) -> String { echoNewUntil.isEmpty ? ef.until : echoNewUntil }
+    /// The 收工 time 改收工时刻 sends, on the phone's clock: the one picked below, else the machine's current 到 on that clock.
+    private func newUntil(_ ef: StatusEchoFarm) -> String { echoNewUntil.isEmpty ? phoneHHMM(fromMachine: ef.until) : echoNewUntil }
 
     // MARK: action tiles
 
@@ -214,7 +216,8 @@ struct StatusPage: View {
                 // the icon stays put while a refresh runs: the pull to refresh shows the one progress indicator (HIG
                 // Progress indicators: "Display a progress indicator in a consistent location."); in the tint of the
                 // row's text, as the other two rows
-                tileLabel("刷新", data.snapAt.map { ago($0) } ?? data.lastUpdate, tint: .blue) {
+                // no second line: how fresh the state is is said once, on the device card above (「17 秒前更新」)
+                tileLabel("刷新", "", tint: .blue) {
                     symbol("arrow.clockwise", android: "Icons.Outlined.Refresh")
                 }
             }
@@ -322,28 +325,32 @@ struct StatusPage: View {
         #endif
     }
 
-    // MARK: plan (这一趟 / 明日安排)
+    // MARK: 班次
 
     @ViewBuilder private func planRows(_ blocks: [StatusPlanBlock]) -> some View {
         ForEach(blocks) { b in
             if let q = b.queueName {
-                // 快捷指令's automation row (reference P6-快捷指令-自动化列表.png): the time in bold, the name and what
-                // happens today small under it, the switch on the right
+                // 快捷指令's automation row (reference P6-快捷指令-自动化列表.png): the time in bold, under it the shift and what
+                // the switch does (HIG Toggles: "Clearly identify the setting the toggle affects"), the switch on the right
                 Toggle(isOn: Binding(get: { b.runsToday }, set: { actions.setRunsToday(q, $0) })) {
                     VStack(alignment: .leading, spacing: 2) {
-                        // a skipped shift's row has no time (StatusMapping, 审查 B2); the lead time is 东京, as the tile (B4)
+                        // a skipped shift's row has its time from the shift's 时刻; only an older relay leaves it out
                         if b.shownTime.isEmpty {
                             Text(q)
                         } else {
                             // the size of 快捷指令 › 自动化's 「At 7:00, daily」 (P6), the iOS reference of the row
                             Text(b.shownTime).font(.headline).tabularDigits()
                         }
-                        Text([b.shownTime.isEmpty ? "" : q, b.machineNote, b.runsToday ? "今天照常" : "今天跳过，明天照常", b.after]
-                                .filter { !$0.isEmpty }.joined(separator: " · "))
+                        Text([b.shownTime.isEmpty ? "" : q, b.switchLine].filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(.footnote).foregroundStyle(.secondary)
+                        let more = [b.machineNote, b.after].filter { !$0.isEmpty }.joined(separator: " · ")
+                        if !more.isEmpty { Text(more).font(.footnote).foregroundStyle(.secondary) }
                         tagLine(StatusSwitchID.queue(q))
                     }
                 }
+                // today's run is over: skip_today is for today only (the relay refuses another day), so the switch could
+                // change nothing; Clock's switch always acts on the ring its row names
+                .disabled(b.passedToday)
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(b.shownTime).font(.headline).tabularDigits()
@@ -351,25 +358,26 @@ struct StatusPage: View {
                     if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(.secondary) }
                 }
             }
-            // ids carry the block: the same game sits in several blocks (这一趟 and 明日安排), and skip-ui keys a List's
-            // rows by ForEach id, so two equal ids crash its LazyColumn ("Key … was already used")
+            // ids carry the block: the same game sits in several blocks, and skip-ui keys a List's rows by ForEach id, so
+            // two equal ids crash its LazyColumn ("Key … was already used")
             ForEach(b.games.map { StatusPlanGameRow(block: b.id, game: $0) }) { r in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(r.game.name)
-                    if !r.game.hints.isEmpty { Text(r.game.hints.joined(separator: "，")).font(.footnote).foregroundStyle(.secondary) }
+                    // every game row says what it runs, as its siblings do; a game the machine gave no line for says so
+                    Text(r.game.hints.isEmpty ? "没读到这一项明天跑什么" : r.game.hints.joined(separator: "，"))
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if !r.game.warning.isEmpty {
+                        // beside the game it is about, in the page's one warning style (机器 section's warningLabel)
+                        warningLabel(r.game.warning).font(.footnote).foregroundStyle(.orange)
+                    }
                 }
             }
         }
     }
 
-    /// What a time row's switch does, once on the page (under 这一趟; 明日安排 has the same rows). HIG Toggles: "Describe
-    /// what it does when turned on, and people can infer the opposite."
-    private static let switchFoot = "关掉时刻行的开关，这趟今天不跑，明天照常。"
-
-    @ViewBuilder private var thisShift: some View {
-        let mine = data.plan.filter { $0.queueName != nil && $0.queueName == data.currentQueue }
+    @ViewBuilder private var shifts: some View {
         Section {
-            if mine.isEmpty {
+            if data.plan.isEmpty {
                 let scripts = data.queues.first(where: { $0.name == data.currentQueue })?.scripts ?? []
                 VStack(alignment: .leading, spacing: 2) {
                     Text(data.currentQueue.isEmpty ? "班次" : data.currentQueue)
@@ -377,28 +385,14 @@ struct StatusPage: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             } else {
-                planRows(mine)
+                planRows(data.plan)
             }
         } header: {
-            Text("这一趟")
+            Text("班次")
         } footer: {
-            if !mine.isEmpty { Text(Self.switchFoot) }
-        }
-    }
-
-    @ViewBuilder private var tomorrow: some View {
-        let rest = data.plan.filter { $0.queueName == nil || $0.queueName != data.currentQueue }
-        listSection("status-tomorrow", if: !rest.isEmpty) {
-            Section {
-                planRows(rest)
-            } header: {
-                Text("明日安排")
-            } footer: {
-                // view.js:259 foot lines; the switch note is said once, under 这一趟 (or here when 这一趟 has no rows)
-                let mineEmpty = !data.plan.contains { $0.queueName != nil && $0.queueName == data.currentQueue }
-                let lines = data.planFoot + (mineEmpty ? [Self.switchFoot] : [])
-                if !lines.isEmpty { Text(lines.joined(separator: "\n")) }
-            }
+            // the game lines are the plan for tomorrow (plan.py next_plan) while the switches act on today: said once
+            let lines = (data.plan.contains { !$0.games.isEmpty } ? ["各班下面列的是明天要跑的内容。"] : []) + data.planFoot
+            if !lines.isEmpty { Text(lines.joined(separator: "\n")) }
         }
     }
 
@@ -413,15 +407,16 @@ struct StatusPage: View {
                 // the picker beside the title, labels hidden: as its label, the two-line hint pushed iOS's time capsule
                 // under it, at the left (test pass 7)
                 HStack(spacing: 12) {
-                    rowTitle("改成刷到几点（机器时间）", "已过算明天；马上停按「提前收工」")
-                    DatePicker("改成刷到几点", selection: hhmmBinding($echoNewUntil, else: ef.until), displayedComponents: .hourAndMinute)
+                    rowTitle("改成刷到几点", "已过算明天；马上停按「提前收工」")
+                    DatePicker("改成刷到几点", selection: hhmmBinding($echoNewUntil, else: phoneHHMM(fromMachine: ef.until)),
+                               displayedComponents: .hourAndMinute)
                         .labelsHidden()
                 }
             } else {
-                // the name left and the value right on one line, as Calendar's 「Repeat」 row (P10); the section header already
-                // says 刷 4C 声骸, and the explanation is in the footer
+                // the name left and the value right on one line, as Calendar's 「Repeat」 row (P10): the value is the option's
+                // name alone, as Calendar's menu shows 「Never」; the list keeps the game's order (footer)
                 Picker(selection: $bossIndex) {
-                    ForEach(data.bosses) { b in Text("\(b.index). \(b.name)").tag(b.index) }
+                    ForEach(data.bosses) { b in Text(b.name).tag(b.index) }
                 } label: {
                     Text("打哪个")
                 }
@@ -431,8 +426,9 @@ struct StatusPage: View {
                 // hint is the one fact the name does not give, in one short clause (HIG Lists and tables: "Keep item text
                 // succinct"; 到点收工 is the row name itself)
                 HStack(spacing: 12) {
-                    rowTitle("刷到几点（机器时间）", "已过算明天")
-                    DatePicker("刷到几点", selection: hhmmBinding($echoUntil, else: "08:30"), displayedComponents: .hourAndMinute)
+                    rowTitle("刷到几点", "已过算明天")
+                    DatePicker("刷到几点", selection: hhmmBinding($echoUntil, else: phoneHHMM(fromMachine: "08:30")),
+                               displayedComponents: .hourAndMinute)
                         .labelsHidden()
                 }
                 Button("开始刷") { confirm = actions.startEchoFarm(bossIndex, echoUntil) }
@@ -440,12 +436,13 @@ struct StatusPage: View {
                     .modifier(StatusAsking(ask: $confirm, anchor: "echo_farm", confirm: actions.confirm))
             }
         } header: {
-            Text("刷 4C 声骸")
+            // 4C is the players' word for a 4-cost echo: said in plain words
+            Text("刷声骸（4 费）")
         } footer: {
             // 打哪个's explanation; HIG Entering data: 开始刷 is grey until a boss and a time are there, and a line says why
             if data.echoFarm == nil {
                 let why = StatusCommands.echoFarmProblem(boss: bossIndex, until: echoUntil)
-                Text((["序号是「讨伐强敌」列表从上往下数的位置。刷的期间不花波片、不领周本奖励。"] + (why.map { [$0] } ?? []))
+                Text((["按游戏里「讨伐强敌」列表的顺序排。刷的期间不花波片、不领周本奖励。"] + (why.map { [$0] } ?? []))
                         .joined(separator: "\n"))
             }
         }
@@ -461,9 +458,8 @@ struct StatusPage: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// A machine time 「HH:MM」 (sent as is, statusTimeHHMM) as the Date a time picker shows, and back. The same calendar
-    /// both ways, on today's date in the phone's zone, so the picker shows exactly the stored 「HH:MM」 (the field is the
-    /// machine's clock, but only its digits matter here: no zone conversion).
+    /// A phone time 「HH:MM」 as the Date a time picker shows, and back. The same calendar both ways, on today's date in the
+    /// phone's zone, so the picker shows exactly the stored 「HH:MM」; StatusCommands converts it to the machine's clock.
     private func hhmmBinding(_ text: Binding<String>, else fallback: String) -> Binding<Date> {
         Binding(
             get: {

@@ -8,6 +8,9 @@ struct StatusQueue: Hashable, Identifiable {
     var name: String          // 名
     var scheduled: Bool       // 定时 (false → 「未启用定时」)
     var scripts: [String]     // 脚本: MAA / MaaEnd / OK-WW
+    /// 时刻: the shift's timed starts on the machine's clock ("HH:MM", plan.py queue_rows), kept while a skip turns the
+    /// timer off; [] from a relay that does not send them yet.
+    var times: [String] = []
     var id: String { name }
 }
 
@@ -15,6 +18,8 @@ struct StatusQueue: Hashable, Identifiable {
 struct StatusPlanGame: Hashable, Identifiable {
     var name: String
     var hints: [String]
+    /// A notice about this game for that day (the plan's 「⚠️ <game> …」 maintenance line), shown under the game's row.
+    var warning: String = ""
     var id: String { name }
 }
 
@@ -23,16 +28,26 @@ struct StatusPlanBlock: Hashable, Identifiable {
     var time: String          // e.g. "04:00"
     var tokyo: String         // 东京 time, may be empty
     var queueName: String?    // the shift this block belongs to, nil when none matches
-    var runsToday: Bool       // switch on = 今天照常, off = 今天跳过
+    var runsToday: Bool       // switch on = 今天跑, off = 今天不跑
     var games: [StatusPlanGame]
     /// The block's 「⏻ 跑完自动关机」 line (plan.py:674-675), without the mark; "" when the shift does not shut down.
     var after: String = ""
+    /// Today's run of this time is over on the machine's clock: the switch (skip_today, today only) can change nothing.
+    var passedToday = false
+    /// The next run on the phone's clock with its day (「明天 10:00」), "" without a time.
+    var nextRun: String = ""
     var id: String { (queueName ?? "") + time }
     /// The time a row leads with: the plan's 东京 time when it gives one (the page's times are the phone's clock, 审查 B4;
     /// the tile's 「下一趟」 uses the same), else the machine's.
     var shownTime: String { tokyo.isEmpty ? time : tokyo }
-    /// 「机器 09:00」 under it when the lead is the 东京 time, else "".
-    var machineNote: String { tokyo.isEmpty || time.isEmpty ? "" : "机器 \(time)" }
+    /// 「游戏机上是 09:00」 under it when the lead is the 东京 time, else "": the page's times are the phone's clock, and
+    /// this one line says the machine's own (Clock's World Clock names whose time it shows).
+    var machineNote: String { tokyo.isEmpty || time.isEmpty || tokyo == time ? "" : "游戏机上是 \(time)" }
+    /// What the switch does, said on the row itself (HIG Toggles: "Clearly identify the setting the toggle affects").
+    var switchLine: String {
+        if passedToday { return nextRun.isEmpty ? "今天这班已过" : "今天这班已过 · \(nextRun) 照常" }
+        return runsToday ? "今天跑" : "今天不跑，明天照常"
+    }
 }
 
 /// One stamina tile (明日方舟 理智 / 终末地 理智 / 鸣潮 波片).
@@ -130,7 +145,7 @@ struct StatusData {
     var configUnreadable = false              // config._错误 → 读不到 AUTO-MAS 的配置
     var configIsStale = false                 // falling back to lastGoodConfig
     // Action tiles.
-    var nextAt = ""                           // next 🕘 time in plan
+    var nextAt = ""                           // the chosen shift's next run with its day (「今天 22:30」 / 「明天 10:00」)
     var lastUpdate = "还没有数据"               // ago(snap.at)
     var snapAt: Int? = nil                    // snap.at, so the page can redraw 「X 分钟前」 by the local clock
     var refreshing = false                    // Live.busy: the 刷新 tile spins while a ping runs
@@ -150,11 +165,11 @@ struct StatusData {
     var debugModeUntil: String? = nil         // 调试模式, value = until HH:MM when on ("" = on, time unknown)
     // The line under a switch while a sent change waits (Pending tag), keyed by StatusSwitchID.
     var switchTags: [String: StatusTag] = [:]
-    // Plan lines before the first 🕘 (view.js planRows foot), shown in 明日安排's footnote.
+    // Plan lines before the first 🕘 (view.js planRows foot) that belong to no game row, shown in the 班次 footnote.
     var planFoot: [String] = []
     // Receipts (newest first) and the group-header note.
     var receipts: [StatusReceipt] = []
-    /// view.js nowRow 「今天实际」: 「早班 照常 · 晚班 跳过」 while a skip is in play today, else nil.
+    /// view.js nowRow 「今天实际」: 「早班 跑 · 晚班 不跑」 while a skip is in play today, else nil.
     var todayActual: String? = nil
     var receiptsToday = ""                    // today "MM-DD" on the phone's clock: the 回执 page puts 今天实际 in that day's group
 

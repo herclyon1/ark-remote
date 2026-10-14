@@ -63,7 +63,7 @@ extension StatusData {
     /// wrote again — the 状态 tab redrew nonstop while idle (验收 10-02 19:3x: +258 frames in 10 s, 115 % CPU).
     @MainActor
     static func from(relay: Relay, live: Live, stamina: StaminaStore, pending: Pending,
-                     currentQueue: String, estopAt: Int, record: Bool = false) -> StatusData {
+                     currentQueue: String, estopAt: Int, record: Bool = false, now: Date = Date()) -> StatusData {
         var d = StatusData()
         let snap = relay.snap
         let relayObj = snap?["relay"]
@@ -118,7 +118,8 @@ extension StatusData {
         d.queues = (snap?["queues"]?.array ?? []).compactMap { q in
             guard let name = q["名"]?.string else { return nil }
             return StatusQueue(name: name, scheduled: q["定时"]?.bool != false,
-                               scripts: (q["脚本"]?.array ?? []).compactMap { $0.string })
+                               scripts: (q["脚本"]?.array ?? []).compactMap { $0.string },
+                               times: (q["时刻"]?.array ?? []).compactMap { $0.string.flatMap(statusTimeHHMM) })
         }
         d.currentQueue = d.queues.contains(where: { $0.name == currentQueue }) ? currentQueue : (d.queues.first?.name ?? currentQueue)
 
@@ -142,8 +143,10 @@ extension StatusData {
                     time = String(rest[..<r.lowerBound])
                     tokyo = String(rest[r.upperBound...])
                 }
-                blocks.append(StatusPlanBlock(time: time.trimmingCharacters(in: .whitespaces),
-                                              tokyo: tokyo.trimmingCharacters(in: .whitespaces),
+                // a plan without the 东京 time (an older relay) gets it converted here: the page shows the phone's clock only
+                let t = time.trimmingCharacters(in: .whitespaces), tk = tokyo.trimmingCharacters(in: .whitespaces)
+                blocks.append(StatusPlanBlock(time: t,
+                                              tokyo: tk.isEmpty && statusTimeHHMM(t) != nil ? phoneHHMM(fromMachine: t, now: now) : tk,
                                               queueName: nil, runsToday: true, games: []))
                 continue
             }
@@ -184,17 +187,50 @@ extension StatusData {
         // only timed shifts (plan.py:136), so the row went from the plan with its switch — the one way to undo the skip here
         // (unskip_today, modes.py:467-501). A shift skipped today with no row gets one, without a time (the plan no longer
         // gives it), so it can be switched back on.
+        // The time comes from the shift's own 时刻 (queue_rows), as Clock keeps showing a switched-off alarm's time; only a
+        // relay that does not send 时刻 leaves the row with the shift's name alone.
         for q in d.queues where skipped.contains(q.name) && !blocks.contains(where: { $0.queueName == q.name }) {
             let id = StatusSwitchID.queue(q.name)
             if record { pending.liveVals[id] = .bool(false) }
-            blocks.append(StatusPlanBlock(time: "", tokyo: "", queueName: q.name,
+            let t = q.times.first ?? ""
+            blocks.append(StatusPlanBlock(time: t, tokyo: t.isEmpty ? "" : phoneHHMM(fromMachine: t, now: now), queueName: q.name,
                                           runsToday: pending.shownValue(for: id)?.truthy ?? false, games: []))
             if let t = tag(pending, id) { d.switchTags[id] = t }
         }
-        // 审查 B3: the tile reads 「<shift> · 下一趟 <time>」, so the time is that shift's own row (blocks.first was the plan's
-        // first row whatever the shift: 「晚班 · 下一趟 09:00」), on the phone's clock (the 东京 time the plan gives, B4)
-        if d.nextAt.isEmpty, let mine = blocks.first(where: { $0.queueName == d.currentQueue && !$0.time.isEmpty }) {
-            d.nextAt = mine.shownTime
+        // Each timed row: whether today's run of it is over (the switch sends skip_today, which the relay takes for today only,
+        // commands.py), and its next run with the day said. Compared on the machine's clock, where the time is set.
+        let machineNow = machineHHMM(now)
+        for i in blocks.indices where !blocks[i].time.isEmpty {
+            let b = blocks[i]
+            let passed = b.time <= machineNow
+            if b.queueName != nil { blocks[i].passedToday = passed }
+            let today = !passed && (b.queueName == nil || b.runsToday)
+            if let at = machineMoment(b.time, days: today ? 0 : 1, now: now) { blocks[i].nextRun = phoneDayClock(at, now: now) }
+        }
+        // one list ordered by time, as Clock's alarms and Shortcuts' automations (rows without a time last)
+        blocks = blocks.enumerated().sorted { x, y in
+            let a = x.element.time.isEmpty ? "99:99" : x.element.time, b = y.element.time.isEmpty ? "99:99" : y.element.time
+            return a != b ? a < b : x.offset < y.offset
+        }.map { $0.element }
+        // 审查 B3: the tile reads 「<shift> · <next run>」 from that shift's own row, with the day (「明天 10:00」: a bare 10:00
+        // read at 12:57 looked past)
+        if d.nextAt.isEmpty, let mine = blocks.first(where: { $0.queueName == d.currentQueue && !$0.nextRun.isEmpty }) {
+            d.nextAt = mine.nextRun
+        }
+        // A 「⚠️ <game> …」 line (plan.py maintenance_lines) goes under that game's row in each block that runs it; a line
+        // about no listed game stays in the footer.
+        for l in foot where l.hasPrefix("⚠️") {
+            let rest = l.replacingOccurrences(of: "⚠️", with: "").trimmingCharacters(in: .whitespaces)
+            guard let game = statusOwnerOf.keys.first(where: { rest.hasPrefix($0 + " ") }) else { continue }
+            let text = String(rest.dropFirst(game.count)).trimmingCharacters(in: .whitespaces)
+            var placed = false
+            for b in blocks.indices {
+                for g in blocks[b].games.indices where blocks[b].games[g].name == game {
+                    blocks[b].games[g].warning = text
+                    placed = true
+                }
+            }
+            if placed { foot.removeAll { $0 == l } }
         }
         d.plan = blocks
         d.planFoot = foot
@@ -262,12 +298,12 @@ extension StatusData {
             }
             lastOk[key] = r
             if day == todayMD && (r.action == "skip_today") != skipped.contains(q) {
-                d.receipts[i].note = "机器现在：\(q)今天\(skipped.contains(q) ? "跳过" : "照常")"
+                d.receipts[i].note = "机器现在：\(q)今天\(skipped.contains(q) ? "不跑" : "跑")"
             }
         }
         // view.js:439-440 nowRow: what each shift does today, while a skip is in play
         if (skipToday || !skipped.isEmpty) && !d.queues.isEmpty {
-            d.todayActual = d.queues.map { "\($0.name) \(skipped.contains($0.name) ? "跳过" : "照常")" }.joined(separator: " · ")
+            d.todayActual = d.queues.map { "\($0.name) \(skipped.contains($0.name) ? "不跑" : "跑")" }.joined(separator: " · ")
         }
         // the 回执 page groups by the phone's day (shownAt), so today's group is the phone's today
         let md = Calendar.current.dateComponents([.month, .day], from: Date())
@@ -290,8 +326,7 @@ extension StatusData {
             // 「下一趟」 here is the next run whatever the shift: the first timed row still to come today on the machine's
             // clock, else tomorrow's first (审查 B3), on the phone's clock (B4)
             let timed = d.plan.filter { !$0.time.isEmpty && $0.runsToday }
-            let now = machineNowHHMM()
-            let next = (timed.first(where: { $0.time > now }) ?? timed.first).map { $0.shownTime } ?? ""
+            let next = (timed.first(where: { $0.time > machineNow }) ?? timed.first).map { $0.nextRun } ?? ""
             let head = rc == nil ? "已下令停止 · 等机器回执"
                 : (rc?["ok"]?.truthy ?? false) ? "已停止 · 下一趟\(next.isEmpty ? "" : " " + next) 照常" : "没停干净 · 见下方回执"
             d.estopNote = StatusEstopNote(title: head,

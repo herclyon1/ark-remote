@@ -58,7 +58,8 @@ import XCTest
                 XCTAssertEqual(tiles.map(\.value), [80, 100, 120], "\(state)")
                 XCTAssertTrue(tiles[2].sub.contains("周本 2/3"), "\(state): 鸣潮 周本 missing from \(tiles[2].sub)")
             }
-            XCTAssertEqual(d.nextAt, "04:00", "\(state): 下一趟")
+            // the machine's 04:00 on the phone's clock, with its day (「今天 05:00」 / 「明天 05:00」 in Tokyo)
+            XCTAssertTrue(d.nextAt.hasSuffix(" " + phoneHHMM(fromMachine: "04:00")), "\(state): 下一趟 \(d.nextAt)")
             XCTAssertEqual(d.plan.first { $0.queueName == "早班" }?.games.map(\.name), ["明日方舟", "终末地", "鸣潮"], "\(state)")
             XCTAssertTrue(d.skipShutdown, "\(state): 下次跑完不关机")
             XCTAssertNotNil(d.debugModeUntil, "\(state): 调试模式")
@@ -71,7 +72,7 @@ import XCTest
     }
 
     /// The `page` List draws these sections with no condition on the machine's state.
-    static let sections = ["actionTiles", "staminaSection", "thisShift", "machineSection", "MonthCardRows(today:", "tomorrow"]
+    static let sections = ["actionTiles", "staminaSection", "shifts", "machineSection", "MonthCardRows(today:"]
     /// What would hide a section by the machine's state.
     static let stateFlags = ["data.online", "data.machineOff", "data.dotOn", "data.configUnreadable", "data.configIsStale"]
 
@@ -103,7 +104,7 @@ import XCTest
             }
         }
         for s in sections where !seen.contains(s) { out.append("\(s) is not drawn on the page itself") }
-        for s in ["actionTiles", "staminaSection", "thisShift", "machineSection", "tomorrow"] {
+        for s in ["actionTiles", "staminaSection", "shifts", "machineSection"] {
             guard let body = RepoFiles.body(after: "private var \(s): some View", in: lines) else { out.append("\(s) is gone"); continue }
             // the 机器 section's footer may warn that the config is unreadable; nothing may hide the section
             let head = body.prefix { !$0.contains("} footer: {") }
@@ -123,25 +124,24 @@ import XCTest
 
     func testTheScanSeesAHiddenSection() {
         let bodies = ["    private var actionTiles: some View { Section { } }", "    private var staminaSection: some View { Section { } }",
-                      "    private var thisShift: some View { Section { } }",
                       "    private var machineSection: some View {", "        Section { } footer: {", "            if data.configUnreadable { }",
                       "        }", "    }",
-                      "    private var tomorrow: some View { listSection(\"t\", if: !data.machineOff) { } }"]
+                      "    private var shifts: some View { listSection(\"t\", if: !data.machineOff) { } }"]
         let page = ["    private var page: some View {", "        return List {",
                     // a notice that shows only while the machine runs is fine: it is not one of the six
                     "            listSection(\"status-busy\", if: !data.busy.isEmpty && data.online) {", "                Section(\"现在在跑\") { }",
                     "            }",
                     "            staminaSection", "            actionTiles",   // order is free
-                    "            if !data.queues.isEmpty {", "                thisShift", "            }",   // not a state condition
+                    "            if !data.queues.isEmpty {", "                shifts", "            }",   // not a state condition
                     "            if data.online {", "                machineSection", "            }",
                     "            listSection(\"m\", if: !data.machineOff) { MonthCardRows(today: MonthCardStore.today()) }",
-                    "            tomorrow", "        }", "    }"]
+                    "        }", "    }"]
         XCTAssertEqual(Self.hidden(page + bodies), ["machineSection is hidden by data.online",
                                                     "MonthCardRows(today: is hidden by data.machineOff",
-                                                    "tomorrow depends on data.machineOff"])
-        XCTAssertEqual(Self.hidden(["    private var page: some View {", "        return List {", "            tomorrow", "        }", "    }"]
-                                   + bodies).prefix(4),
+                                                    "shifts depends on data.machineOff"])
+        XCTAssertEqual(Self.hidden(["    private var page: some View {", "        return List {", "            shifts", "        }", "    }"]
+                                   + bodies).prefix(3),
                        ["actionTiles is not drawn on the page itself", "staminaSection is not drawn on the page itself",
-                        "thisShift is not drawn on the page itself", "machineSection is not drawn on the page itself"])
+                        "machineSection is not drawn on the page itself"])
     }
 }
