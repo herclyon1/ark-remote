@@ -25,6 +25,7 @@ struct ArknightsPage: View {
                 }
             }
             stageSection
+            fightSection
             infrastSection
             awardSection
             weeklySection
@@ -46,9 +47,10 @@ struct ArknightsPage: View {
     private static let hints: [String: String] = [
         "Info.Stage": "关卡填游戏里的关卡号，如 1-7、CE-6、AT-4。",
         "Info.MedicineNumb": "理智药填一趟最多用几瓶，填 0 不用，填 999 不限。",
-        "Task.IfFight": "作战关掉后只做基建、公招等日常，不刷关卡。",
+        "Task.IfFight": "刷关卡关掉后只做基建、公招等日常。",
         "Task.IfActivityFirst": "有活动先刷活动关，活动结束后回到上面的关卡。",
-        "Task.ActivityStageIndex": "活动关按活动关卡列表从上往下数第几关来选，活动关优先开着时才用。",
+        // the row shows only while 活动关优先 is on (stageRows), so the hint no longer says when it is used
+        "Task.ActivityStageIndex": "活动关按活动关卡列表从上往下数第几关来选。",
         "Infrast/UsesOfDrones": "贸易站加速订单，制造站加速产物。",
         "Award/Mail": "每趟收下邮箱里的奖励，关着的话邮件到期作废。",
         "Award/Orundum": "每天去幸运墙领合成玉。",
@@ -72,13 +74,26 @@ struct ArknightsPage: View {
         }
     }
 
+    /// The 作战 rows split in two cards, each with its own short footer under it (one five-line footer under five rows
+    /// made the reader match each sentence to its row; HIG Lists: "Keep item text succinct"): what to farm (关卡, 理智药),
+    /// then the switches (刷关卡, 活动关优先, and 活动关序号 only while 活动关优先 is on).
     private var stageRows: [String] {
         var out: [String] = []
         if data.stage != nil { out.append("Info.Stage") }
         if data.medicineNumb != nil { out.append("Info.MedicineNumb") }
+        return out
+    }
+
+    /// 活动关序号 is used only while 活动关优先 is on: hidden otherwise, as Calendar hides End Repeat while Repeat is Never.
+    private var showsActivityIndex: Bool { Self.fightRows(data).contains("Task.ActivityStageIndex") }
+
+    private var fightRows: [String] { Self.fightRows(data) }
+
+    static func fightRows(_ data: ArknightsPageData) -> [String] {
+        var out: [String] = []
         if data.ifFight != nil { out.append("Task.IfFight") }
         if data.ifActivityFirst != nil { out.append("Task.IfActivityFirst") }
-        if data.activityStageIndex != nil { out.append("Task.ActivityStageIndex") }
+        if data.activityStageIndex != nil && data.ifActivityFirst == true { out.append("Task.ActivityStageIndex") }
         return out
     }
 
@@ -105,11 +120,25 @@ struct ArknightsPage: View {
                                        text: binding(\.medicineNumb, default: ""))
                 }
             }
+        } header: {
+            // the page is 明日方舟 already: each header names its group only (HIG Writing: "Check each word to be sure
+            // it needs to be there.")
+            Text("作战")
+        } footer: {
+            hintFooter(stageRows)
+        }
+        }
+    }
+
+    var fightSection: some View {
+        listSection("ark-fight", if: !fightRows.isEmpty) {
+        Section {
             if data.ifFight != nil {
                 tagged("Task.IfFight") {
-                    // 「作战」, not 「作战开关」: the switch beside it already says it is one (HIG Toggles: "the content in the row
-                    // provides the context for the state the switch controls"; HIG review 1014)
-                    ArknightsToggleRow(label: label("Task.IfFight", "作战"),
+                    // 「刷关卡」: what turning it off stops (stage farming; 基建 and 公招 still run), not the name of the
+                    // group it sits in (HIG Toggles: "the content in the row provides the context for the state the
+                    // switch controls"; Calendar's 「All-day」 names the state it sets)
+                    ArknightsToggleRow(label: label("Task.IfFight", "刷关卡"),
                                        isOn: binding(\.ifFight, default: false))
                 }
             }
@@ -119,18 +148,14 @@ struct ArknightsPage: View {
                                        isOn: binding(\.ifActivityFirst, default: false))
                 }
             }
-            if data.activityStageIndex != nil {
+            if showsActivityIndex {
                 tagged("Task.ActivityStageIndex") {
                     ArknightsStepperRow(label: label("Task.ActivityStageIndex", "活动关序号"),
                                         text: binding(\.activityStageIndex, default: ""))
                 }
             }
-        } header: {
-            // the page is 明日方舟 already: each header names its group only (HIG Writing: "Check each word to be sure
-            // it needs to be there.")
-            Text("作战")
         } footer: {
-            hintFooter(stageRows)
+            hintFooter(fightRows)
         }
         }
     }
@@ -228,7 +253,8 @@ struct ArknightsPage: View {
                 // a read-only value: the system's name + value row (iOS reads the two as one element); the value
                 // secondary on Android too, where skip-ui's LabeledContent draws it in the primary colour
                 LabeledContent {
-                    Text(done ? "本周已打满" : "本周还没打满")
+                    // the words the 鸣潮 weekly rows use too (HIG Writing: consistent terminology)
+                    Text(done ? "本周已做完" : "本周还没做完")
                         .foregroundStyle(.secondary)
                 } label: {
                     Text("剿灭")
@@ -238,7 +264,8 @@ struct ArknightsPage: View {
             } footer: {
                 // one row: the hint goes to the footer without the 「剿灭：」 prefix (view.js:989)
                 // annihilation.py:56-65 counts the week from Monday 04:00 Beijing = 05:00 Tokyo (审查 B4)
-                Text("打满本周剿灭后自动停掉，下周一 05:00（东京时间）自动恢复")
+                // says what stops (剿灭 only, not 作战)
+                Text("本周剿灭打满后，这周不再打剿灭；下周一 05:00（东京时间）起重新打。")
             }
         }
     }
