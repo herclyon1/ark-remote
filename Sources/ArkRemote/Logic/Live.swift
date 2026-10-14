@@ -292,9 +292,9 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
         let isAlive = lastHb > 0 && (relay.serverNowMs() - lastHb < hbWindowMs())
         if alive != isAlive { alive = isAlive }
         if isAlive {
-            // 「 · 」 separates the parts of the device card's grey line: 「开机中 · 实时 · 1 分钟前更新」
-            relay.setStatus("开机中 · \(hbEvery > 60 ? "每 \(Int((Double(hbEvery) / 60).rounded())) 分钟报一次" : "实时")"
-                            + (relay.snapAt.map { " · \(ago($0))更新" } ?? ""), "on")
+            // 「 · 」 separates the parts of the device card's grey line: 「开机中 · 1 分钟前更新」. How often the machine reports is
+            // how the App works, not something to act on; Find My's device card says only the state and how fresh it is (P7)
+            relay.setStatus("开机中" + (relay.snapAt.map { " · \(ago($0))更新" } ?? ""), "on")
         } else if nowMs() < pendingUntil {
             relay.setStatus("正在确认是否在线…", "")
         } else if offline() {

@@ -267,7 +267,8 @@ struct RelaySwitch: Sendable {
 /// 调试模式's rule as the relay applies it (modes.py set_debug); the end moment itself is shown once the machine reports it
 /// (relay.调试模式, in the phone's time: StatusMapping). One line (design rule 8); the 150-minute exception of
 /// modes.py is left to the end time the row shows once it is on.
-let debugModeRule = "跑完都不关机，到下次预定开机前 10 分钟自动关掉。"
+// 「自动关掉」 did not say whether the switch or the machine goes off: the switch is named (HIG Toggles: say what it does)
+let debugModeRule = "打开后每一趟跑完都不关机；到下次定时开机前 10 分钟，这个开关自己关上。"
 
 /// 下次跑完不关机 as the relay applies it (modes.py skip_armed / set_skip_shutdown): a one-shot mark with no time,
 /// spent when the next 早班/晚班 run finishes; the run after that shuts down. One line of what switching it on does
