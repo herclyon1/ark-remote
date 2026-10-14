@@ -102,7 +102,18 @@ struct EWRowView: View {
         // no row tint for 待保存 / 已寄出 (the web's accent / green 8 %): a row tinted for long reads as a selection that
         // never cleared (HIG Lists and tables: a list "highlights a row only briefly"); the line under the row says it
         .listRowBackground(rowBackground(nil))   // never nil on Android (SkipFixes.swift)
+        #if os(Android)
+        // A row picked on a sheet (icons / pills) kept its old height on Android after the sheet closed: the new value's
+        // second line was cut and the 「待保存」 line under it not seen until the tab was drawn again (HIG review 1014;
+        // ark37, a tab switch brought it back). A new identity when what the row shows changes measures it afresh. Only
+        // these rows: a text row keeps its identity, or the first keystroke would rebuild its field and drop the keyboard.
+        .id(sheetPicked ? "\(row.path)|\(value.display)|\(tag?.unsaved == true)|\(tag?.text ?? "")" : row.path)
+        #endif
     }
+
+    #if os(Android)
+    private var sheetPicked: Bool { row.kind == .icons || row.kind == .pills }
+    #endif
 
     private var selectBinding: Binding<String> {
         Binding(get: { value == .null ? "" : value.key }, set: { setChoice($0) })
@@ -113,19 +124,7 @@ struct EWRowView: View {
             Text("未设").tag("")
         }
         ForEach(row.choices, id: \.value) { c in
-            if let parts = ewMenuParts(row.path, c.label) {
-                // the name as the item's title and the row's value, the products as the item's subtitle (a menu item's
-                // second Text): 「干员养成」 on one line in the row, 「作战记录、协议圆盘、…」 still beside it in the menu
-                // (HIG Menus: "write a label that clearly and succinctly describes it"; decision E7: the products stay
-                // visible on the choice page)
-                VStack(alignment: .leading) {
-                    Text(verbatim: parts.title)
-                    Text(verbatim: parts.subtitle)
-                }
-                .tag(c.value)
-            } else {
-                Text(c.label).tag(c.value)
-            }
+            Text(c.label).tag(c.value)
         }
     }
 
@@ -170,12 +169,37 @@ struct EWRowView: View {
     #endif
 
     /// menuPicker (SkipFixes.swift): inside this row's VStack a bare Picker loses its title on Android.
-    private var selectPicker: some View {
+    @ViewBuilder private var selectPicker: some View {
+        #if !os(Android)
+        if ewMenuSubtitlePaths.contains(row.path) {
+            // the row shows the name alone (the Picker's currentValueLabel, iOS 18), the menu items the whole label with
+            // the products: 「干员养成」 on one line in the row, 「干员养成（作战记录、协议圆盘、…）」 in the menu (HIG Menus:
+            // "write a label that clearly and succinctly describes it"; decision E7: the products stay visible on the
+            // choice page). A second Text in a Picker item does not become a subtitle: a VStack showed the name alone, two
+            // bare Texts became two items (iOS 27 simulator, HIG review 1014).
+            Picker(selection: selectBinding) {
+                choiceItems
+            } label: {
+                EWRowTitle(label: row.label, hint: hint)
+            } currentValueLabel: {
+                Text(verbatim: value == .null ? "未设" : (ewMenuParts(row.path, pick(value))?.title ?? pick(value)))
+            }
+            .pickerStyle(.menu)
+            .menuValueGrey()
+        } else {
+            menuPicker(selection: selectBinding) {
+                choiceItems
+            } title: {
+                EWRowTitle(label: row.label, hint: hint)
+            }
+        }
+        #else
         menuPicker(selection: selectBinding) {
             choiceItems
         } title: {
             EWRowTitle(label: row.label, hint: hint)
         }
+        #endif
     }
 
     @ViewBuilder
