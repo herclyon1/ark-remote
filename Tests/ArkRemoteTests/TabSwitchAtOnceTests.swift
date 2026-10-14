@@ -1,8 +1,8 @@
 import XCTest
 
-/// Regression 0108 #10: 10-02 21:08 「app切换页面的时候那个淡入淡出动画未结束就滑动的时候就会滑动失败」. skip-ui's TabView
-/// cross-fades tabs for 700 ms on Android and a swipe during the fade is lost; 4e62ea6 turns the fade off
-/// (skip-ui README "tabViewTransitions": NavDisplayTransitionOptions(.none)), as Apple's tab bar switches at once.
+/// Regression 0108 #10. Defect guarded: on Android, skip-ui's TabView cross-fades between tabs (TabView.swift falls back
+/// to NavDisplayTransitionOptions.tabViewDefaults, the NavDisplay default transition), and a swipe made during the fade
+/// is lost: lost input. 4e62ea6 turns the fade off (skip-ui README "tabViewTransitions": NavDisplayTransitionOptions(.none)).
 /// The check: ContentView's TabView keeps `.tabViewTransitions { _ in .init(.none) }` inside its `#if os(Android)`.
 final class TabSwitchAtOnceTests: XCTestCase {
     static let line = ".tabViewTransitions { _ in .init(.none) }"

@@ -1,10 +1,10 @@
 import XCTest
 @testable import ArkRemote
 
-/// Regression 0108 #25: 10-07 17:40 「你首页那个不应该把信息数据都显示出来吗？目前你把哪些信息放到了第二层。」 (and owner
-/// decisions S4 / S8: the read-only numbers stay on 状态). The everyday numbers are on the 状态 page itself, whether the
-/// machine is on, off, or its config cannot be read: the three stamina tiles (理智 ×2, 波片 with 鸣潮's 周本), the
-/// shift's 下一趟 and its plan, the two 机器 switches and each game's 月卡 days.
+/// Regression 0108 #25 (owner decisions S4 / S8: the read-only numbers stay on 状态). Defect guarded: the everyday
+/// numbers disappear from 状态 when the machine is off or its config cannot be read, or get hidden behind a state
+/// condition. When the machine is off, the phone is the only view of them. They are: the three stamina tiles (理智 ×2,
+/// 波片 with 鸣潮's 周本), the shift's 下一趟 and its plan, the two 机器 switches and each game's 月卡 days.
 /// Two halves: the page data (StatusData.from) carries them in all three states, and the page's List draws their
 /// sections with no condition on the machine's state (a section hidden off-line, or moved behind a row, goes red).
 @MainActor final class StatusHomeDataTests: XCTestCase {
@@ -70,25 +70,39 @@ import XCTest
         }
     }
 
-    /// The `page` List draws these sections unconditionally, in this order.
+    /// The `page` List draws these sections with no condition on the machine's state.
     static let sections = ["actionTiles", "staminaSection", "thisShift", "machineSection", "MonthCardRows(today:", "tomorrow"]
     /// What would hide a section by the machine's state.
     static let stateFlags = ["data.online", "data.machineOff", "data.dotOn", "data.configUnreadable", "data.configIsStale"]
+
+    /// Where `name` stands as a whole name in `line` (not inside a longer identifier), or nil.
+    static func position(of name: String, in line: String) -> String.Index? {
+        line.range(of: #"(?<![\w.])"# + NSRegularExpression.escapedPattern(for: name) + #"(?!\w)"#, options: .regularExpression)?.lowerBound
+    }
 
     /// The problems in StatusPage's page body and section bodies.
     static func hidden(_ lines: [String]) -> [String] {
         guard let page = RepoFiles.body(after: "private var page: some View", in: lines) else { return ["page is gone"] }
         var out: [String] = []
-        var at = 0
-        for s in sections {
-            guard let i = page.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix(s) }) else {
-                out.append("\(s) is not drawn on the page itself"); continue
+        var seen = Set<String>()
+        // the lines whose `{` is still open, innermost last; the page's own opening line is not a condition
+        var openers: [String] = []
+        for line in page.dropFirst() {
+            for s in sections {
+                guard let at = position(of: s, in: line) else { continue }
+                seen.insert(s)
+                // the blocks around it: those still open, and those opened earlier on this line
+                var around = openers
+                for ch in line[..<at] {
+                    if ch == "{" { around.append(line) } else if ch == "}" { _ = around.popLast() }
+                }
+                for f in stateFlags where around.contains(where: { $0.contains(f) }) { out.append("\(s) is hidden by \(f)") }
             }
-            if i < at { out.append("\(s) moved") }
-            at = i
-            // directly in the List: indented as its other rows (a wrapping `if` / Group indents it further)
-            if !page[i].hasPrefix("            \(s)") || page[i].hasPrefix("             ") { out.append("\(s) is wrapped") }
+            for ch in line {
+                if ch == "{" { openers.append(line) } else if ch == "}" { _ = openers.popLast() }
+            }
         }
+        for s in sections where !seen.contains(s) { out.append("\(s) is not drawn on the page itself") }
         for s in ["actionTiles", "staminaSection", "thisShift", "machineSection", "tomorrow"] {
             guard let body = RepoFiles.body(after: "private var \(s): some View", in: lines) else { out.append("\(s) is gone"); continue }
             // the 机器 section's footer may warn that the config is unreadable; nothing may hide the section
@@ -108,14 +122,26 @@ import XCTest
     }
 
     func testTheScanSeesAHiddenSection() {
-        let page = ["    private var page: some View {", "        return List {", "            actionTiles", "            staminaSection",
-                    "            thisShift", "            if data.online {", "                machineSection", "            }",
-                    "            MonthCardRows(today: MonthCardStore.today())", "            tomorrow", "        }", "    }",
-                    "    private var actionTiles: some View { Section { } }", "    private var staminaSection: some View { Section { } }",
-                    "    private var thisShift: some View { Section { } }",
-                    "    private var machineSection: some View {", "        Section { } footer: {", "            if data.configUnreadable { }",
-                    "        }", "    }",
-                    "    private var tomorrow: some View { listSection(\"t\", if: !data.machineOff) { } }"]
-        XCTAssertEqual(Self.hidden(page), ["machineSection is wrapped", "tomorrow depends on data.machineOff"])
+        let bodies = ["    private var actionTiles: some View { Section { } }", "    private var staminaSection: some View { Section { } }",
+                      "    private var thisShift: some View { Section { } }",
+                      "    private var machineSection: some View {", "        Section { } footer: {", "            if data.configUnreadable { }",
+                      "        }", "    }",
+                      "    private var tomorrow: some View { listSection(\"t\", if: !data.machineOff) { } }"]
+        let page = ["    private var page: some View {", "        return List {",
+                    // a notice that shows only while the machine runs is fine: it is not one of the six
+                    "            listSection(\"status-busy\", if: !data.busy.isEmpty && data.online) {", "                Section(\"现在在跑\") { }",
+                    "            }",
+                    "            staminaSection", "            actionTiles",   // order is free
+                    "            if !data.queues.isEmpty {", "                thisShift", "            }",   // not a state condition
+                    "            if data.online {", "                machineSection", "            }",
+                    "            listSection(\"m\", if: !data.machineOff) { MonthCardRows(today: MonthCardStore.today()) }",
+                    "            tomorrow", "        }", "    }"]
+        XCTAssertEqual(Self.hidden(page + bodies), ["machineSection is hidden by data.online",
+                                                    "MonthCardRows(today: is hidden by data.machineOff",
+                                                    "tomorrow depends on data.machineOff"])
+        XCTAssertEqual(Self.hidden(["    private var page: some View {", "        return List {", "            tomorrow", "        }", "    }"]
+                                   + bodies).prefix(4),
+                       ["actionTiles is not drawn on the page itself", "staminaSection is not drawn on the page itself",
+                        "thisShift is not drawn on the page itself", "machineSection is not drawn on the page itself"])
     }
 }

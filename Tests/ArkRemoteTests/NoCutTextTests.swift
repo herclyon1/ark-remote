@@ -1,7 +1,10 @@
 import XCTest
 
-/// Regression 0108 #8: 10-02 20:49 「回执现在完全显示不出来内容，是被截断了，不应该是省略号，你加了省略号依旧显示不了信息」
-/// (cf2e0c2: a receipt shows its whole text, wrapping). Owner decision S8 says the same for every plan hint on 状态.
+/// Regression 0108 #8. Defect guarded: a receipt or plan hint is cut off by lineLimit or truncationMode, so its content
+/// cannot be read; receipts are how he learns what the PC did (cf2e0c2: a receipt shows its whole text, wrapping; owner
+/// decision S8 says the same for every plan hint on 状态). HIG Typography: "Avoid truncating text in scrollable regions
+/// unless people can open a separate view to read the rest of the content." Receipts sit in a scrolling List with no
+/// detail view.
 /// The check: no text in Sources/ is cut. A `.lineLimit` / `.truncationMode` is allowed only where it cannot cut: on a
 /// short value that keeps its whole width (`.fixedSize(horizontal: true, vertical: false)` on the same line), or as the
 /// height a multi-line input field reserves (`reservesSpace: true`). The receipt row's text itself carries neither.

@@ -1,8 +1,9 @@
 import XCTest
 
-/// Regression 0108 #18: 10-07 00:26 「部署目标肯定是最新的iOS系统啊」, 04:07 「我刚看怎么有 iOS 17是谁干的」. The deployment
-/// target is the newest iOS / macOS SDK on this Mac, in Package.swift and in Darwin/ArkRemote.xcconfig, with no target of
-/// its own in the Xcode project (it would win over the xcconfig). The same rule as ark-release.sh's gate (remote-ref/
+/// Regression 0108 #18. Defect guarded: the deployment target falls behind the newest SDK (an iOS 17 target was found on
+/// 10-07), or the Xcode project sets a target that silently overrides the xcconfig. The rule: the deployment target is
+/// the newest iOS / macOS SDK on this Mac, in Package.swift and in Darwin/ArkRemote.xcconfig, with no target of its own
+/// in the Xcode project (it would win over the xcconfig). The same rule as ark-release.sh's gate (remote-ref/
 /// tools/ark-release.sh:16-20, which compares major.minor), here so it also runs with every `swift test`.
 final class DeploymentTargetTests: XCTestCase {
     /// `xcrun --sdk <sdk> --show-sdk-version`, cut to major.minor.

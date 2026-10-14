@@ -1,17 +1,14 @@
 import XCTest
 
-/// Regression 0108 #21: the 10-07 01:04–01:18 rewrite lost the games' pictures (被指出.txt:80, :96). On this base the
-/// pictures are Module.xcassets imagesets: the game tab icons (tab-*), the stamina tiles' resource icons (res-*), the
-/// 月卡 rows' game icons (tab-*) and the 鸣潮 echo sets (echo-set-*). Every picture the code names must be an imageset
-/// whose files are there, and the pages that show the games must still name them.
+/// Regression 0108 #21. Defect guarded: the game pictures disappear (the 10-07 rewrite removed them), or code names an
+/// image whose imageset or files are missing, which draws a blank picture. On this base the pictures are
+/// Module.xcassets imagesets: the game icons (tab-*), the stamina tiles' resource icons (res-*) and the 鸣潮 echo sets
+/// (echo-set-*). Every picture the code names must be an imageset whose files are there, and each game's icon and
+/// resource icon must still be named somewhere in Sources/ (where the tab icons sit is TabIconTests').
 final class GamePictureTests: XCTestCase {
     static let assets = "Sources/ArkRemote/Resources/Module.xcassets"
-    /// Where each game picture is used on this base (ContentView tab bar, 状态 stamina tiles, 月卡 rows).
-    static let required: [(file: String, names: [String])] = [
-        ("Sources/ArkRemote/ContentView.swift", ["tab-arknights", "tab-endfield", "tab-wuwa"]),
-        ("Sources/ArkRemote/Pages/Status/StatusPage.swift", ["res-ak", "res-ef", "res-ww"]),
-        ("Sources/ArkRemote/Pages/Status/MonthCardRows.swift", ["tab-arknights", "tab-endfield", "tab-wuwa"]),
-    ]
+    /// The pictures of the three games: their icons and their stamina resources.
+    static let gamePictures: Set<String> = ["tab-arknights", "tab-endfield", "tab-wuwa", "res-ak", "res-ef", "res-ww"]
 
     /// The picture names in string literals: "tab-…", "res-…", "echo-set-…".
     static func pictureNames(_ lines: [String]) -> Set<String> {
@@ -46,11 +43,10 @@ final class GamePictureTests: XCTestCase {
         }
     }
 
-    func testTheGamePagesStillShowThem() throws {
-        for (file, names) in Self.required {
-            let found = Self.pictureNames(try RepoFiles.lines(file))
-            for name in names { XCTAssertTrue(found.contains(name), "\(file) no longer shows \(name)") }
-        }
+    func testTheGamePicturesAreStillUsed() throws {
+        var named = Set<String>()
+        for (_, lines) in try RepoFiles.swiftSources() { named.formUnion(Self.pictureNames(lines)) }
+        XCTAssertEqual(Self.gamePictures.subtracting(named), [], "no file under Sources/ shows these pictures any more")
     }
 
     func testTheCheckSeesAMissingImageset() {

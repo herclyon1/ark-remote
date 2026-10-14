@@ -1,13 +1,13 @@
 import XCTest
 
-/// Regression 0108 #26: 10-07 17:56 「机器出错、上一趟失败，这个不是给日报去解决了吗？是server酱里面解决的事情啊，怎么会在
-/// app上面看呢？」 (design rule 7; owner decisions S1 / S3). How the machine's runs went is the daily report's: the App
-/// shows neither 「最近一趟 X」 nor 「失败 N 趟」, and does not read the state's 今天.最近 / 今天.失败 at all (d7516c8 took
-/// the code path out, not only the text). The replay step status.noresult looks at the drawn page; this check keeps the
-/// code from coming back, and runs with every `swift test`.
+/// Regression 0108 #26 (design rule 7; owner decisions S1 / S3). Defect guarded: the App goes back to showing or reading
+/// how the PC's runs went (「最近一趟 X」, 「失败 N 趟」, the state's 今天.最近 / 今天.失败). That is the daily report's job,
+/// so this is a product-scope guard, not a malfunction check: d7516c8 took the code path out, not only the text. The
+/// replay step status.noresult looks at the drawn page; this check keeps the code from coming back, and runs with
+/// every `swift test`. A failure of the App's own sending (「发送失败 …」) is not a run result and is not caught.
 final class NoRunResultTests: XCTestCase {
     static let banned = try! NSRegularExpression(
-        pattern: #"最近一趟|失败 \\\(|失败 \d+ 趟|\btodayFailed\b|\btodayLast\b|\["今天"\]|\["失败"\]|\["最近"\]"#)
+        pattern: #"最近一趟|失败 \\\(.*\) 趟|失败 \d+ 趟|\btodayFailed\b|\btodayLast\b|\["今天"\]|\["失败"\]|\["最近"\]"#)
 
     static func hits(_ lines: [String]) -> [String] {
         lines.enumerated().compactMap { i, line in
@@ -23,7 +23,7 @@ final class NoRunResultTests: XCTestCase {
         XCTAssertEqual(found, [], "the App shows or reads how the machine's runs went")
     }
 
-    /// d7516c8^'s receipts header and mapping are caught; 「现在跑一趟」 and 「这一趟」 are not.
+    /// d7516c8^'s receipts header and mapping are caught; 「现在跑一趟」, 「这一趟」 and a send failure are not.
     func testTheScanCatchesTheOldHeader() {
         let old = [
             "            let note = [data.todayLast.isEmpty ? \"\" : \"最近一趟 \\(data.todayLast)\",",
@@ -32,6 +32,7 @@ final class NoRunResultTests: XCTestCase {
             "        d.todayLast = today?[\"最近\"]?.jsString ?? \"\"",
         ]
         XCTAssertEqual(Self.hits(old).count, 4)
-        XCTAssertEqual(Self.hits(["tileLabel(\"现在跑一趟\", x)", "Text(\"这一趟\")", "// 最近一趟 was removed"]), [])
+        XCTAssertEqual(Self.hits(["tileLabel(\"现在跑一趟\", x)", "Text(\"这一趟\")", "// 最近一趟 was removed",
+                                  "Text(\"发送失败 \\(e)\")"]), [])
     }
 }

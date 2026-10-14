@@ -1,10 +1,10 @@
 import XCTest
 @testable import ArkRemote
 
-/// Regression 0108 #15: 10-05 01:48 「我遥控器app怎么没有月卡功能。网页搬过去的时候怎么还能出现这种问题。」 The pages are
-/// covered by the replay steps mc.open … mc.tabpop (scripts/replay/steps.py); this is the date rule under them
-/// (spec BOARD/月卡到期提示-规格.md §2, web monthcard.js): days counted on Shanghai's calendar, so the day turns at
-/// Shanghai midnight; a top-up of N adds 30 × N to a card still running and counts from today − 1 for a lapsed or
+/// Regression 0108 #15. Defect guarded: wrong 月卡 dates, which mean a missed reminder; the feature itself had been left
+/// out when the web page was ported. The pages are covered by the replay steps mc.open … mc.tabpop
+/// (scripts/replay/steps.py); this is the date rule under them (spec BOARD/月卡到期提示-规格.md §2, web monthcard.js):
+/// days counted on Shanghai's calendar, so the day turns at Shanghai midnight; a top-up of N adds 30 × N to a card still running and counts from today − 1 for a lapsed or
 /// never-registered one; two top-ups add up; the relay's copy replaces the phone's once it has caught up.
 @MainActor final class MonthCardTests: XCTestCase {
     /// ms of an ISO UTC time.

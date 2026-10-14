@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 
 /// Files of this repository, for the regression checks that read the code or the build settings rather than run them
-/// (App-回归清单-0108: one check per problem the owner reported). Paths are relative to the repository root.
+/// (one check per defect in App-回归清单-0108). Paths are relative to the repository root.
 enum RepoFiles {
     /// The repository root (the iOS run builds the tests from a folder of symlinks, hence resolvingSymlinksInPath).
     static let root: URL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
@@ -47,5 +47,44 @@ enum RepoFiles {
             if opened && depth <= 0 { break }
         }
         return out
+    }
+
+    /// Which platform a line is compiled for, as far as these scans need it.
+    enum Platform { case android, apple, either }
+
+    /// The platform of each line, from the `#if` stack: `#if os(Android)` and the `#else` of `#if !os(Android)…` are
+    /// Android; `#if !os(Android)…` and the `#else` of `#if os(Android)` are Apple; any other condition is either.
+    /// The `#else` of `#if !os(Android) && canImport(UIKit)` also builds for macOS; it counts as Android here, because
+    /// the scans that use this ask what the Android build draws. Directive lines get the platform around them.
+    static func platforms(_ lines: [String]) -> [Platform] {
+        func kind(_ cond: String) -> Platform {
+            let c = cond.trimmingCharacters(in: .whitespaces)
+            if c == "os(Android)" { return .android }
+            if c == "!os(Android)" || c.hasPrefix("!os(Android) &&") { return .apple }
+            return .either
+        }
+        func flip(_ p: Platform) -> Platform { p == .android ? .apple : p == .apple ? .android : .either }
+        var stack: [(cond: Platform, now: Platform)] = []
+        var out: [Platform] = []
+        for raw in lines {
+            let c = code(raw).trimmingCharacters(in: .whitespaces)
+            if c.hasPrefix("#if ") {
+                let k = kind(String(c.dropFirst(4)))
+                stack.append((k, k))
+            } else if c.hasPrefix("#elseif ") {
+                if !stack.isEmpty { stack[stack.count - 1].now = kind(String(c.dropFirst(8))) }
+            } else if c.hasPrefix("#else") {
+                if !stack.isEmpty { stack[stack.count - 1].now = flip(stack[stack.count - 1].cond) }
+            } else if c.hasPrefix("#endif") {
+                _ = stack.popLast()
+            }
+            out.append(stack.last(where: { $0.now != .either })?.now ?? .either)
+        }
+        return out
+    }
+
+    /// Whether some line of `lines` compiled for `platform` contains `text` (comments dropped).
+    static func contains(_ text: String, on platform: Platform, in lines: [String]) -> Bool {
+        zip(lines, platforms(lines)).contains { line, p in p == platform && code(line).contains(text) }
     }
 }

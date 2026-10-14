@@ -1,8 +1,9 @@
 import XCTest
 @testable import ArkRemote
 
-/// Regression 0108 #5: 10-02 19:06 「下载安装更新的那个状态栏太丑了，有现实bug」 (e56d5ff: one download per version, a
-/// Material notice under the top bar). The notice draws AppUpdate.phase (Logic/AppUpdate.swift UpdateBanner: 有新版本 /
+/// Regression 0108 #5. Defect guarded: an update check that answers mid-download, mid-install or while the confirm
+/// sheet is up restarts the download or resets the notice; a failure never offers the update again; a finished update
+/// leaves the notice on screen (e56d5ff: one download per version, a Material notice under the top bar). The notice draws AppUpdate.phase (Logic/AppUpdate.swift UpdateBanner: 有新版本 /
 /// 正在下载 / 正在安装 / 没能更新到), so the phases it moves through are checked here, the way Kotlin reports them:
 /// a check that answers while a download, install or confirm sheet is running leaves it alone (no second download, no
 /// notice jumping back to 「有新版本」), a failure starts over as 「有新版本」 on the next check, and a finished update

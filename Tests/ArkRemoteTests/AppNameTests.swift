@@ -1,7 +1,8 @@
 import XCTest
 
-/// Regression 0108 #3: the App is called 「遥控」 under its icon on both phones (his 10-02 17:06 「然后就是名字改成遥控。」;
-/// owner decision G3). On 10-08 the iOS line in ArkRemote.xcconfig was commented out, so iOS showed the target name.
+/// Regression 0108 #3. Defect guarded: the name under the icon is wrong. The App's name is 「遥控」 on both phones (owner
+/// decision G3). On 10-08 the iOS line in ArkRemote.xcconfig was commented out, so iOS showed the target name; on
+/// Android a manifest label or a values-* strings.xml can override app_name.
 /// Read from the build settings that make the installed name: the xcconfig's generated Info.plist key on iOS (with no
 /// InfoPlist.xcstrings translation over it), strings.xml app_name and every android:label in the manifest on Android.
 final class AppNameTests: XCTestCase {

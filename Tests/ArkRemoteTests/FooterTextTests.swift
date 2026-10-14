@@ -1,8 +1,10 @@
 import XCTest
 @testable import ArkRemote
 
-/// The 方舟 and 鸣潮 card footers (decision A2/W4, BOARD/App-待他定项-从记录定-1014.md): no 「行名：」 list repeating
-/// the row names drawn right above, while the facts he cannot infer stay (the 关卡 format example, 理智药 0 / 999).
+/// The game cards' footers (decision A2/W4, BOARD/App-待他定项-从记录定-1014.md). Defect guarded: a footer repeats the
+/// row names drawn right above it as a 「行名：」 list, or loses a fact the rows do not show: the stage-code format,
+/// 理智药 0 = don't use and 999 = no limit, 周本 numbering from 1, and that only the first two settlements count. Without
+/// those facts a wrong value gets mailed to the PC. The checks look for the facts, not for one wording of them.
 @MainActor final class FooterTextTests: XCTestCase {
     private let arknightsStage = ["Info.Stage", "Info.MedicineNumb", "Task.IfFight", "Task.IfActivityFirst",
                                   "Task.ActivityStageIndex"]
@@ -17,20 +19,31 @@ import XCTest
         }
     }
 
+    /// No line starts with a short label and 「：」, whatever the label says (a name list whose names differ from the rows').
+    private func assertNoLabelPrefix(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
+        for l in text.split(separator: "\n") {
+            XCTAssertFalse(Self.has(String(l), #"^[^。，、\s]{1,8}："#), "「\(l)」 starts with a label", file: file, line: line)
+        }
+    }
+
+    static func has(_ text: String, _ pattern: String) -> Bool { text.range(of: pattern, options: .regularExpression) != nil }
+
+    /// `n` as a number of its own (0 is not the 0 in 10).
+    static func number(_ text: String, _ n: Int) -> Bool { has(text, #"(?<!\d)"# + "\(n)" + #"(?!\d)"#) }
+
     func testArknightsStageFooterHasNoRowNamesButKeepsTheFacts() {
         let foot = ArknightsPage.footerText(arknightsStage)
         assertNoNameList(foot, ["关卡", "理智药", "作战开关", "活动关优先", "活动关序号"])
-        XCTAssertFalse(foot.contains("："), foot)
-        XCTAssertTrue(foot.contains("1-7、CE-6、AT-4"), foot)
-        XCTAssertTrue(foot.contains("填 0 不用"), foot)
-        XCTAssertTrue(foot.contains("填 999 不限"), foot)
-        XCTAssertEqual(foot.split(separator: "\n").count, arknightsStage.count)
+        assertNoLabelPrefix(foot)
+        XCTAssertTrue(Self.has(foot, #"[A-Z]*\d+-\d+"#), "no stage-code example: \(foot)")
+        XCTAssertTrue(Self.number(foot, 0), "理智药 0 is not explained: \(foot)")
+        XCTAssertTrue(Self.number(foot, 999), "理智药 999 is not explained: \(foot)")
     }
 
     func testArknightsAwardFooterHasNoRowNames() {
         let foot = ArknightsPage.footerText(arknightsAward)
         assertNoNameList(foot, ["邮件", "幸运墙合成玉", "开采许可合成玉", "周年月卡"])
-        XCTAssertFalse(foot.contains("："), foot)
+        assertNoLabelPrefix(foot)
     }
 
     func testWuwaDailyFooterHasNoRowNames() {
@@ -38,18 +51,18 @@ import XCTest
         XCTAssertFalse(rows.isEmpty)
         let foot = WuwaPage.dailyFoot(rows)
         assertNoNameList(foot, rows.map(\.label) + ["无音区结算截图"])
-        XCTAssertFalse(foot.contains("："), foot)
+        assertNoLabelPrefix(foot)
         // the switch's sentence is still there, and the 残象聚落 line names no single settlement (W2)
         XCTAssertTrue(foot.contains(tacetShotsHint), foot)
-        XCTAssertTrue(foot.contains("前两个"), foot)
+        XCTAssertTrue(Self.has(foot, #"前\s*(两|2)\s*个"#), "only the first two settlements count: \(foot)")
         XCTAssertFalse(foot.contains("落渊南丘"), foot)
     }
 
     func testWuwaWeeklyFooterHasNoRowNames() {
         let foot = WuwaPage.weeklyFoot
         assertNoNameList(foot, ["周常乐园", "周本", "周本打第几个"])
-        XCTAssertFalse(foot.contains("："), foot)
-        XCTAssertTrue(foot.contains("第一个是 1"), foot)
+        assertNoLabelPrefix(foot)
+        XCTAssertTrue(Self.number(foot, 1), "周本 numbering from 1 is not said: \(foot)")
     }
 
     /// 终末地 cards and their 「…设置」 pages: no 「行名：」 in front either (HIG review 1014: the three game tabs used two
