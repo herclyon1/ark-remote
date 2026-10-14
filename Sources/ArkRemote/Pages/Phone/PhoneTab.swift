@@ -10,7 +10,9 @@ struct PhoneTab: View {
         let stamina = StaminaStore.shared
         // tokens is loaded in StaminaStore.init; reading it here makes the page redraw when it changes
         let status = stamina.tokens == nil ? "" : stamina.status()
+        let t = stamina.tokens
         PhonePage(data: PhonePageData(pageVersion: PhoneLink.appVersion, staminaStatus: status,
+                                      hasKuro: t?["kuro"]?.truthy == true, hasSkland: t?["sk"]?.truthy == true,
                                       hasConfig: Relay.shared.config != nil),
                   actions: PhonePageActions(
                     pasteTokens: { s in
@@ -32,7 +34,8 @@ struct PhoneTab: View {
                         if let u = URL(string: link) { UserDefaults.standard.set(PhoneLink.linkHash(u), forKey: PhoneLink.takenKey) }
                         // read back: navigator.clipboard.writeText can reject, UIPasteboard just does nothing
                         return PhoneLink.pasted() == link ? .copied : .failed(link)
-                    }))
+                    },
+                    pasteNoInputLink: { SetupScreen.takeLink() }))
     }
 }
 

@@ -397,13 +397,20 @@ step("d39.ww.top", "d39", "D39：鸣潮滑到底再点「鸣潮」→ 回顶",
      [("swipe", "up", 4), ("tab", "鸣潮"), ("wait", 1.2)], visible=["~无音区"])
 
 # ------------------------------------------------------------------ 手机
-step("ph.open", "phone", "手机标签 → 版本 / 诊断记录 / 「密钥」行",
-     [("tab", "手机")], expect=[VERSION, "诊断记录", "复制免输入链接", "密钥"], absent=["已配置"],
-     ios={"say": "手机标签 → 版本「x.y.z (n)」/ 诊断记录（说明写「收发消息、网络通断和机器状态」）/ 「密钥」行",
+# 10-14 review: the links in their own 换手机 section with 粘贴免输入链接; one row per game key; 运行自检 always there
+step("ph.open", "phone", "手机标签 → 版本 / 诊断记录 / 运行自检 / 换手机两行 / 库街区密钥行",
+     [("tab", "手机")], expect=[VERSION, "诊断记录", "运行自检", "复制免输入链接", "粘贴免输入链接", "~库街区密钥"],
+     absent=["已配置", "标出问题"],
+     ios={"say": "手机标签 → 版本「x.y.z (n)」/ 诊断记录（说明写「收发消息、网络通断和机器状态」）/ 运行自检 / 换手机 / 库街区密钥行",
           "expect": [VERSION, "re:^\\d+\\.\\d+\\.\\d+ \\(\\d+\\)$", "诊断记录", "~收发消息、网络通断和机器状态",
-                     "复制免输入链接", "密钥"]})
-step("ph.diag.on", "phone", "诊断记录打开 → 分享 / 清空 / 运行自检 / 就是这里",
-     [("toggle", "诊断记录")], expect=["~分享诊断记录", "清空诊断记录", "运行自检", "就是这里"])
+                     "运行自检", "复制免输入链接", "粘贴免输入链接", "~库街区密钥"]})
+step("ph.pastelink.none", "phone", "粘贴免输入链接（剪贴板里没有链接）→ 提示「剪贴板里没有免输入链接」",
+     [tap("粘贴免输入链接"), ("allow_paste", 4), ("wait", 0.8)], expect=["剪贴板里没有免输入链接"], timeout=10,
+     android={"do": [tap("粘贴免输入链接"), ("wait", 0.8)]})   # no paste permission alert on Android
+step("ph.pastelink.ok", "phone", "好 → 关提示，还在手机页", [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.6)],
+     expect=[VERSION], absent=["剪贴板里没有免输入链接"])
+step("ph.diag.on", "phone", "诊断记录打开 → 分享 / 清空 / 运行自检 / 标出问题",
+     [("toggle", "诊断记录")], expect=["~分享诊断记录", "清空诊断记录", "运行自检", "标出问题"])
 # 自检结果 lists one row per check (「信箱和 PIN  通过」…; app-r1 fix round 2, owner decision P5); the 0.4.4 base says
 # 「通过 N / 6」 in one sentence
 # anchored: the 这台手机 footer also says 「…不用再填信箱和 PIN…」
@@ -447,8 +454,8 @@ step("ph.paste.bad", "phone", "粘贴密钥串 填乱码 → 存 → 「没存�
      android={"do": [tap("粘贴密钥串"), ("wait", 1.0), ("field", {"t": "", "kind": "EditText"}, "zzz"), tap("存")]})
 step("ph.paste.close", "phone", "好 → 提示和粘贴单一起关掉，回手机页",
      [CONFIRM_WAIT, tap("好", last=True), ("wait", 0.8)], expect=[VERSION], absent=["没存上"])
-DIAG_BTN = "就是这里"
-step("diag.bottom.phone", "diag", "诊断开 · 手机页滑到底 → 最后一行在红钮「就是这里」上面（ce8ebc3）",
+DIAG_BTN = "标出问题"
+step("diag.bottom.phone", "diag", "诊断开 · 手机页滑到底 → 最后一行在「标出问题」按钮上面（ce8ebc3）",
      [("bottom", 4)], last_above=DIAG_BTN, on="ios")
 step("diag.bottom.status", "diag", "诊断开 · 状态根页滑到底 → 「查看全部」在红钮上面",
      [("tab", "状态"), ("wait", 0.8), ("bottom", 8)], last_above=DIAG_BTN, expect=["~查看全部"], on="ios")
@@ -462,8 +469,8 @@ step("diag.bottom.ef", "diag", "诊断开 · 终末地根页滑到底 → 最后
      [("tab", "终末地"), ("wait", 0.8), ("bottom", 8)], last_above=DIAG_BTN, on="ios")
 step("diag.bottom.ww", "diag", "诊断开 · 鸣潮滑到底 → 最后一行在红钮上面",
      [("tab", "鸣潮"), ("wait", 0.8), ("bottom", 6)], last_above=DIAG_BTN, on="ios")
-step("ph.diag.off", "phone", "诊断记录关掉 → 多出的行收起", [("tab", "手机"), ("top", 4), ("toggle", "诊断记录")],
-     absent=["运行自检", "就是这里"])
+step("ph.diag.off", "phone", "诊断记录关掉 → 多出的行收起，运行自检还在", [("tab", "手机"), ("top", 4), ("toggle", "诊断记录")],
+     absent=["清空诊断记录", "标出问题"], expect=["运行自检"])
 # last_bottom: a leftover room for the 诊断记录 bar (about 55 pt) would end the page near 815. Measured app-r1 (iOS 27,
 # tab bar top 872.5): a last card with no footer (状态 「查看全部」) ends at 853 with the system's own margin, diagnostics
 # never turned on; a footer text (方舟, 终末地) ends lower, 860-880.

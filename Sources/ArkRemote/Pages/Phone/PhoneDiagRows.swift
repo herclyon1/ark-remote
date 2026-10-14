@@ -25,7 +25,10 @@ struct PhoneDiagRows: View {
             DiagLog.shared.setEnabled(v)
             if v { DiagWatch.start() }
         })) {
-            PhoneRowLabel(title: "诊断记录", hint: "开着时记下这台手机收发消息、网络通断和机器状态的变化，可以复制或分享。")
+            // what turning it on brings: the bar under every page with the button that sends the record (HIG Toggles:
+            // say what it does; the switch's own effects were not said)
+            PhoneRowLabel(title: "诊断记录",
+                          hint: "开着时记下这台手机收发消息、网络通断和机器状态的变化。每页底下会出现诊断条，出问题时点「标出问题」把记录发去排查。")
         }
         .onAppear { if diagOn { DiagWatch.start(); DiagUI.shared.start() } }
         if diagOn {
@@ -46,27 +49,32 @@ struct PhoneDiagRows: View {
                     // match the row behind (HIG Action sheets: "Provide a message only if necessary.")
                     Text("记下的都会删掉，还没分享的找不回来。")
                 }
-            // view.js:602 #selfcheck is hidden while 诊断记录 is off. The running flag and the result sheet live in
-            // SelfCheckRun and the sheet is on PhonePage outside its .id(reselect): a reselect of 手机 rebuilds this List
-            // on Android (D39), and @State here went back to 「运行自检」 mid-run, the result sheet never coming up.
-            let run = SelfCheckRun.shared
-            Button {
-                guard !run.checking else { return }
-                run.checking = true
-                Task {
-                    _ = await SelfCheck.run()   // kept in LastSelfCheck; the sheet reads it from there
-                    run.checking = false
-                    run.shown = true
-                }
-            } label: {
-                if run.checking {
-                    LabeledContent("正在自检…") { ProgressView() }
-                } else {
-                    Text("运行自检")
-                }
-            }
-            .disabled(run.checking)
         }
+        // 运行自检 does not read the record (SelfCheck.run), so it is not hidden behind the 诊断记录 switch (view.js:602 hid
+        // it); it stays under the diagnostics rows (decision P1). The running flag and the result sheet live in
+        // SelfCheckRun and the sheet is on PhonePage outside its .id(reselect): a reselect of 手机 rebuilds this List on
+        // Android (D39), and @State here went back to 「运行自检」 mid-run, the result sheet never coming up.
+        selfCheckButton
+    }
+
+    @ViewBuilder private var selfCheckButton: some View {
+        let run = SelfCheckRun.shared
+        Button {
+            guard !run.checking else { return }
+            run.checking = true
+            Task {
+                _ = await SelfCheck.run()   // kept in LastSelfCheck; the sheet reads it from there
+                run.checking = false
+                run.shown = true
+            }
+        } label: {
+            if run.checking {
+                LabeledContent("正在自检…") { ProgressView() }
+            } else {
+                Text("运行自检")
+            }
+        }
+        .disabled(run.checking)
     }
 }
 
@@ -82,9 +90,11 @@ struct SelfCheckSheet: View {
         // one row per check, so a failure says which check and why (BOARD/App-待他定项-从记录定-1014.md P5; his 09-07
         // 14:59 「描述模糊是第一大禁止」); no file format or size (HIG Writing: "avoiding jargon")
         let rows = (rec["rows"]?.array ?? []).map {
-            SelfCheckItem(name: $0["name"]?.jsString ?? "", ok: $0["ok"]?.truthy ?? false, detail: $0["detail"]?.jsString ?? "")
+            SelfCheckItem(name: $0["name"]?.jsString ?? "", ok: $0["ok"]?.truthy ?? false, detail: $0["detail"]?.jsString ?? "",
+                          neutral: $0["neutral"]?.truthy ?? false, fix: $0["fix"]?.jsString ?? "")
         }
-        DiagSheetBox(title: "自检结果", message: "复制后粘到聊天里，或用分享发出。", json: json, canShare: true,
+        // what the list is and what to do with it (P13 opens with one sentence of what the page is)
+        DiagSheetBox(title: "自检结果", message: "查这台手机连机器的每一步。要别人帮忙查，复制或分享给对方。", json: json, canShare: true,
                      checks: rows, close: close)
     }
 }
@@ -188,16 +198,21 @@ struct DiagSheetBox: View {
         }
     }
 
-    /// A passed check: its name and a grey 「通过」, no colour. A failed one: its name with what failed under it, and the
-    /// system red ✗ (an error in Apple's system colours; named 没通过 for VoiceOver).
+    /// A passed check: its name and a grey value of what was found with 「通过」 (「有网 · 通过」), no colour (decision P5
+    /// keeps the word and no colour; the value tells what was checked). A normal state that is not a pass (machine off,
+    /// optional key not set): its words grey, no mark. A failed one: its name with what failed and what to do under it,
+    /// and the system red ✗ (an error in Apple's system colours; named 没通过 for VoiceOver).
     @ViewBuilder private func checkRow(_ c: SelfCheckItem) -> some View {
-        if c.ok {
-            LabeledContent(c.name) { Text("通过").foregroundStyle(.secondary) }
+        if c.ok || c.neutral {
+            LabeledContent(c.name) {
+                Text(c.neutral ? c.detail : [c.detail, "通过"].filter { !$0.isEmpty }.joined(separator: " · "))
+                    .foregroundStyle(.secondary)
+            }
         } else {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(c.name)
-                    Text(c.detail).font(.footnote).foregroundStyle(.secondary)
+                    Text([c.detail, c.fix].filter { !$0.isEmpty }.joined(separator: "，")).font(.footnote).foregroundStyle(.secondary)
                 }
                 Spacer()
                 symbol("xmark.circle.fill", android: "Icons.Filled.Close").foregroundStyle(Color.red)

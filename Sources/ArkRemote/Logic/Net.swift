@@ -531,13 +531,13 @@ struct PinScan: Sendable, Equatable {
     }
 
     /// The status line when the PIN cannot be right (no state matched it on ntfy, or the one on COS carries another),
-    /// else nil. It points at what the App has: there is no settings screen; a 免输入链接 pasted in 「手机 › 粘贴密钥串」
-    /// replaces the mailbox and PIN (PhoneTab pasteTokens → PhoneLink.open → saveConfig).
+    /// else nil. It points at what the App has: there is no settings screen; 「手机 › 粘贴免输入链接」 replaces the mailbox and
+    /// PIN (SetupScreen.takeLink → PhoneLink.open → saveConfig).
     func pinMismatchNote() -> String? {
         let ntfyBad = pinScan.seen > 0 && pinScan.matched == 0
         guard ntfyBad || cosPinBad else { return nil }
         return (ntfyBad ? "信箱里有 \(pinScan.seen) 条消息但 PIN 对不上" : "机器存的状态 PIN 对不上")
-            + "——到「手机」页点「粘贴密钥串」，粘贴免输入链接重设"
+            + "——到「手机」页点「粘贴免输入链接」重设"
     }
 
     /// Reads the state object once and takes it when it is newer. Called on open, on refresh and on the

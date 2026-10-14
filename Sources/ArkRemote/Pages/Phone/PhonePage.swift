@@ -7,6 +7,9 @@ struct PhonePageData {
     var pageVersion: String = ""
     /// 游戏账号 · 已配置: Stamina.status() on the web; empty = 「没有」, and the 清除密钥 button is hidden.
     var staminaStatus: String = ""
+    /// The 库街区 key (鸣潮's 体力) and the 森空岛 session (from the machine) are stored.
+    var hasKuro = false
+    var hasSkland = false
     /// This phone has a mailbox and PIN to put in the 免输入链接; without them 复制免输入链接 is disabled.
     var hasConfig: Bool = true
 }
@@ -18,6 +21,8 @@ struct PhonePageActions {
     var clearTokens: () -> Void = {}
     /// Copies the no-input link.
     var copyNoInputLink: () -> PhoneCopyResult = { .noConfig }
+    /// A 免输入链接 on the clipboard → its mailbox and PIN (SetupScreen.takeLink's path); false when there is none.
+    var pasteNoInputLink: () -> Bool = { false }
 }
 
 enum PhoneCopyResult {
@@ -54,6 +59,8 @@ struct PhonePage: View {
     @State var heldPasteErr: String? = nil
     /// 复制免输入链接 took: its label reads 「链接已复制」 until the page goes away (no timer).
     @State var linkCopied = false
+    /// 粘贴免输入链接 found no link on the clipboard (the alert SetupScreen shows for the same button).
+    @State var noLinkShown = false
     /// A reselect of the 手机 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.phone }
@@ -69,6 +76,15 @@ struct PhonePage: View {
                 // a name and a value, no hint under them (HIG Lists: "Keep item text succinct"; P13's rows)
                 PhoneValueRow(title: "版本", value: data.pageVersion)
                 PhoneDiagRows(appVersion: data.pageVersion)
+            } header: {
+                Text("这台手机")
+            }
+
+            // The two links in a section of their own with their footer right under them: the footer explained the last
+            // row of 「这台手机」 four diagnostics rows away (P13: one subject a section, its footer about it alone).
+            // 粘贴免输入链接 is here under the name the first-use page gives it (SetupScreen): it replaces the mailbox and
+            // PIN, which hid behind 「粘贴密钥串」 before.
+            Section {
                 Button(linkCopied ? "链接已复制" : "复制免输入链接") {
                     // view.js #mklink; prompt("长按复制这条链接：", url) when the clipboard refuses
                     switch actions.copyNoInputLink() {
@@ -81,8 +97,11 @@ struct PhonePage: View {
                 }
                 // HIG Entering data: "make the button available only after people enter the data you require"
                 .disabled(!data.hasConfig)
+                Button("粘贴免输入链接") {
+                    if !actions.pasteNoInputLink() { noLinkShown = true }
+                }
             } header: {
-                Text("这台手机")
+                Text("换手机")
             } footer: {
                 // one sentence of what the link does (HIG Writing: "If you can use fewer words, do so."). The link opens
                 // the App now (PhoneLink.linkBase), not the web page, so no 「存成书签或放到主屏幕」.
@@ -91,8 +110,10 @@ struct PhonePage: View {
             }
 
             Section {
-                // 「密钥」, not the web's 「已配置」 (view.js:608): with none stored the row read 「已配置 … 没有」 (test pass 1, 问题 7)
-                PhoneValueRow(title: "密钥", value: hasTokens ? data.staminaStatus : "没有")
+                // one row per key, each saying whose it is and what it is for (a bare 「密钥 没有」 did not say which of
+                // the two); the 森空岛 one comes from the machine, the 库街区 one is pasted here
+                PhoneValueRow(title: "库街区密钥（鸣潮体力）", value: data.hasKuro ? "已填" : "没有")
+                PhoneValueRow(title: "森空岛密钥（方舟）", value: data.hasSkland ? "游戏机已给" : "游戏机还没给")
                 Button("粘贴密钥串") {
                     pasteText = ""
                     pasteShown = true
@@ -112,7 +133,7 @@ struct PhonePage: View {
             } footer: {
                 // plain words, no paths or file names (HIG Writing: "Choose simple, plain language … avoiding jargon");
                 // what to paste is the paste field's own prompt now
-                Text("森空岛的密钥由游戏机交过来，库街区的点「粘贴密钥串」填；密钥只存在这台手机里，免输入链接会把它一起带上。")
+                Text("库街区的点「粘贴密钥串」填；密钥只存在这台手机里，免输入链接会一起带上。")
             }
         }
         // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
@@ -148,6 +169,9 @@ struct PhonePage: View {
         } message: {
             Text(pasteErr)
         }
+        .alert("剪贴板里没有免输入链接", isPresented: $noLinkShown) {
+            Button("好") {}
+        }
         .alert("长按复制这条链接：", isPresented: $manualShown) {
             TextField("", text: $manualLink)
             Button("好", role: .cancel) {}
@@ -164,7 +188,9 @@ struct PhonePage: View {
                 Section {
                     // what to paste as the field's prompt (HIG Text fields: "Show a hint in a text field to help
                     // communicate its purpose"; Passwords' grey 「User」 / 「Notes」, P12), not a footer under it
-                    TextField("", text: $pasteText, prompt: Text("免输入链接，或 KUROBBS_TOKEN=… 两行"), axis: .vertical)
+                    // the key only: the 免输入链接 has its own row (粘贴免输入链接); a link pasted here still works
+                    // (PhoneTab pasteTokens) but is not asked for
+                    TextField("", text: $pasteText, prompt: Text("KUROBBS_TOKEN=… 和 KUROBBS_DID=… 两行"), axis: .vertical)
                         .lineLimit(3, reservesSpace: true)
                         .setupPlainInput()
                     #if !os(Android)
@@ -176,9 +202,13 @@ struct PhonePage: View {
                         Task { @MainActor in pasteText = s }
                     }
                     #endif
+                } footer: {
+                    // whose key and what for (P12: the sheet says what to fill); the variable names are what the user
+                    // copies, so they stay
+                    Text("用来读鸣潮体力。把 KUROBBS_TOKEN=… 和 KUROBBS_DID=… 两行一起粘进来。")
                 }
             }
-            .navigationTitle("粘贴密钥串")
+            .navigationTitle("库街区密钥")
             #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif

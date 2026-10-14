@@ -164,6 +164,11 @@ struct SelfCheckItem: Sendable, Equatable {
     var name: String
     var ok: Bool
     var detail: String
+    /// A normal state that is not a pass either (the machine off at night, an optional key not set): its words in grey,
+    /// no ✗ (a system check marks red only what is broken; Settings shows an optional item as 「Off」 / 「Not Set Up」).
+    var neutral = false
+    /// What to do about a failed check, said on its row.
+    var fix = ""
 }
 
 /// 运行自检: the checks the app can make on its own, one pass per tap.
@@ -175,12 +180,16 @@ struct SelfCheckItem: Sendable, Equatable {
         // 1. configuration
         let cfg = relay.config
         let cfgOk = cfg.map { !$0.topic.isEmpty && !$0.pin.isEmpty } ?? false
-        out.append(SelfCheckItem(name: "信箱和 PIN", ok: cfgOk, detail: cfgOk ? "已填" : "没填，先用免输入链接打开一次"))
+        out.append(SelfCheckItem(name: "信箱和 PIN", ok: cfgOk, detail: cfgOk ? "已填" : "没填",
+                                 fix: cfgOk ? "" : "到「手机 › 粘贴免输入链接」填"))
         let acc = stamina.tokens == nil ? "" : stamina.status()
-        out.append(SelfCheckItem(name: "游戏账号", ok: !acc.isEmpty, detail: acc.isEmpty ? "没有密钥，体力读不到" : acc))
+        // the 库街区 key only reads 鸣潮's 体力 and may be left out: not a failure when it is not set
+        let kuro = (stamina.tokens ?? stamina.loadTokens())?["kuro"]?.truthy == true
+        out.append(SelfCheckItem(name: "库街区密钥", ok: kuro, detail: kuro ? "已填" : "没设置，鸣潮体力不显示", neutral: !kuro))
 
         // 2. the phone's own network
-        out.append(SelfCheckItem(name: "手机网络", ok: live.deviceOnline, detail: live.deviceOnline ? "系统说有网" : "系统说没网"))
+        out.append(SelfCheckItem(name: "手机网络", ok: live.deviceOnline, detail: live.deviceOnline ? "有网" : "没网",
+                                 fix: live.deviceOnline ? "" : "看看手机的网络设置"))
 
         guard let cfg, cfgOk else { return out }
 
@@ -188,19 +197,24 @@ struct SelfCheckItem: Sendable, Equatable {
         let t0 = nowMs()
         do {
             let msgs = try await Relay.pollTopic(cfg.topic, since: "10m")   // one-shot: one read per 运行自检 tap
-            out.append(SelfCheckItem(name: "连得上中继", ok: true, detail: "\(Int(nowMs() - t0)) ms，最近 10 分钟 \(msgs.count) 条消息"))
+            out.append(SelfCheckItem(name: "连得上服务器", ok: true, detail: "\(Int(nowMs() - t0)) ms，最近 10 分钟 \(msgs.count) 条消息"))
         } catch {
-            out.append(SelfCheckItem(name: "连得上中继", ok: false, detail: Live.why(error)))
+            out.append(SelfCheckItem(name: "连得上服务器", ok: false, detail: Live.why(error)))
         }
 
         // 4. the push stream: open one, wait for ntfy's `open` event, close it
         let pushMs = await PushProbe.openMs(topic: cfg.topic)   // Logic/PushProbe.swift
-        out.append(SelfCheckItem(name: "推送通道", ok: pushMs != nil,
+        out.append(SelfCheckItem(name: "实时消息", ok: pushMs != nil,
                                  detail: pushMs.map { "\($0) ms 连上" } ?? "8 秒内没连上"))
 
-        // 5. the machine, as the status line has it now
-        out.append(SelfCheckItem(name: "机器", ok: relay.statusState == "on",
-                                 detail: relay.statusText.isEmpty ? "还没问过" : relay.statusText))
+        // 5. the machine, as the status line has it now. Off is its normal state at night, not a failure: only a line
+        // that is neither on nor the 「关机 · …」 verdict (connection trouble) is marked
+        let on = relay.statusState == "on"
+        let off = relay.statusState == "off" && relay.statusText.hasPrefix("关机")
+        out.append(SelfCheckItem(name: "机器", ok: on,
+                                 detail: on ? "开着" : off ? "关着（开机后会自动连上）"
+                                     : (relay.statusText.isEmpty ? "还没问过" : relay.statusText),
+                                 neutral: off))
 
         // 6. the game accounts, when there are any: one forced read
         if !acc.isEmpty {
@@ -236,12 +250,13 @@ enum LastSelfCheck {
     static let key = "ark-accept"   // the web page's key
 
     static func save(_ items: [SelfCheckItem]) {
-        let fails = items.filter { !$0.ok }.count
+        let fails = items.filter { !$0.ok && !$0.neutral }.count
         let o: JSONValue = .object([
             "at": .double(nowMs()),
             "total": .int(items.count),
             "fails": .int(fails),
-            "rows": .array(items.map { .object(["name": .string($0.name), "ok": .bool($0.ok), "detail": .string($0.detail)]) }),
+            "rows": .array(items.map { .object(["name": .string($0.name), "ok": .bool($0.ok), "detail": .string($0.detail),
+                                                "neutral": .bool($0.neutral), "fix": .string($0.fix)]) }),
         ])
         UserDefaults.standard.set(o.encodedString(), forKey: key)
     }
@@ -259,7 +274,7 @@ enum LastSelfCheck {
             "at": a["at"] ?? .null,
             "total": a["total"] ?? .null,
             "fails": a["fails"] ?? .null,
-            "failRows": .array(rows.filter { $0["ok"]?.bool == false }),
+            "failRows": .array(rows.filter { $0["ok"]?.bool == false && $0["neutral"]?.bool != true }),
         ])
     }
 }
@@ -283,7 +298,7 @@ func diagKB(_ text: String) -> String {
     /// machine status (not taps) and sends the whole log as one record, so the web's wording would be wrong here.
     /// Short enough for the bar's two lines beside 「就是这里」 and for one line inline (P14: MiniPlayer's one row,
     /// 「诊断记录中」); no 「右下角」: the button sits beside the line now (Pages/Shell/DiagAccessory.swift).
-    static let startLine = "诊断记录中：记在手机里，按「就是这里」才送出"
+    static let startLine = "诊断记录中：只记在手机里，点「标出问题」才发出"
 
     /// The 诊断记录 switch, mirrored here so the mark button and the line appear / go at once.
     var on = DiagLog.shared.enabled
@@ -356,13 +371,14 @@ func diagKB(_ text: String) -> String {
         let mk = marks.isEmpty ? "" : "你标了 \(marks.count) 处（\(marks.map { $0["word"]?.string ?? "未选词" }.joined(separator: "、"))）。"
         let u = rec["upload"]
         let state = u?["state"]?.string
-        let up: String
-        if u == nil || state == nil { up = "上传：还在送" }
-        else if state == "sent" { up = "上传：已送达" }
-        else if state == "local" { up = "还没按「就是这里」，只在这台手机里" }   // plain words for 「没标记」 (HIG Writing: "avoiding jargon"; HIG review 1014)
-        else { up = "上传：没送到（\(u?["detail"]?.string ?? "原因不明")）" }
-        // no file format or size in the words (HIG Writing: "avoiding jargon"; app-1013 review 手机 8)
-        return (json, "\(mk)\(n) 条。\(up)。送不到时复制后粘到聊天里，或用分享发出。", state == "sent")
+        // only what holds in this state (HIG Writing: be concise and accurate): 「送不到时…」 sat after 「只在这台手机里」,
+        // before anything had been sent; no file format or size (app-1013 review 手机 8)
+        let text: String
+        if u == nil || state == nil { text = "记了 \(n) 条，正在发去排查。" }
+        else if state == "sent" { text = "记了 \(n) 条，已发去排查。" }
+        else if state == "local" { text = "记了 \(n) 条。还没发出，只在这台手机里。可以复制或分享给别人。" }
+        else { text = "记了 \(n) 条，没发出去（\(u?["detail"]?.string ?? "原因不明")）。可以复制或分享。" }
+        return (json, mk + text, state == "sent")
     }
 
     // MARK: 件 C

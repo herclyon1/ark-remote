@@ -12,23 +12,32 @@ import SwiftUI
 // safeAreaInset (skip-fuse-ui Layout/SafeArea.swift:19-22), so the same row sits under each tab's pages in the tab's own
 // column (DiagRoom): the pages end above it, nothing measured, nothing drawn over the list.
 
-/// 「就是这里」 and its words (seg-frames-logger.js MARK_WORDS) as a system Menu: one tap opens the words, a word sends.
+/// 「标出问题」 and its words (seg-frames-logger.js MARK_WORDS) as a system Menu: one tap opens the words, a word sends.
+/// Named by what it does, everywhere it is mentioned (the bar's line, the switch's note, the record sheet), not by its
+/// icon, which differs between the platforms (HIG Writing: one name for one thing). The menu's title says that a word
+/// sends the record (a menu that sends data says so first); skip-ui draws a Section header as a disabled first item.
 struct DiagMarkMenu: View {
+    static let name = "标出问题"
+
     var body: some View {
         Menu {
-            ForEach(DiagUI.markWords, id: \.self) { w in
-                Button(w) { DiagUI.shared.mark(w) }
+            Section {
+                ForEach(DiagUI.markWords, id: \.self) { w in
+                    Button(w) { DiagUI.shared.mark(w) }
+                }
+                Button("不选，直接发") { DiagUI.shared.mark(nil) }
+            } header: {
+                Text("哪里不对？选一个就把记录发去排查")
             }
-            Button("直接发（不选词）") { DiagUI.shared.mark(nil) }
         } label: {
             // skip-ui has no flag: Material's Feedback icon ("report an issue") on Android
-            Label { Text("就是这里") } icon: {
+            Label { Text(Self.name) } icon: {
                 symbol("flag", android: "Icons.Outlined.Feedback")
                 #if os(Android)
                     // .iconOnly drops the title on Android, and skip-ui gives a Material icon its own name as the
                     // content description (Image.swift Icon(contentDescription: name)): TalkBack read
                     // 「Icons.Outlined.Feedback」 (uiautomator tree, ark37 10-14). iOS names it by the Label's title.
-                    .accessibilityLabel("就是这里")
+                    .accessibilityLabel(Self.name)
                 #endif
             }
         }
@@ -69,7 +78,7 @@ struct DiagAccessory: View {
                 }
             }
             .buttonStyle(.plain)
-            // MiniPlayer's controls: the symbol alone in the label colour, named 就是这里 for VoiceOver (HIG Toolbars:
+            // MiniPlayer's controls: the symbol alone in the label colour, named 标出问题 for VoiceOver (HIG Toolbars:
             // "Prefer simple, recognizable symbols for items instead of text")
             DiagMarkMenu().labelStyle(.iconOnly).tint(Color.primary)
         }
@@ -78,7 +87,7 @@ struct DiagAccessory: View {
 
     /// The grey line: what the recorder last said, without the 「诊断记录中：」 the title already says.
     static func detail(_ line: String) -> String {
-        if line == DiagUI.startLine { return "记在手机里，点旗子才送出" }
+        if line == DiagUI.startLine { return "出问题时点右边按钮，把这段记录发去排查" }
         return line.hasPrefix("诊断记录中：") ? String(line.dropFirst("诊断记录中：".count)) : line
     }
 }

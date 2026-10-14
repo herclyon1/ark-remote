@@ -40,6 +40,10 @@ struct SetupScreen: View {
                             .multilineTextAlignment(.trailing)
                             .setupNumberInput()
                     }
+                } header: {
+                    // what the App is for and where the two values come from, before asking for them (the Watch pairing
+                    // page opens with one sentence of what it does and what it needs, P16)
+                    Text(Self.headNote).textCase(nil)
                 } footer: {
                     // one fixed line, so the page does not jump as the fields fill; no 「两样都要填」: the grey 开始使用 already says both
                     // are needed (HIG Entering data: "make the button available only after people enter the data you require")
@@ -87,6 +91,7 @@ struct SetupScreen: View {
         }
     }
 
+    static let headNote = "遥控家里的游戏机。填游戏机那边设好的信箱名（ark- 开头）和 4 位 PIN。"
     static let footNote = "只存在这台手机里，填一次就不再问。"
     /// Under 粘贴免输入链接: where the link comes from in the App itself (手机 › 复制免输入链接); older links work too.
     static let linkFootNote = "「手机」页复制的免输入链接或旧链接都行，复制后点上面。"
