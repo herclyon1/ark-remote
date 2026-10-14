@@ -128,10 +128,13 @@ struct EWSaveBar: ViewModifier {
 
     /// The review sheet's leading button: the system's ✕ (iOS 26 `Button(role: .cancel)`, as 密码 › 新建, P12), named
     /// 再想想 for VoiceOver (HIG Toolbars: "Prefer simple, recognizable symbols for items instead of text"). Android: the
-    /// word, as skip-ui has no system cancel symbol for a role-only button.
+    /// same ✕ glyph as the paste sheet's cancel (PhonePage), as skip-ui has no system cancel symbol for a role-only button;
+    /// named 再想想 on the image, as skip-ui otherwise gives the icon its own name for TalkBack (DiagAccessory.swift).
     @ViewBuilder private var cancelReviewButton: some View {
         #if os(Android)
-        Button("再想想", role: .cancel) { reviewing = false }
+        Button(role: .cancel) { reviewing = false } label: {
+            Image(systemName: "xmark").accessibilityLabel("再想想")
+        }
         #else
         Button(role: .cancel) { reviewing = false }
             .accessibilityLabel("再想想")
