@@ -277,7 +277,7 @@ let skipShutdownRule = "下一趟跑完不关机，再下一趟跑完照常关�
 
 /// 无音区结算截图: what switching it on does, one sentence (HIG Toggles: "Describe what it does when turned on, and people
 /// can infer the opposite."; the old 「开着：」 put a colon after the footer's 「无音区结算截图：」).
-let tacetShotsHint = "日报后面带上无音区打完的两张结算图。"
+let tacetShotsHint = "打完无音区的两张结算图跟在日报后面发。"
 
 let relaySwitches: [RelaySwitch] = [
     RelaySwitch(id: "relay|skip_shutdown", key: "下次别关机", tab: "状态", label: "下次跑完不关机",
@@ -292,7 +292,7 @@ let relaySwitches: [RelaySwitch] = [
                 on: .object(["action": .string("debug_mode"), "minutes": .int(90), "confirmed": .bool(true)]),
                 off: .object(["action": .string("debug_mode"), "off": .bool(true), "confirmed": .bool(true)]),
                 hintOn: { v in "开着，到 \(v)——这期间跑完不关机" }),
-    RelaySwitch(id: "relay|tacet_shots", key: "无音区截图", tab: "OK-WW", label: "无音区结算截图",
+    RelaySwitch(id: "relay|tacet_shots", key: "无音区截图", tab: "OK-WW", label: "日报附无音区结算图",
                 hint: tacetShotsHint,
                 on: .object(["action": .string("tacet_shots"), "on": .bool(true)]),
                 off: .object(["action": .string("tacet_shots"), "on": .bool(false)])),

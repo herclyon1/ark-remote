@@ -63,8 +63,11 @@ enum WuwaSchema {
     /// 「只在上面选…时才有用」, since those rows are hidden for the other choices (`hidden(_:)`). The hints are only read in
     /// the card's footer, with no 「行名：」 in front (A2/W4), so each names its subject; a row whose name already says
     /// everything has none (体力刷什么, 刷哪种材料: it is shown only once 模拟领域 is picked).
+    static let nestPath = "NightmareNestTask.json/Only Farm These Nests"
+
     static let group = EWGroupSpec(title: "鸣潮", fields: [
-        EWFieldSpec(path: "DailyTask.json/Which to Farm", type: .text, label: "体力刷什么",
+        // `name`, not `label`: the machine's own label (「刷什么」) wins over `label` and did not say it spends 体力
+        EWFieldSpec(path: "DailyTask.json/Which to Farm", type: .text, name: "体力刷什么",
                     hint: nil),
         EWFieldSpec(path: "DailyTask.json/Material Selection", type: .text, label: "刷哪种材料",
                     hint: nil),
@@ -76,8 +79,9 @@ enum WuwaSchema {
                     choices: tacet.map { EWChoice($0.names.joined(separator: " ＋ "), String($0.value)) }),
         // the first two settlements (his 10-12 11:17 「我要的就是要刷前两个残像聚落，第2个就是落渊南丘」; the relay's
         // mastercfg_okww.py ONLY_NESTS 梦枢天罗、落渊南丘); the old 「只刷落渊南丘」 was out of date
-        EWFieldSpec(path: "NightmareNestTask.json/Only Farm These Nests", type: .text, label: "残象聚落点位",
-                    hint: "残象聚落只刷列表里的前两个，这是定好的，要换在电脑上改。", readOnly: true),
+        // a fixed task of its own (NightmareNestTask), not an option of 体力刷什么: drawn in its own card (WuwaPage nestCard)
+        EWFieldSpec(path: nestPath, type: .text, label: "残象聚落点位",
+                    hint: "只刷列表里的前两个，定好的，要换在电脑上改。", readOnly: true),
     ])
 }
 
@@ -93,6 +97,8 @@ struct WuwaPageData {
     var weeklyBossDone = false
     /// relay["周常"]["周本"]["第几个周本"]
     var weeklyBossIndex = 1
+    /// relay["周常"]["周本"]["名字"] by the index it belongs to: the stepper row names the boss only for that index.
+    var weeklyBossNames: [Int: String] = [:]
     /// path (or "relay|tacet_shots", "wb|OK-WW|第几个周本") -> the small lines under that row.
     var tags: [String: EWRowTag] = [:]
 
@@ -132,6 +138,7 @@ struct WuwaPage: View {
     var body: some View {
         List {
             gameCard
+            nestCard
             weeklyCard
         }
         // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
@@ -157,7 +164,7 @@ struct WuwaPage: View {
     @ViewBuilder
     private var gameCard: some View {
         let (m, notes) = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster)
-        let rows = gameRows(m, notes)
+        let rows = gameRows(m, notes).filter { $0.path != WuwaSchema.nestPath }
         // view.js:976-995: the hints sit under the card; the 无音区结算截图 switch is one of its rows.
         // Only when the 母本 is readable: otherwise the card is the one warning line.
         let foot = m == nil ? "" : Self.dailyFoot(rows)
@@ -170,7 +177,9 @@ struct WuwaPage: View {
                 // The relay's own switch for OK-WW (schema.js RELAY_SWITCHES tab "OK-WW"); not part of any config file.
                 tagged("relay|tacet_shots") {
                     Toggle(isOn: Binding(get: { tacetShots }, set: { tacetShots = $0; onRelaySwitch("relay|tacet_shots", $0) })) {
-                        EWRowTitle(label: "无音区结算截图", hint: nil)
+                        // says where the pictures go: 「无音区结算截图」 read as taking screenshots in the game (HIG Toggles:
+                        // "the content in the row provides the context for the state the switch controls")
+                        EWRowTitle(label: "日报附无音区结算图", hint: nil)
                     }
                 }
             } else {
@@ -184,6 +193,30 @@ struct WuwaPage: View {
         } footer: {
             if !foot.isEmpty { Text(verbatim: foot) }
         }
+    }
+
+    /// 残象聚落点位 in a card of its own: a fixed task (NightmareNestTask) that sat between the 体力 rows as if it were an
+    /// option of 体力刷什么 (HIG Layout: "Group related items to clearly express related information or functions").
+    @ViewBuilder private var nestCard: some View {
+        let m = ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0
+        let rows = m.map { ewRows(WuwaSchema.group, $0, values: values, hidden: hidden($0)) }?
+            .filter { $0.path == WuwaSchema.nestPath } ?? []
+        listSection("wuwa-nest", if: m != nil && !rows.isEmpty) {
+            Section {
+                ForEach(rows) { row in
+                    EWRowView(row: row, values: $values, readonly: m?.readonly ?? [:], onChange: onChange,
+                              tag: data.tags[row.path], onResend: onResend, showHint: false)
+                }
+            } header: {
+                Text("残象聚落")
+            } footer: {
+                Text(verbatim: Self.nestFoot(rows))
+            }
+        }
+    }
+
+    static func nestFoot(_ rows: [EWRow]) -> String {
+        rows.compactMap(\.hint).joined(separator: "\n")
     }
 
     /// The 母本's rows: the notes about an earlier copy first, then the fields the 体力 choice opens.
@@ -206,8 +239,9 @@ struct WuwaPage: View {
     }
 
     /// The 每周 card's footer (view.js:976-995), no 「行名：」 list (A2/W4): each sentence names what it is about.
-    static let weeklyFoot = "周常乐园不花体力，做完就停到下周一。\n"
-        + "周本花体力，一周领 3 次奖励，领满就停到下周一。\n"
+    static let weeklyFoot = "周常乐园不花体力；周本花体力，一周领 3 次奖励。\n"
+        // the reset as the 方舟 page gives it: weekgate.py counts weeks from Monday 04:00 Beijing = 05:00 Tokyo
+        + "做完后停到下周一 05:00（东京时间）。\n"
         + "周本的序号在游戏里按 F2 打开周本列表从上往下数，第一个是 1。新 Boss 上线顺序会变，换本时记得来改。"
 
     /// Weekly items: done this week stops them, Monday 04:00 brings them back (view.js:510-535).
@@ -216,23 +250,13 @@ struct WuwaPage: View {
     private var weeklyCard: some View {
         Section {
             LabeledContent("周常乐园") {
-                Text(data.parkDone ? "本周已完成" : "本周还没做").foregroundStyle(.secondary)   // Android: LabeledContent does not grey its value
+                // one word pair for every weekly row, 方舟's 剿灭 too (HIG Writing: consistent terminology); 周本 is done
+                // after its three reward claims
+                Text(data.parkDone ? "本周已做完" : "本周还没做完").foregroundStyle(.secondary)   // Android: LabeledContent does not grey its value
             }
-            // the name, and the boss under it in grey (the system's subtitle in a LabeledContent label)
-            LabeledContent {
-                Text(data.weeklyBossDone ? "本周已领满" : "本周还没领满").foregroundStyle(.secondary)
-            } label: {
-                #if os(Android)
-                // skip-ui lays a label's two bare Texts side by side (战歌重奏 floated mid-row): stacked here, the boss
-                // grey under the name as iOS draws it (HIG review 1014)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("周本")
-                    Text("战歌重奏").font(.subheadline).foregroundStyle(.secondary)
-                }
-                #else
-                Text("周本")
-                Text("战歌重奏")
-                #endif
+            // no fixed grey line under it: 「战歌重奏」 is the mode's name, not the boss, and did not follow the stepper below
+            LabeledContent("周本") {
+                Text(data.weeklyBossDone ? "本周已做完" : "本周还没做完").foregroundStyle(.secondary)
             }
             // A small whole number in a fixed range is a stepper with its value beside it (HIG Steppers: "Make the value
             // that a stepper affects obvious."; the App's own 充值了 N 次, MonthCardRows.swift). − is off at 1, + at 20,
@@ -242,8 +266,10 @@ struct WuwaPage: View {
                     bossIndex = n
                     onWeeklyBossIndex(n)
                 }), in: Self.bossRange) {
+                    // the value names the boss when the machine knows the one at this index (周本.名字), so it follows the stepper
                     LabeledContent("周本打第几个") {
-                        Text(verbatim: String(bossIndex)).foregroundStyle(.secondary)
+                        Text(verbatim: data.weeklyBossNames[bossIndex].map { "\(bossIndex) · \($0)" } ?? String(bossIndex))
+                            .foregroundStyle(.secondary)
                     }
                 }
             }

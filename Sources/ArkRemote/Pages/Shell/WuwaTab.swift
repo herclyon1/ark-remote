@@ -16,6 +16,8 @@ struct WuwaTab: View {
         var parkDone = false
         var bossDone = false
         var bossIndex = 1
+        /// 周本.名字: the boss of the machine's 第几个周本 (weeklyboss.py settings), "" when it does not know it.
+        var bossName = ""
 
         init(_ snap: JSONValue?) {
             let relay = snap?["relay"] ?? .object([:])
@@ -26,6 +28,7 @@ struct WuwaTab: View {
             bossDone = wb["本周已打"]?.truthy ?? false
             let n = Int(wb["第几个周本"]?.number ?? 1)
             bossIndex = n == 0 ? 1 : n
+            bossName = wb["名字"]?.string ?? ""
         }
     }
 
@@ -47,6 +50,7 @@ struct WuwaTab: View {
                                 tacetShots: edits[Self.tacetKey]?.to.bool ?? sentTacet ?? bits.tacetShots,
                                 parkDone: bits.parkDone, weeklyBossDone: bits.bossDone,
                                 weeklyBossIndex: Int(edits[Self.bossKey]?.to.number ?? Double(bossBase)),
+                                weeklyBossNames: bits.bossName.isEmpty ? [:] : [bits.bossIndex: bits.bossName],
                                 tags: tags(master))
         WuwaPage(data: data, onChange: { path, v in
             let machine = ewEffectiveMaster(master, lastGood: lastGood).0

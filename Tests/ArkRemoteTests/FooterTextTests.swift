@@ -49,13 +49,16 @@ import XCTest
     func testWuwaDailyFooterHasNoRowNames() {
         let rows = ewRows(WuwaSchema.group, .wuwaSample, values: [:])
         XCTAssertFalse(rows.isEmpty)
-        let foot = WuwaPage.dailyFoot(rows)
-        assertNoNameList(foot, rows.map(\.label) + ["无音区结算截图"])
+        let foot = WuwaPage.dailyFoot(rows.filter { $0.path != WuwaSchema.nestPath })
+        assertNoNameList(foot, rows.map(\.label) + ["日报附无音区结算图"])
         assertNoLabelPrefix(foot)
-        // the switch's sentence is still there, and the 残象聚落 line names no single settlement (W2)
+        // the switch's sentence is still there; the 残象聚落 line is in its own card's footer and names no single
+        // settlement (W2)
         XCTAssertTrue(foot.contains(tacetShotsHint), foot)
-        XCTAssertTrue(Self.has(foot, #"前\s*(两|2)\s*个"#), "only the first two settlements count: \(foot)")
-        XCTAssertFalse(foot.contains("落渊南丘"), foot)
+        let nest = WuwaPage.nestFoot(rows.filter { $0.path == WuwaSchema.nestPath })
+        XCTAssertTrue(Self.has(nest, #"前\s*(两|2)\s*个"#), "only the first two settlements count: \(nest)")
+        XCTAssertFalse(nest.contains("落渊南丘"), nest)
+        XCTAssertFalse(foot.contains("前两个"), "said once, under its own card: \(foot)")
     }
 
     func testWuwaWeeklyFooterHasNoRowNames() {
