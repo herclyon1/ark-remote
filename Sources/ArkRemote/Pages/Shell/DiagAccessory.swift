@@ -37,7 +37,7 @@ struct DiagMarkMenu: View {
                     // .iconOnly drops the title on Android, and skip-ui gives a Material icon its own name as the
                     // content description (Image.swift Icon(contentDescription: name)): TalkBack read
                     // 「Icons.Outlined.Feedback」 (uiautomator tree, ark37 10-14). iOS names it by the Label's title.
-                    .accessibilityLabel(Self.name)
+                    .accessibilityLabel(Text(Self.name))   // skip-fuse-ui takes Text or LocalizedStringKey only
                 #endif
             }
         }
