@@ -338,7 +338,7 @@ enum InventoryCalc {
     var busy = false
     /// need.json as read, `{built, games: [...]}`.
     var need: JSONValue?
-    /// The last need.json error (the reading still goes ahead without it).
+    /// This read's need.json error, "" when the table was read (cleared at the start of each read).
     var err = ""
     /// The GETs loadNeed makes; tests replace it so no request leaves the Mac.
     @ObservationIgnored var fetchNeed: (String) async throws -> (Data, Int) = { try await httpFetch($0, noStore: true) }
@@ -503,15 +503,38 @@ enum InventoryCalc {
         busy = true
         defer { busy = false }
         var out = InventoryReading(takenAt: clockHHMM(ms: nowMs()), games: [])
+        err = ""
         do { try await loadNeed(force: force) } catch { err = errorMessage(error) }
         if let sk = t?["sk"], sk.truthy {
-            out.games.append(await endfield(sk))
+            // no usable need table: the rows would carry no group and the page would blame 森空岛
+            if need == nil { out.games.append(Self.needMissing(err)) }
+            else if let gap = needGap() { out.games.append(Self.needLacks(gap)) }
+            else { out.games.append(await endfield(sk)) }
         } else {
             out.games.append(InventoryGame(game: Self.gameName, gameId: Self.gameIdEndfield, error: "没配森空岛"))
         }
         data = out
         at = nowMs()
         return out
+    }
+
+    /// The game shown when no need table could be read (neither copy) and none is held from an earlier read: says the
+    /// table is what is missing, not 森空岛 (森空岛 is not asked, since nothing could be worked out from its answer).
+    static func needMissing(_ err: String) -> InventoryGame {
+        InventoryGame(game: gameName, gameId: gameIdEndfield,
+                      error: "这次是需求表没拿到（不是森空岛回报的），算不出人份：" + (err.isEmpty ? "原因不明" : err))
+    }
+
+    /// What the held need table lacks for 终末地, nil when it has the game and its rows.
+    func needGap() -> String? {
+        guard let ng = needFor(Self.gameIdEndfield) else { return "需求表拿到了，但里面没有终末地这一项" }
+        let rows = (standardFor(ng) ?? ng)["rows"]?.array ?? []
+        return rows.isEmpty ? "需求表里终末地这一项没有材料" : nil
+    }
+
+    /// The game shown when the need table is held but lacks 终末地 or its rows (森空岛 is not asked).
+    static func needLacks(_ gap: String) -> InventoryGame {
+        InventoryGame(game: gameName, gameId: gameIdEndfield, error: gap + "（不是森空岛回报的），算不出人份")
     }
 
     /// inventory.js status(): "森空岛" when a 森空岛 session is stored, else "".

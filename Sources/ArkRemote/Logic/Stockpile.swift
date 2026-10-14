@@ -62,7 +62,7 @@ enum StockpileContent: Sendable, Equatable {
     case loading
     /// The sections and the footnote lines (joined with line breaks under the last card).
     case list(sections: [StockSection], footnote: [String])
-    /// 「森空岛没有返回仓库数据。」
+    /// 「森空岛没有返回仓库数据。」, or the need table's rows carrying no group (Stockpile.ungrouped).
     case zero(String)
     /// Empty state: title, caption, button label, and what the button does.
     case empty(title: String, text: String, button: String, action: StockpileEmptyAction)
@@ -217,6 +217,9 @@ enum StockpileEmptyAction: Sendable, Equatable {
         return "需求表 \(m)月\(d)日 核对过最新六星"
     }
 
+    /// Rows came back but none has a group: the need table's grouping does not match, not 森空岛 (Inventory.needLacks wording).
+    static let ungrouped = "需求表里终末地的材料都没有分组，和这次读到的库存对不上（不是森空岛回报的），列不出来"
+
     /// stockpile.js listHtml(g, d, err): sections and footnote for one game.
     static func list(_ g: JSONValue, _ d: JSONValue, err: String) -> StockpileContent {
         var nf = NumFormat()
@@ -227,7 +230,7 @@ enum StockpileEmptyAction: Sendable, Equatable {
             let name = gr.jsString
             if let i = groups.firstIndex(where: { $0.name == name }) { groups[i].rows.append(r) } else { groups.append((name, [r])) }
         }
-        if groups.isEmpty { return .zero("森空岛没有返回仓库数据。") }
+        if groups.isEmpty { return .zero(rows.isEmpty ? "森空岛没有返回仓库数据。" : ungrouped) }
         let order = (g["groups"]?.array ?? []).map { $0.jsString }
         let rank = { (n: String) -> Int in order.firstIndex(of: n) ?? Int.max }
         // stable: unnamed ones keep file order
