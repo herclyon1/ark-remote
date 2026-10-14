@@ -446,7 +446,11 @@ step("ph.copylink", "phone", "复制免输入链接 → 按钮自己写「链接
      absent=["复制免输入链接"], timeout=5)
 step("ph.paste.bad", "phone", "粘贴密钥串 填乱码 → 存 → 「没存上」",
      [tap("粘贴密钥串"), ("wait", 1.0), ("field", {"t": "", "kind": ["TextField", "TextView", "EditText"]}, "zzz"), tap("存")],
-     expect=["没存上"], timeout=6,
+     # the timeout runs from the step's start, so it also pays for the actions above (two waits 1.8 s, the sheet's
+     # locate, typing): 0.5.0 passed in 6.4 s, 0.5.1 (a footer in the sheet) used up the 6 s before 存 closed the sheet,
+     # its dump at the deadline still holding the sheet sliding off (gamepages-1007, 10-14); the alert itself follows
+     # the sheet's close within the next 2-3 s (ph.paste.close passed in 2.3-2.7 s)
+     expect=["没存上"], timeout=10,
      # iOS: the field shows as a TextField with its prompt (app-r1 fix round 2); before, only as its cell
      ios={"do": [tap("粘贴密钥串"), ("wait", 1.0), tap({"t": "", "kind": ["TextField", "Cell"]}, scroll=False), ("wait", 0.8),
                  ("type", "zzz"), tap("存")]},
