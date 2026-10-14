@@ -187,10 +187,15 @@ struct EWSaveBar: ViewModifier {
     @ViewBuilder
     private func titled(_ content: Content) -> some View {
         if let title {
-            content.navigationTitle(edits.isEmpty ? title : "待保存 \(edits.count) 项")
+            content.navigationTitle(Self.title(tab: title, count: edits.count))
         } else {
             content
         }
+    }
+
+    /// The bar's title: the tab's name while nothing waits, 「待保存 N 项」 over the shared pool while changes wait.
+    static func title(tab: String, count: Int) -> String {
+        count == 0 ? tab : "待保存 \(count) 项"
     }
 }
 
