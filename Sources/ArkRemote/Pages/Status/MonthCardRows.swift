@@ -25,7 +25,7 @@ struct MonthCardReminder: View {
             Section("月卡快到期") {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(soon.map { "\($0.game)还剩 \($0.entry.left) 天" }.joined(separator: "、"))
-                    Text(soon.map { "\($0.game)最后一次领取是 \(MonthCardStore.md($0.entry.last))" }.joined(separator: "；")
+                    Text(soon.map { "\($0.game)领到 \(MonthCardStore.md($0.entry.last))" }.joined(separator: "；")
                          + "。续费后点下面的月卡行登记")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
@@ -99,7 +99,7 @@ struct MonthCardPage: View {
                 if let e {
                     // the card: the game's tab icon (his 09-14 project colour icons, design rule 6) and name, then the day
                     // count large (orange from 5 days left, red once lapsed, else the primary colour) with 「还剩」 and
-                    // 「天」 small and grey, 「最后一次领取 X月X日」 grey under it, the sync note last
+                    // 「天」 small and grey, 「领到 X月X日」 grey under it, the sync note last
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
                             decorativeImage(Self.icon[game] ?? "tab-arknights").resizable().scaledToFit()
@@ -107,7 +107,7 @@ struct MonthCardPage: View {
                             Text(game).font(.subheadline).bold()
                         }
                         dayCount(e)
-                        Text("最后一次领取 \(MonthCardStore.md(e.last))").foregroundStyle(.secondary)
+                        Text("领到 \(MonthCardStore.md(e.last))").foregroundStyle(.secondary)
                         if e.local {
                             Text(MonthCardStore.syncNote).font(.footnote).foregroundStyle(.secondary)
                         }
@@ -131,14 +131,14 @@ struct MonthCardPage: View {
                     let n = count
                     let to = store.after(game, add: n)
                     ask = MonthCardAsk(title: "登记充值 \(n) 次？",
-                                       message: "\(game)月卡加 \(MonthCardStore.days * n) 天，最后一次领取改到 \(MonthCardStore.md(to))。",
+                                       message: "\(game)月卡加 \(MonthCardStore.days * n) 天，领到 \(MonthCardStore.md(to))。",
                                        ok: "登记", add: n, left: nil, last: to)
                 }
                 .modifier(MonthCardAsking(ask: $ask, kind: "add", confirm: register))
             } header: {
                 Text("登记充值")
             } footer: {
-                Text("买一次加 \(MonthCardStore.days) 天，接在最后一次领取后面。")
+                Text("买一次加 \(MonthCardStore.days) 天，接在原来的截止日后面。")
             }
             Section {
                 // Health's Add Data row: the name on the left, the number field taking the rest, right-aligned
@@ -237,7 +237,7 @@ struct MonthCardPage: View {
     private func setLeft() {
         guard let x = leftValue else { return }
         let to = MonthCardStore.plus(MonthCardStore.today(), x)
-        ask = MonthCardAsk(title: "对准为还剩 \(x) 天？", message: "\(game)月卡最后一次领取改到 \(MonthCardStore.md(to))。",
+        ask = MonthCardAsk(title: "对准为还剩 \(x) 天？", message: "\(game)月卡改成领到 \(MonthCardStore.md(to))。",
                            ok: "对准", add: nil, left: x, last: to)
     }
 }

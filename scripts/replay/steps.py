@@ -234,7 +234,7 @@ step("d39.status.top", "d39", "D39：状态根页滑到底再点「状态」→ 
 
 # ------------------------------------------------------------------ 月卡
 step("mc.open", "monthcard", "终末地月卡行 → 月卡页",
-     [tap({"t": "终末地", "after": "调试模式"})], expect=["终末地月卡", "~最后一次领取"])
+     [tap({"t": "终末地", "after": "调试模式"})], expect=["终末地月卡", "~领到"])
 step("mc.plus", "monthcard", "＋ → 充值了 2 次", [tap(PLUS)], expect=["充值了 2 次"])
 step("mc.minus", "monthcard", "－ → 回到 1 次", [tap(MINUS)], expect=["充值了 1 次"])
 step("mc.register.ask", "monthcard", "登记 → 弹「登记充值 1 次？」", [tap("登记", region="content")], expect=["登记充值 1 次？"])

@@ -57,7 +57,7 @@ import XCTest
         let last = MonthCardStore.plus(today, 10)
         store.records["终末地"] = MonthCardRecord(last: last, at: now, sentAt: now)
         XCTAssertEqual(store.entry("终末地"), MonthCardEntry(last: last, left: 10, local: true))
-        XCTAssertEqual(MonthCardStore.line(store.entry("终末地")), "还剩 10 天 · 最后一次领取 \(MonthCardStore.md(last))")
+        XCTAssertEqual(MonthCardStore.line(store.entry("终末地")), "还剩 10 天 · 领到 \(MonthCardStore.md(last))")
         let first = store.after("终末地", add: 1)
         XCTAssertEqual(first, MonthCardStore.plus(today, 40))
         store.records["终末地"] = MonthCardRecord(last: first, at: now + 1, sentAt: now + 1)
