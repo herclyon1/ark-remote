@@ -222,8 +222,17 @@ struct WuwaPage: View {
             LabeledContent {
                 Text(data.weeklyBossDone ? "本周已领满" : "本周还没领满").foregroundStyle(.secondary)
             } label: {
+                #if os(Android)
+                // skip-ui lays a label's two bare Texts side by side (战歌重奏 floated mid-row): stacked here, the boss
+                // grey under the name as iOS draws it (HIG review 1014)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("周本")
+                    Text("战歌重奏").font(.subheadline).foregroundStyle(.secondary)
+                }
+                #else
                 Text("周本")
                 Text("战歌重奏")
+                #endif
             }
             // A small whole number in a fixed range is a stepper with its value beside it (HIG Steppers: "Make the value
             // that a stepper affects obvious."; the App's own 充值了 N 次, MonthCardRows.swift). − is off at 1, + at 20,
