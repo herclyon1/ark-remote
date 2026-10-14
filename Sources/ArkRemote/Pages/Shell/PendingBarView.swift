@@ -32,7 +32,12 @@ struct SubtitleLine: View {
                     Text(verbatim: bar.text).foregroundStyle(.secondary)
                     Text("不等了").foregroundStyle(.tint)
                 }
+                // a 44 pt tall target on a subheadline-high line (HIG Accessibility: 44x44 pt default hit region on
+                // iOS; HIG review 1014), the line's look and place unchanged: the padding is taken back outside
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
             }
+            .padding(.vertical, -12)
             // the status itself grey and passive, only its action in the accent colour, as Mail's line with 「Undo Send」
             // (P15; HIG Feedback: "it often works well to display status information in a passive way so that people
             // can view it when they need it"); the same slot is grey for the 已派 note below
