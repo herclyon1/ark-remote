@@ -111,7 +111,7 @@ struct StatusPage: View {
         // Android: a tap outside the time fields or back with the keyboard up checks them, as the web input's blur
         // (view.js:1235); without this the check waited for a tab switch
         .clearsFocusOnOutsideTap()
-        // the title (the tab's name, or 「待保存 N 项」 while changes wait, view.js:1554) is set by StatusTab's EWSaveBar
+        // the title (the tab's name) is set by StatusTab's EWSaveBar
     }
 
     /// The small line under a switch row (pending.js:50-73; index.html:769-773): grey, red for 没生效, 「再发一次」 in link colour.

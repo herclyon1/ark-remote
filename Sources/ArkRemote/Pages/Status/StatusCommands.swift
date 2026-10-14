@@ -196,7 +196,7 @@ enum StatusCommands {
             } else if let i = d.plan.firstIndex(where: { $0.queueName.map(StatusSwitchID.queue) == id }) {
                 d.plan[i].runsToday = on
             }
-            d.switchTags[id] = .unsaved("待保存")
+            d.switchTags[id] = .unsaved("未寄出")
         }
     }
 }

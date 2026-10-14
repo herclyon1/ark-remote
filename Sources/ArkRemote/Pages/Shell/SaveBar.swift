@@ -1,12 +1,14 @@
 import SwiftUI
 
-// The one save bar of every tab (view.js updateBar / #confirm): ✕ / 「待保存 N 项」 / ✓ over the one pool of unsaved
-// changes (Logic/Edits.swift), and its 「确认这次修改」 review: 保存 → 确认 → 寄出, nothing goes out on a change alone.
+// The one save bar of every tab (view.js updateBar / #confirm): ✕ / ✓ over the one pool of unsent changes
+// (Logic/Edits.swift), 「N 项未寄出」 under the title (TopNotices), and its 「寄出前看一下」 review: nothing goes out on a
+// change alone. One verb throughout, 寄出, as Mail says Send from the button to the sent state.
 // Moved from Pages/Endfield/EWLive.swift: it is the shell's (tab pages only put `.modifier(EWSaveBar(title:))` on).
 
 /// The edit bar and its review sheet, on every tab, over the one pool of unsaved changes (Logic/Edits.swift): the
 /// count, ✕ and ✓ cover the changes of all tabs, as the web page's one top bar does.
-/// `title`: the page title when nothing waits; while editing the title is 「待保存 N 项」 (view.js:1554 swaps the same span).
+/// `title`: the page title, kept while changes wait (Passwords › New Password keeps its title while editing, P12; HIG
+/// Toolbars: the title says which page this is). The count is the line under it (unsentLine, TopNotices).
 ///
 /// ✕ and ✓ are the system's cancel / confirm toolbar buttons (iOS 26 `Button(role:action:)`: the system draws the
 /// symbol, ✓ prominent), the pair a sheet editing something carries (BOARD/app-page-references.txt P12: 密码 › 新建,
@@ -80,7 +82,7 @@ struct EWSaveBar: ViewModifier {
                             }
                         }
                     }
-                    .navigationTitle("确认这次修改")
+                    .navigationTitle("寄出前看一下")
                     #if !os(macOS)
                     .navigationBarTitleDisplayMode(.inline)
                     #endif
@@ -193,10 +195,11 @@ struct EWSaveBar: ViewModifier {
         }
     }
 
-    /// The bar's title: the tab's name while nothing waits, 「待保存 N 项」 over the shared pool while changes wait.
-    static func title(tab: String, count: Int) -> String {
-        count == 0 ? tab : "待保存 \(count) 项"
-    }
+    /// The bar's title: the tab's name, also while changes wait (it said 「待保存 N 项」 and the page lost its name).
+    static func title(tab: String, count: Int) -> String { tab }
+
+    /// The line under the title while changes wait over the shared pool: 「N 项未寄出」; nil when none wait.
+    static func unsentLine(count: Int) -> String? { count == 0 ? nil : "\(count) 项未寄出" }
 }
 
 /// When the current press on the review sheet began (Android). skip-ui's simultaneous DragGesture with minimumDistance 0

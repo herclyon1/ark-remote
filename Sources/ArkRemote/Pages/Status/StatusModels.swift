@@ -115,7 +115,7 @@ struct StatusBoss: Hashable, Identifiable {
 
 /// The small line under a row (pending.js applyPending; index.html:769-773): grey, or red with 「再发一次」.
 enum StatusTag: Hashable {
-    case unsaved(String)                 // 待保存
+    case unsaved(String)                 // 未寄出
     case sent(String, again: Bool)       // 已寄出 … / 没回执 · 已寄出 HH:MM (+ 再发一次 past 10 h)
     case bad(String)                     // 没生效 · … + 再发一次, red
     case applied(String)                 // 已应用 HH:MM

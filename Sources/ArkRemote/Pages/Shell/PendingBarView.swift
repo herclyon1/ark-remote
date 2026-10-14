@@ -13,7 +13,8 @@ import SwiftUI
 // stays a row over the list with its own button, as in 0.4.4.
 
 #if !os(Android)
-/// The line itself: the pending text (a red cross while something was refused), or the last status note.
+/// The line itself: 「N 项未寄出」 while changes wait to be sent, else the pending text (a red cross while something was
+/// refused), else the last status note.
 struct SubtitleLine: View {
     /// true: under the large title (leading, as Mail's 「Undo Send」); false: under the collapsed title (centred with it,
     /// smaller).
@@ -21,7 +22,10 @@ struct SubtitleLine: View {
     @State var asking = false
 
     var body: some View {
-        if let bar = Pending.shared.bar {
+        if let unsent = EWSaveBar.unsentLine(count: EWEdits.shared.items.count) {
+            // the count of the changes not sent yet, where the title stays the page's name (SaveBar.swift)
+            Text(verbatim: unsent).foregroundStyle(.secondary).modifier(SubtitlePlace(large: large))
+        } else if let bar = Pending.shared.bar {
             Button { asking = true } label: {
                 HStack(spacing: 4) {
                     if bar.hasMismatch {
@@ -30,7 +34,9 @@ struct SubtitleLine: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(Color.red).accessibilityHidden(true)
                     }
                     Text(verbatim: bar.text).foregroundStyle(.secondary)
-                    Text("不等了").foregroundStyle(.tint)
+                    // named for what it does: the phone stops showing the progress; nothing is taken back (Mail's
+                    // 「Undo Send」 says the one thing that happens)
+                    Text(PendingBar.clearLabel).foregroundStyle(.tint)
                 }
             }
             // the status itself grey and passive, only its action in the accent colour, as Mail's line with 「Undo Send」
@@ -40,7 +46,7 @@ struct SubtitleLine: View {
             .confirmationDialog(bar.text, isPresented: $asking, titleVisibility: .visible) {
                 Button(PendingBar.clearLabel, role: .destructive) { Pending.shared.clearAll() }
             } message: {
-                Text("只是这台手机不再等回执，已经寄出的不会撤回。")
+                Text(PendingBar.clearNote)
             }
         } else if let n = Feedback.shared.note {
             Text(verbatim: Feedback.line(n))
@@ -63,9 +69,11 @@ struct SubtitlePlace: ViewModifier {
 }
 #endif
 
-/// Android: the #pendbar row over the list (grey footnote, the 「不等了，清掉」 button), or the last status note.
+/// Android: the #pendbar row over the list (grey footnote, the 「不再显示进度」 button), or the last status note. The button
+/// asks first, as on iOS (one name and one flow for one action on both platforms).
 struct PendingBarView: View {
     let bar: PendingBar
+    @State var asking = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -77,13 +85,32 @@ struct PendingBarView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
-            Button(PendingBar.clearLabel) { Pending.shared.clearAll() }
+            Button(PendingBar.clearLabel) { asking = true }
                 .font(.subheadline)
                 .buttonStyle(.bordered)
+                .confirmationDialog(bar.text, isPresented: $asking, titleVisibility: .visible) {
+                    Button(PendingBar.clearLabel, role: .destructive) { Pending.shared.clearAll() }
+                } message: {
+                    Text(PendingBar.clearNote)
+                }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// Android: 「N 项未寄出」 in the same place while changes wait to be sent (iOS: the line under the title, SubtitleLine).
+struct UnsentRow: View {
+    let text: String
+
+    var body: some View {
+        Text(verbatim: text)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

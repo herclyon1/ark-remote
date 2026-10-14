@@ -150,7 +150,9 @@ struct TopNotices<Content: View>: View {
         #if os(Android)
         VStack(spacing: 0) {
             if AppUpdate.shared.showsBanner { UpdateBanner() }
-            if let bar = Pending.shared.bar {
+            if let unsent = EWSaveBar.unsentLine(count: EWEdits.shared.items.count) {
+                UnsentRow(text: unsent)
+            } else if let bar = Pending.shared.bar {
                 PendingBarView(bar: bar)
             } else if let note = Feedback.shared.note {
                 StatusNoteRow(note: note)   // the last status line (Pages/Shell/Feedback.swift)
@@ -161,7 +163,7 @@ struct TopNotices<Content: View>: View {
         // P15: the line under the large title, Mail's 「Undo Send」 place, and under the small title once the list has
         // scrolled and the title has collapsed (.largeSubtitle alone left it out then) (Pages/Shell/PendingBarView.swift)
         content.toolbar {
-            if Pending.shared.bar != nil || Feedback.shared.note != nil {
+            if !EWEdits.shared.items.isEmpty || Pending.shared.bar != nil || Feedback.shared.note != nil {
                 ToolbarItem(placement: .largeSubtitle) { SubtitleLine() }
                 ToolbarItem(placement: .subtitle) { SubtitleLine(large: false) }
             }

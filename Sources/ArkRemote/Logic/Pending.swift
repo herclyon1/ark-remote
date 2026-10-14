@@ -63,7 +63,10 @@ enum PendingTag: Sendable, Equatable {
 struct PendingBar: Sendable, Equatable {
     let text: String
     let hasMismatch: Bool
-    static let clearLabel = "不等了，清掉"
+    /// What the button does: the phone stops showing the progress; the order is not taken back (it said 「不等了，清掉」,
+    /// which read as undoing the change).
+    static let clearLabel = "不再显示进度"
+    static let clearNote = "改动已经寄出，照样会生效，只是这台手机不再显示进度。"
 }
 
 @MainActor @Observable final class Pending {
@@ -167,7 +170,8 @@ struct PendingBar: Sendable, Equatable {
             if isLost(p) { return .sent(text: Self.lostText) }
             // pending.js:58-59: past 10 h the mailbox (12 h) may have dropped it; resent only by a tap, never automatically
             if Self.isStale(p) { return .sent(text: "没回执 · 已寄出 \(Self.hhmm(at))") }
-            return .sent(text: "已寄出 \(Self.hhmm(at)) · \(waitNote)")
+            // the row says when; what happens next is the line under the title (bar), said once
+            return .sent(text: "已寄出 \(Self.hhmm(at))")
         }
         if editing { return nil }
         guard let a = acked[key], nowSec() - a.at <= 24 * 3600 else { return nil }
@@ -181,9 +185,10 @@ struct PendingBar: Sendable, Equatable {
     var waitNote: String {
         // the machine's `at` against ntfy's clock, not the phone's (Relay.serverNowMs, edge audit 3)
         let fresh = relay.snapAt.map { relay.serverNowMs() / 1000 - Double($0) < Live.freshMs / 1000 } ?? false
-        guard Live.shared.alive || fresh else { return "机器开机后生效" }
+        // one verb, 生效, in all three cases (「回执」 is the App's own word)
+        guard Live.shared.alive || fresh else { return "开机后生效" }
         let running = fresh && !(relay.snap?["run"]?["在跑的"]?.array ?? []).isEmpty
-        return running ? "机器在跑，跑完再生效" : "几秒内回执"
+        return running ? "跑完再生效" : "几秒内生效"
     }
 
     /// pending.js:58: no receipt for more than 10 h since the last send (the resend when there is one).
@@ -249,7 +254,7 @@ struct PendingBar: Sendable, Equatable {
             ? "\(bad) 项改动机器没接受（见红字）" + (n - bad > 0 ? "，另 \(n - bad) 项还在等回执" : "")
             : lost > 0 ? "\(lost) 项改动机器没收到（关机超过 12 小时），要的话点「再发一次」"
                 + (n - lost > 0 ? "，另 \(n - lost) 项还在等回执" : "")
-            : queued ? "\(n) 项改动\(Self.queuedText)" : "\(n) 项改动已寄出 · \(waitNote)"
+            : queued ? "\(n) 项改动\(Self.queuedText)" : "\(n) 项改动已寄给机器 · \(waitNote)"
         return PendingBar(text: text, hasMismatch: bad > 0)
     }
 

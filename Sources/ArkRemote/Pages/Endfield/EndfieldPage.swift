@@ -218,8 +218,10 @@ struct EndfieldMorePage: View {
             }
         }
         .keyboardDone()
-        // the ✕ / ✓ of 「待保存」 here too, so a change made on this page is saved from it
+        // the ✕ / ✓ here too, so a change made on this page is sent from it
         .modifier(EWSaveBar(title: name))
+        // and 「N 项未寄出」 under its title, as on the tab roots (the title stays the page's name)
+        .topNotices()
         #if os(iOS)
         // a pushed page's title small and centred, as Shortcuts' pushed editors and Health's pushed lists (P5); iOS only
         // (MonthCardPage says why)

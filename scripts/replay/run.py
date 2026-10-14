@@ -43,7 +43,7 @@ class Abort(Exception):
 
 DISCARD_SEL = ["放弃", "xmark"]       # the save bar's ✕ (steps.DISCARD)
 DISCARD_OK = "放弃改动"                # its confirmation (Pages/Shell/SaveBar.swift)
-CLEAR_SEL = "不等了，清掉"             # steps.CLEAR
+CLEAR_SEL = "不再显示进度"             # steps.CLEAR
 PENDING_LINE = "re:项改动"             # the pending line under the title, iOS (Pages/Shell/PendingBarView.swift)
 
 
@@ -258,8 +258,8 @@ class Runner:
             # the action sheet takes no touch while it is still coming up (UIKit): tap 放弃改动 until the sheet is gone
             self.tap_until_gone(DISCARD_OK, step)
         elif kind == "clear":
-            # 「不等了，清掉」: iOS asks from the pending line under the title (Pages/Shell/PendingBarView.swift
-            # SubtitleLine); Android keeps the button on the row
+            # 「不再显示进度」: iOS asks from the pending line under the title (Pages/Shell/PendingBarView.swift
+            # SubtitleLine); Android keeps the button on the row, which asks the same question (PendingBarView)
             if self.drv.platform == "ios":
                 # right after a send the review sheet is still closing and a tap on the line can be lost (app-r1 local
                 # ntfy run, step 75 ef.protocol right after ef.send): tap the line again while its sheet is not up
@@ -276,6 +276,7 @@ class Runner:
                 time.sleep(0.6)
             else:
                 self.act(("tap", CLEAR_SEL), step)
+                self.tap_until_gone(CLEAR_SEL, step)   # the dialog's button of the same name
         elif kind == "tab":
             hits = self.find({"t": rest[0], "region": "bottom"}, self.dump(self.cache is None))
             if not hits:
@@ -768,7 +769,7 @@ class Runner:
         return n
 
     def tap_until_gone(self, sel, step):
-        """Tap a confirmation's button (放弃改动 / 不等了，清掉) until its sheet is gone. A sheet that comes up takes no
+        """Tap a confirmation's button (放弃改动 / 不再显示进度) until its sheet is gone. A sheet that comes up takes no
         touch for a moment (UIKit), so a first tap can be lost; but a sheet that is only closing slowly (a loaded Mac)
         still lists its button for a while, and a second tap at that place lands on the page under it (see dismiss()).
         So the button is tapped again only when the sheet is still up well after the last tap."""

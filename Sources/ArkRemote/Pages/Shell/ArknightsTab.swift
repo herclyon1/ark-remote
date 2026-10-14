@@ -51,7 +51,9 @@ struct ArknightsTab: View {
                 refresh()
             }
         }, edited: edited)
-            .modifier(EWSaveBar(title: "明日方舟"))   // the tab's own name (HIG Toolbars: "Don't title windows with your app name."); 「待保存 N 项」 while editing
+            // the tab's own label, 「方舟」, as every other tab's title is its label (Music: the 「Library」 tab opens
+            // 「Library」); 「明日方舟」 would not fit the tab bar (HIG Toolbars: "Don't title windows with your app name.")
+            .modifier(EWSaveBar(title: "方舟"))
             .task { await reload() }
             // Pull to refresh asks the machine to report again (view.js:1150 → live.js:21 ping: {action:"refresh"}). The
             // control closes once the ask is out instead of spinning for the up to 11 s the answer takes (HIG Refresh

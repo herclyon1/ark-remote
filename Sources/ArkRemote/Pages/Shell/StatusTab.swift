@@ -84,6 +84,6 @@ struct StatusTab: View {
             } message: {
                 Text(ask?.message ?? "")
             }
-            .modifier(EWSaveBar(title: "状态"))   // the tab's own name (HIG Toolbars: "Don't title windows with your app name."); ✕ / 「待保存 N 项」 / ✓ over every tab's changes (view.js:1551-1555)
+            .modifier(EWSaveBar(title: "状态"))   // the tab's own name (HIG Toolbars: "Don't title windows with your app name."); ✕ / ✓ over every tab's changes (view.js:1551-1555)
     }
 }
