@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android's HTTP stack refuses cleartext by default (targetSdk 28+). The app talks https only, except to the replay
+     test's local servers (Net.swift loopbackOverride: 127.0.0.1, localhost, and 10.0.2.2, the emulator's alias of the
+     host), which the ntfy stream (NtfyStreamer.kt) reaches over http. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

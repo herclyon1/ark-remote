@@ -24,9 +24,10 @@
 //
 // Not a straight port:
 //   · EventSource (SSE) → ntfy's `/json` stream (`NtfyStream`): on iOS / macOS read with URLSession.bytes(for:) and
-//     AsyncBytes.lines, on Android (no AsyncBytes in swift-corelibs-foundation) through a URLSessionDataDelegate;
+//     AsyncBytes.lines, on Android with Android's own HTTP stack, a blocking readLine()
+//     per stream (NtfyStreamer.kt; FoundationNetworking's data task kept a core busy while idle, 0.5.2 r3);
 //     same event fields (event, topic, message, time). Reconnects after 3 s like EventSource. No polling
-//     (user 2026-09-02, quoted under Presence above); FoundationNetworking hands a delegate each chunk.
+//     (user 2026-09-02, quoted under Presence above).
 //   · setInterval → Task loops started by `start()`; document.hidden → `foreground`, set by the page from
 //     scenePhase; `visibilitychange` → `becameVisible()`; navigator.onLine / online / offline →
 //     `deviceOnline`, set by the page.
@@ -562,18 +563,35 @@ import SkipFuse   // @Observable types only drive the Android UI with SkipFuse i
 ///
 /// No polling fallback, like live.js (user 2026-09-02, see the file header).
 #if os(Android)
-/// swift-corelibs-foundation has no URLSession.AsyncBytes, so on Android the lines are cut from the delegate's chunks:
-/// FoundationNetworking's NativeProtocol.didReceive(data:) passes each libcurl chunk to
-/// `urlSession(_:dataTask:didReceive:)` as it arrives (swift-corelibs-foundation main, NativeProtocol.swift:96-141).
-final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+/// Read by Android's own HTTP stack (NtfyStreamer.kt): a thread per stream blocks in readLine() on the socket, so an idle
+/// open stream costs no CPU. The FoundationNetworking data task used here before 0.5.2 (swift-corelibs-foundation has no
+/// URLSession.AsyncBytes, so a URLSessionDataDelegate cut the lines) kept libdispatch's threads waking each other while
+/// the stream sat idle: 23-32 % of a core on the emulator with a mailbox set, ~0 without (0.5.2 r3 idle-cpu, r4).
+/// Each read has a generation number; its lines and its end come back through ArkRemoteAppDelegate with it, so a read
+/// that was closed or replaced can neither deliver nor reopen.
+final class NtfyStream: @unchecked Sendable {
+    /// The Kotlin entry points (ArkRemoteAppDelegate.registerStreamer at startup).
+    struct Hooks {
+        let open: (Int, String) -> Void
+        let close: (Int) -> Void
+    }
+    nonisolated(unsafe) static var hooks: Hooks?
+    /// Streams with a read open on the Kotlin side, by generation, until that read has ended.
+    nonisolated(unsafe) private static var reads: [Int: NtfyStream] = [:]
+    nonisolated(unsafe) private static var lastGen = 0
+    private static let readsLock = NSLock()
+
     private let topics: String
     private let since: String
     private let onEvent: @MainActor (JSONValue) -> Void
     private let lock = NSLock()
-    private var session: URLSession?
-    private var buffer = Data()
+    private var gen: Int?
     private var closed = false
     private var lastId: String?
+    /// Events not yet handed to the main actor, and whether a drain is under way: one drain at a time hands them over
+    /// in the order they came (edge audit 25).
+    private var queue: [JSONValue] = []
+    private var draining = false
 
     init(topics: String, since: String, onEvent: @escaping @MainActor (JSONValue) -> Void) {
         self.topics = topics
@@ -582,65 +600,83 @@ final class NtfyStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     }
 
     func open() {
+        guard let hooks = Self.hooks else {
+            DiagLog.shared.record("stream", ["state": "dropped", "error": "no stream reader"])
+            return
+        }
         lock.lock()
-        defer { lock.unlock() }
-        guard !closed, session == nil,
-              let url = URL(string: "\(ntfyBase)/\(topics)/json?since=\(lastId ?? since)") else { return }
-        let q = OperationQueue()
-        q.maxConcurrentOperationCount = 1
-        let s = URLSession(configuration: .default, delegate: self, delegateQueue: q)
-        var req = URLRequest(url: url)
-        req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        req.timeoutInterval = 24 * 3600
-        session = s
-        buffer = Data()
-        s.dataTask(with: req).resume()
+        guard !closed, gen == nil else { lock.unlock(); return }
+        let url = "\(ntfyBase)/\(topics)/json?since=\(lastId ?? since)"
+        Self.readsLock.lock()
+        Self.lastGen += 1
+        let g = Self.lastGen
+        Self.reads[g] = self
+        Self.readsLock.unlock()
+        gen = g
+        lock.unlock()
         DiagLog.shared.record("stream", ["state": "connecting"])
+        hooks.open(g, url)
     }
 
     func close() {
         lock.lock()
         closed = true
-        let s = session
-        session = nil
+        let g = gen
+        gen = nil
+        queue = []
         lock.unlock()
-        s?.invalidateAndCancel()
+        if let g { Self.hooks?.close(g) }
     }
 
-    private func deliver(_ events: [JSONValue]) {
-        lock.lock()
-        if let id = events.last?["id"]?.string { lastId = id }
-        let isClosed = closed
-        lock.unlock()
-        if events.contains(where: { $0["event"]?.string == "open" }) { DiagLog.shared.record("stream", ["state": "open"]) }
-        if isClosed { return }
-        let f = onEvent
-        // one task for the batch, so its events are handled in the order they came (edge audit 25)
-        Task { @MainActor in for e in events { f(e) } }
+    /// ArkRemoteAppDelegate.onStreamLine, on the read's thread.
+    static func line(gen: Int, line: String) {
+        readsLock.lock()
+        let found = reads[gen]
+        readsLock.unlock()
+        guard let s = found, let e = try? JSONValue.parse(Data(line.utf8)) else { return }
+        s.take(e, gen: gen)
     }
 
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        lock.lock()
-        buffer.append(data)
-        var lines: [Data] = []
-        while let nl = buffer.firstIndex(of: 0x0A) {
-            lines.append(buffer.subdata(in: buffer.startIndex..<nl))
-            buffer.removeSubrange(buffer.startIndex...nl)
-        }
-        lock.unlock()
-        let events = lines.compactMap { $0.isEmpty ? nil : try? JSONValue.parse($0) }
-        if !events.isEmpty { deliver(events) }
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        lock.lock()
-        let reconnect = !closed && self.session === session
-        if reconnect { self.session = nil }
-        lock.unlock()
-        session.finishTasksAndInvalidate()
-        DiagLog.shared.record("stream", ["state": reconnect ? "dropped" : "closed", "error": error.map { errorMessage($0) } ?? ""])
+    /// ArkRemoteAppDelegate.onStreamEnd, on the read's thread: reconnect 3 s later from the last id seen, unless closed.
+    static func ended(gen: Int, error: String) {
+        readsLock.lock()
+        let found = reads.removeValue(forKey: gen)
+        readsLock.unlock()
+        guard let s = found else { return }
+        s.lock.lock()
+        let reconnect = !s.closed && s.gen == gen
+        if s.gen == gen { s.gen = nil }
+        s.lock.unlock()
+        DiagLog.shared.record("stream", ["state": reconnect ? "dropped" : "closed", "error": error == "closed" ? "" : error])
         guard reconnect else { return }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 3) { [weak self] in self?.open() }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3) { [weak s] in s?.open() }
+    }
+
+    private func take(_ e: JSONValue, gen g: Int) {
+        lock.lock()
+        guard !closed, gen == g else { lock.unlock(); return }
+        if let id = e["id"]?.string { lastId = id }
+        queue.append(e)
+        let start = !draining
+        draining = true
+        lock.unlock()
+        if e["event"]?.string == "open" { DiagLog.shared.record("stream", ["state": "open"]) }
+        if start { Task { @MainActor in self.drain() } }
+    }
+
+    @MainActor private func drain() {
+        while true {
+            lock.lock()
+            guard !closed, !queue.isEmpty else {
+                queue = []
+                draining = false
+                lock.unlock()
+                return
+            }
+            let e = queue.removeFirst()
+            lock.unlock()
+            onEvent(e)
+        }
     }
 }
 #else

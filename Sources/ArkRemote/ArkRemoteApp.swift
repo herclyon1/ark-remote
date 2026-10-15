@@ -151,6 +151,30 @@ let logger: Logger = Logger(subsystem: "com.herclyon.arkremote", category: "ArkR
         Task { @MainActor in DiagShare.finish(state: state, message: message) }
     }
 
+    // MARK: ntfy stream (Android; NtfyStreamer.kt reads it, Logic/Live.swift NtfyStream owns it)
+
+    /// AndroidAppMain hands over the stream entry points once at startup: `open(gen, url)` starts reading `url` on a
+    /// thread of its own, `close(gen)` ends that read.
+    /* SKIP @bridge */public func registerStreamer(open: @escaping (Int, String) -> Void, close: @escaping (Int) -> Void) {
+        #if os(Android)
+        NtfyStream.hooks = NtfyStream.Hooks(open: open, close: close)
+        #endif
+    }
+
+    /// One non-empty line of stream `gen`. Called on that stream's thread, in the order the lines came.
+    /* SKIP @bridge */public func onStreamLine(gen: Int, line: String) {
+        #if os(Android)
+        NtfyStream.line(gen: gen, line: line)
+        #endif
+    }
+
+    /// Stream `gen` ended: `error` is "" when the server ended it, "closed" after close(), else why it failed.
+    /* SKIP @bridge */public func onStreamEnd(gen: Int, error: String) {
+        #if os(Android)
+        NtfyStream.ended(gen: gen, error: error)
+        #endif
+    }
+
     // MARK: In-app update (Android only; AppUpdater.kt drives these, Logic/AppUpdate.swift shows them)
 
     /// AndroidAppMain hands over the two Kotlin entry points once at startup: `check` (one GitHub request)

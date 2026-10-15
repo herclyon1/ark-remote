@@ -59,6 +59,8 @@ open class AndroidAppMain: Application {
         watchNetwork()
         // in-app update from GitHub Releases (AppUpdater.kt); hands Swift the check / install entry points
         AppUpdater.start(this)
+        // the ntfy stream's blocking reader (NtfyStreamer.kt); hands Swift the open / close entry points
+        NtfyStreamer.start()
     }
 
     /// navigator.onLine / online / offline: the system's default-network callback, event-driven (no timer,
