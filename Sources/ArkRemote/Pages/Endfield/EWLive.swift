@@ -214,6 +214,14 @@ struct EndfieldStockpilePage: View {
     @Environment(\.dismiss) var dismiss
     /// The material's picture, 28 pt at the default text size, growing with Dynamic Type (was a fixed 28 pt frame).
     @ScaledMetric(relativeTo: .body) var iconSize: CGFloat = 28
+    /// Android's empty-state picture, 60 pt at the default text size (iOS: ContentUnavailableView sizes its own).
+    @ScaledMetric(relativeTo: .largeTitle) var boxSide: CGFloat = 60
+    /// The segment just tapped, until the page has the numbers for it (nil: the page's own top.selected).
+    @State var picked: String?
+    /// The List's top content margin on iOS. Measured on the iPhone 18 Pro Max simulator (iOS 27), the control's top edge:
+    /// Health › Steps' D / W / M 126.7 pt (evidence/home-sample-r8/apple/ios27-健康Steps详情-满数据.png); ours 161.7 pt with
+    /// the List's default margin, 147.7 pt with 21, 126.7 pt with 0 (the first section's own top spacing is what is left).
+    static let topMargin: CGFloat = 0
 
     var body: some View {
         let s = Stockpile.shared
@@ -238,18 +246,32 @@ struct EndfieldStockpilePage: View {
                 // related choices that affect an object, state, or view"), on the page ground as the 状态 tab's 班次
                 listSection("stock-pick", ifLet: s.top.flatMap { $0.choices.isEmpty ? nil : $0 }) { top in
                     Section {
-                        Picker("按哪位干员算", selection: Binding(get: { top.selected },
-                                                             set: { k in Task { await Stockpile.shared.pick(k) } })) {
+                        // the tap shows at once (`picked`); the page catches up when Stockpile.pick has worked the numbers
+                        // out again, which is a new read from 森空岛 when there is no earlier one to reuse
+                        Picker("按哪位干员算", selection: Binding(get: { picked ?? top.selected }, set: { k in
+                            picked = k
+                            Task {
+                                await Stockpile.shared.pick(k)
+                                picked = nil
+                            }
+                        })) {
                             ForEach(top.choices) { c in Text(c.title).tag(c.id) }
                         }
                         .pickerStyle(.segmented)
                         #if !os(Android)
-                        // skip-ui: listRowInsets unavailable
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())   // skip-ui: listRowInsets unavailable (skip-fuse-ui List.swift:381)
                         #endif
+                        // on the page ground, not in a card, on both platforms (skip-fuse-ui List.swift:336 has it)
+                        .listRowBackground(Color.clear)
                     } footer: {
-                        if let c = top.caption { Text(c) }
+                        if picked != nil && s.busy {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                Text(Stockpile.loadingText)
+                            }
+                        } else if let c = top.caption {
+                            Text(c)
+                        }
                     }
                 }
                 // the shown one's essence advice, before the 40-odd material rows: three terms as plain label / value rows
@@ -257,12 +279,15 @@ struct EndfieldStockpilePage: View {
                 listSection("stock-essence", ifLet: s.top?.essence) { e in
                     Section {
                         ForEach(e.terms) { t in
-                            LabeledContent(t.slot, value: t.name)
+                            // the term in the label colour as the material readings below (P5), on both platforms: it is the
+                            // answer to tick in MaaEnd (iOS LabeledContent draws a plain value in the secondary colour)
+                            LabeledContent(t.slot) { Text(t.name).foregroundStyle(Color.primary) }
                         }
                         ForEach(e.points.map { [$0] } ?? [], id: \.self) { p in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(e.pointsTitle)
-                                Text(p).font(.caption).foregroundStyle(.secondary)
+                            LabeledContent {
+                                EmptyView()
+                            } label: {
+                                titleAndSubtitle(e.pointsTitle, p)
                             }
                         }
                     } header: {
@@ -275,15 +300,21 @@ struct EndfieldStockpilePage: View {
                     Section {
                         ForEach(sec.rows) { r in
                             LabeledContent {
-                                // P5 (app-page-references): the reading in the label colour, as Health's numbers; a
-                                // row short of one build (「差 N」) in the system orange
-                                if let v = r.value { Text(v).foregroundStyle(r.short ? Color.orange : Color.primary) }
+                                // P5 (app-page-references): the reading in the label colour, as Health's numbers; a row
+                                // short of one build (「差 N」) marked by a system-orange dot before it. Orange text on
+                                // white is 2.31:1, under HIG Accessibility's 4.5:1 for text up to 17 pt (review 0.5.2)
+                                if let v = r.value {
+                                    HStack(spacing: 6) {
+                                        if r.short {
+                                            Image(systemName: "circle.fill").font(.caption2).foregroundStyle(Color.orange)
+                                                .accessibilityHidden(true)   // the text says 差
+                                        }
+                                        Text(v).foregroundStyle(Color.primary)
+                                    }
+                                }
                             } label: {
                                 Label {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(r.name)
-                                        Text(r.subtitle + (r.origin ?? "")).font(.caption).foregroundStyle(.secondary)
-                                    }
+                                    titleAndSubtitle(r.name, r.subtitle + (r.origin ?? ""))
                                 } icon: {
                                     // stockpile.js:74, 98: the material's picture, fit. One that is not there or does not
                                     // load is a grey system picture, not an empty space before the name (HIG Lists: "a
@@ -292,7 +323,7 @@ struct EndfieldStockpilePage: View {
                                         if let img = phase.image {
                                             img.resizable().scaledToFit()
                                         } else {
-                                            missingPicture
+                                            Image(systemName: "photo").resizable().scaledToFit().foregroundStyle(.secondary)
                                         }
                                     }
                                     .frame(width: iconSize, height: iconSize)
@@ -302,14 +333,23 @@ struct EndfieldStockpilePage: View {
                         }
                     } header: {
                         Text(sec.name)
-                    } footer: {
-                        if sec.id == sections.last?.id, !footnote.isEmpty {
-                            Text(footnote.joined(separator: "\n"))
-                        }
                     }
+                }
+                // what the numbers mean and where they come from: about ten lines, too long for a group's footer (HIG
+                // Lists: footers hold short explanations), so one row at the end leads to them, as Health ends a data
+                // type's page with 「About Steps」; the footer keeps only when it was read
+                Section {
+                    NavigationLink(value: EndfieldRoute.stockNotes) { Text(Self.notesTitle) }
+                } footer: {
+                    if let first = footnote.first { Text(first) }
                 }
             }
         }
+        #if os(iOS)
+        // the picker right under the bar as Health's D / W / M (review 0.5.2: 35 pt lower inside the List's first
+        // section); the List's own top margin only, the rows keep theirs
+        .contentMargins(.top, Self.topMargin, for: .scrollContent)
+        #endif
         #if !os(Android)
         // the system empty state over the (empty) List, centred on the page, the way the ContentUnavailableView
         // documentation places it (`.overlay { if … { ContentUnavailableView.search } }`, 7b6a3f1); the List under it
@@ -332,12 +372,24 @@ struct EndfieldStockpilePage: View {
         .task { await s.open() }
     }
 
-    /// The stand-in for a material picture that is not there.
-    @ViewBuilder private var missingPicture: some View {
+    /// The pushed page of the footnote lines' title.
+    static let notesTitle = "关于这些数字"
+
+    /// A row's name with a second line under it. iOS: the system title + subtitle of a label with two Texts (LabeledContent
+    /// documentation, "Custom view labels"), sized and coloured by the system. Android: skip-ui composes a label's views
+    /// side by side in one Row (Vendor/skip-ui Text/LabeledContent.swift RenderLabeleledContent, Text/Label.swift:93), so
+    /// the two lines are stacked here, the second as Material 3's list-item supporting text (bodyMedium, on-surface-variant
+    /// colour: Skip's .callout is bodyMedium, Text/Font.swift:79-81).
+    @ViewBuilder
+    private func titleAndSubtitle(_ title: String, _ subtitle: String) -> some View {
         #if os(Android)
-        Color.clear   // skip-ui maps no picture symbol to a Material icon (Components/Image.swift table)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            Text(subtitle).font(.callout).foregroundStyle(.secondary)
+        }
         #else
-        Image(systemName: "photo").resizable().scaledToFit().foregroundStyle(.secondary)
+        Text(title)
+        Text(subtitle)
         #endif
     }
 
@@ -346,9 +398,12 @@ struct EndfieldStockpilePage: View {
     private func empty(title: String, text: String, button: String, action: StockpileEmptyAction) -> some View {
         #if os(Android)
         // skip-fuse-ui has no ContentUnavailableView and skip-ui's init is fatalError() (System/ContentUnavailableView.swift:59);
-        // Skip maps no box symbol to a Material icon (Components/Image.swift symbol table), so the web page's box stays here
+        // the same symbol as iOS's: Module.xcassets carries a shippingbox.symbolset (Material's inventory_2) that skip-ui
+        // takes for Image(systemName:) before its own table (Components/Image.swift RenderSystem)
         VStack(alignment: .leading, spacing: 6) {
-            EWStockBox()   // stockpile.js:146 the empty-state box
+            Image(systemName: "shippingbox").resizable().scaledToFit().foregroundStyle(.secondary)
+                .frame(width: boxSide, height: boxSide)
+                .accessibilityHidden(true)
             Text(title).font(.headline)
             Text(text).foregroundStyle(.secondary)
             emptyAction(button: button, action: action)
@@ -378,27 +433,22 @@ struct EndfieldStockpilePage: View {
     }
 }
 
-/// Android's empty-state box, traced from stockpile.js:146's SVG (viewBox 24, stroke 1.2, secondary label colour), 60 pt
-/// at the default text size. iOS shows the system symbol shippingbox in ContentUnavailableView instead.
-struct EWStockBox: View {
-    @ScaledMetric(relativeTo: .largeTitle) var side: CGFloat = 60
-
+/// 「关于这些数字」: the 库存 page's footnote lines after the first (what 人份 / 差 N / 箱 / k mean, which build the
+/// numbers are for, when the need table was checked, where the essence data comes from), one row each.
+struct EndfieldStockNotesPage: View {
     var body: some View {
-        let k: CGFloat = side / 24.0
-        var p = Path()
-        p.move(to: CGPoint(x: 3 * k, y: 7.5 * k))
-        p.addLine(to: CGPoint(x: 12 * k, y: 3 * k))
-        p.addLine(to: CGPoint(x: 21 * k, y: 7.5 * k))
-        p.addLine(to: CGPoint(x: 21 * k, y: 16.5 * k))
-        p.addLine(to: CGPoint(x: 12 * k, y: 21 * k))
-        p.addLine(to: CGPoint(x: 3 * k, y: 16.5 * k))
-        p.closeSubpath()
-        p.move(to: CGPoint(x: 3 * k, y: 7.5 * k))
-        p.addLine(to: CGPoint(x: 12 * k, y: 12 * k))
-        p.addLine(to: CGPoint(x: 21 * k, y: 7.5 * k))
-        p.move(to: CGPoint(x: 12 * k, y: 12 * k))
-        p.addLine(to: CGPoint(x: 12 * k, y: 21 * k))
-        return p.stroke(Color.secondary, style: StrokeStyle(lineWidth: 1.2 * k, lineJoin: .round))
-            .frame(width: side, height: side)
+        List {
+            if case .list(_, let footnote) = Stockpile.shared.content {
+                Section {
+                    ForEach(Array(footnote.dropFirst()), id: \.self) { line in
+                        Text(line)
+                    }
+                }
+            }
+        }
+        .navigationTitle(EndfieldStockpilePage.notesTitle)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
     }
 }

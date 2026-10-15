@@ -46,7 +46,8 @@ struct StockRow: Identifiable, Sendable, Equatable {
     let origin: String?
     /// Right value: 「2.6 人份」 / 「差 12」 / 「剩 2 个」, or nil.
     let value: String?
-    /// Not enough for one build (the value reads 「差 N」): the page draws the value orange (app-page-references P5).
+    /// Not enough for one build (the value reads 「差 N」): the page marks the row with an orange dot before the value
+    /// (app-page-references P5; the value itself stays in the label colour for contrast, HIG review 0.5.2).
     var short = false
 }
 
@@ -196,11 +197,12 @@ enum StockpileEmptyAction: Sendable, Equatable {
         return "\(p[1])-\(p[2])"
     }
 
-    /// 「下一位：明河（11-05 上线）」.
-    static func nextLine(_ n: JSONValue) -> String {
+    /// 「下一位：明河（11-05 上线）」 in the footnote; 「下一位：明河（11-05）」 in the picker's caption, whose first half has
+    /// just said 「10-15 上线」 (HIG review 0.5.2: the long form wrapped and left 「上线）」 alone on the caption's second line).
+    static func nextLine(_ n: JSONValue, short: Bool = false) -> String {
         let name = n["name"]?.jsString ?? ""
         let day = monthDay(n["releasedAt"]?.string ?? "")
-        return "下一位：\(name)" + (day.isEmpty ? "" : "（\(day) 上线）")
+        return "下一位：\(name)" + (day.isEmpty ? "" : short ? "（\(day)）" : "（\(day) 上线）")
     }
 
     /// The part above the materials for game `g` of a reading (Inventory's shape): the picker when the table has two
@@ -225,12 +227,14 @@ enum StockpileEmptyAction: Sendable, Equatable {
             if let l = std?["label"]?.string, !l.isEmpty { parts.append(l) }
             let day = monthDay(std?["releasedAt"]?.string ?? "")
             if !day.isEmpty { parts.append("\(day) 上线") }
-            if let w = std?["weapon"]?.string, !w.isEmpty { parts.append("专武 \(w)") }
+            // 「专武「玉中身」」: Chinese runs a name on without a space; the brackets set the weapon's name apart
+            if let w = std?["weapon"]?.string, !w.isEmpty { parts.append("专武「\(w)」") }
             var caption = parts.joined(separator: "，")
             // the next one named under the newest one; not under the next one herself
             if let n = g["next"], n.truthy, (n["name"]?.jsString ?? "") != (std?["name"]?.jsString ?? ""),
                (std?["role"]?.string ?? "current") != "next" {
-                caption += (caption.isEmpty ? "" : "。") + nextLine(n)
+                // on a line of its own: run on after 「。」 it wrapped mid-name at phone width, leaving 「（11-05）」 alone
+                caption += (caption.isEmpty ? "" : "\n") + nextLine(n, short: true)
             }
             top.caption = caption.isEmpty ? nil : caption
         }
@@ -339,6 +343,23 @@ enum StockpileEmptyAction: Sendable, Equatable {
         return "需求表 \(m)月\(d)日 核对过最新六星"
     }
 
+    /// A section's title by what the materials are for. A standard counted from the client's preview table (明河 before
+    /// she is out) has no build steps, so the table groups her rows by owner and names the groups after her
+    /// (「明河」 / 「专武 唤月」 / 「明河 + 专武 唤月」): the first repeated the picker's segment just above it (HIG review
+    /// 0.5.2). Such a group is titled by its rows' `owner` the way 祀's groups read (干员… / 武器… / 多处共用); any other
+    /// group keeps the table's name.
+    static func groupTitle(_ name: String, owner: String?, standard: JSONValue?) -> String {
+        let who = standard?["name"]?.jsString ?? ""
+        let weapon = standard?["weapon"]?.string ?? ""
+        guard (!who.isEmpty && name.contains(who)) || (!weapon.isEmpty && name.contains(weapon)) else { return name }
+        switch owner {
+        case "干员": return "干员养成"
+        case "专武": return "武器养成"
+        case "干员 + 专武": return "多处共用"
+        default: return name
+        }
+    }
+
     /// Rows came back but none has a group: the need table's grouping does not match, not 森空岛 (Inventory.needLacks wording).
     static let ungrouped = "需求表里终末地的材料都没有分组，和这次读到的库存对不上（不是森空岛回报的），列不出来"
 
@@ -373,7 +394,9 @@ enum StockpileEmptyAction: Sendable, Equatable {
         var sections: [StockSection] = []
         for s in groups {
             let sorted = Array(s.rows.enumerated()).map { ($0.offset, $0.element) }.sorted(by: less).map { $0.1 }
-            sections.append(StockSection(name: s.name, rows: sorted.map { row($0, &nf) }))
+            var title = groupTitle(s.name, owner: s.rows.first?["owner"]?.string, standard: g["standard"])
+            if sections.contains(where: { $0.name == title }) { title = s.name }   // ids stay unique
+            sections.append(StockSection(name: title, rows: sorted.map { row($0, &nf) }))
         }
         let box: JSONValue? = (g["box"]?["id"]?.truthy ?? false) ? g["box"] : nil
         if let box, let own = rows.first(where: { $0["id"]?.jsString == box["id"]?.jsString }),

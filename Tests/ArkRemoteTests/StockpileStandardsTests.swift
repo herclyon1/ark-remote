@@ -107,7 +107,8 @@ import XCTest
         XCTAssertEqual(top.choices.map(\.title), ["祀", "明河"])
         XCTAssertEqual(top.choices.map(\.id), [Self.siKey, Self.mingheKey])
         XCTAssertEqual(top.selected, Self.siKey)
-        XCTAssertEqual(top.caption, "最新六星，10-15 上线，专武 玉中身。下一位：明河（11-05 上线）")
+        // HIG review 0.5.2: the caption's second line was 「上线）」 alone; the next one on a line of her own
+        XCTAssertEqual(top.caption, "最新六星，10-15 上线，专武「玉中身」\n下一位：明河（11-05）")
         XCTAssertEqual(sections.map(\.name).prefix(7), ["干员精英化", "干员技能升级", "干员技能专精", "干员等级提升", "武器突破", "武器等级提升", "多处共用"])
         XCTAssertTrue(foot.contains { $0.hasPrefix("一人所需 = 最新六星 祀（2026-10-15 上线）") }, "\(foot)")
         XCTAssertFalse(foot.contains { $0.hasPrefix("下一位") }, "the next one is in the caption already: \(foot)")
@@ -137,8 +138,10 @@ import XCTest
         XCTAssertEqual(inv.chosenStandard(), Self.mingheKey)
         guard case .list(let sections, let foot) = page.content else { return XCTFail("not a list") }
         XCTAssertEqual(page.top?.selected, Self.mingheKey)
-        XCTAssertEqual(page.top?.caption, "下一位六星，11-05 上线，专武 唤月")
-        XCTAssertEqual(Array(sections.map(\.name).prefix(3)), ["明河", "专武 唤月", "明河 + 专武 唤月"])
+        XCTAssertEqual(page.top?.caption, "下一位六星，11-05 上线，专武「唤月」")
+        // her groups are named after her in the table (「明河」 repeated the picker's segment, HIG review 0.5.2): titled by
+        // what they are for, as 祀's
+        XCTAssertEqual(Array(sections.map(\.name).prefix(3)), ["干员养成", "武器养成", "多处共用"])
         XCTAssertEqual(page.top?.essence?.header, "基质刷取 · 唤月")
         XCTAssertEqual(page.top?.essence?.points, "源石研究园、供能高地、首墩、应龙关")
         XCTAssertFalse(essenceText(page.top).contains("玉中身"), essenceText(page.top))

@@ -73,6 +73,8 @@ struct EndfieldPage: View {
             switch route {
             case .stockpile:
                 EndfieldStockpilePage()
+            case .stockNotes:
+                EndfieldStockNotesPage()
             case .more(let title):
                 if let g = Self.cards.first(where: { $0.title == title }) {
                     EndfieldMorePage(group: g, data: live ?? { [data] in data }, onChange: onChange, onResend: onResend)
@@ -133,6 +135,8 @@ struct EndfieldPage: View {
 enum EndfieldRoute: Hashable {
     /// 库存 → EndfieldStockpilePage.
     case stockpile
+    /// 库存's last row 「关于这些数字」 → EndfieldStockNotesPage.
+    case stockNotes
     /// A card's 「…设置」 row (ewMoreName) → EndfieldMorePage, by the card's title (EWGroupSpec.title).
     case more(String)
 }

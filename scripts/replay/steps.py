@@ -294,6 +294,9 @@ step("d39.ark.top", "d39", "D39：方舟滑到底再点「方舟」→ 回顶",
 # ------------------------------------------------------------------ 终末地
 # the 基质刷取 card's row to its pushed page (EndfieldPage ewMoreName: each card's row is named after it, HIG review 1014)
 EF_MORE = "基质刷取设置"
+# skip-ui's stand-in for a symbol it cannot draw (Components/Image.swift RenderSystem: Icons.Default.Warning with this
+# content description): shippingbox / photo / circle.fill come from Module.xcassets symbolsets on Android
+MISSING_ICON = "missing icon"
 step("ef.open", "endfield", "终末地标签 → 库存 / 基质刷取设置 / 自动采集",
      [("tab", "终末地")], expect=["库存", "没配森空岛", EF_MORE])
 # the task cards have no header: the switch row names the task (10-14 review: the header said it again)
@@ -301,8 +304,10 @@ step("ef.title", "endfield", "任务卡没有标题：没有「另一个任务�
      [("swipe", "up", 3)], expect=["自动采集设置"], absent=["另一个任务", "~另外两个任务", "~终末地 · ", "刷取设置"])
 # the page reads the need table over the network (COS, then github.io) before it says 没配森空岛 (Inventory.refresh):
 # 11.2 s on ark37 for 0.5.1, 13.6 s and 17.5 s on 10-15
-step("ef.stock", "endfield", "库存 → 推入库存页（没配森空岛）",
-     [("top", 4), tap("库存")], expect=["~去手机页"], timeout=25)
+step("ef.stock", "endfield", "库存 → 推入库存页（没配森空岛）；箱子是系统符号（安卓没有警告三角）",
+     [("top", 4), tap("库存")], expect=["~去手机页"], absent=[MISSING_ICON], timeout=25)
+step("ef.stock.shot", "endfield", "截图：库存页空状态（系统箱子符号）", [("shot", "stock-empty")], expect=["~去手机页"],
+     absent=[MISSING_ICON])
 step("ef.stock.tophone", "endfield", "库存页「去手机页」→ 跳到手机标签", [tap("~去手机页")], expect=[VERSION])
 step("ef.stock.popped", "d39", "回终末地 → 库存页已退掉", [("tab", "终末地")], expect=["库存", EF_MORE])
 step("ef.stock.tabpop", "d39", "再进库存 → 点「终末地」→ 回根页",
@@ -312,9 +317,9 @@ step("ef.stock.tabpop", "d39", "再进库存 → 点「终末地」→ 回根页
 # shows only its own weapon's essence advice: the MaaEnd line names the one weapon to tick.
 SI_ONLY = "~只勾玉中身"
 MINGHE_ONLY = "~只勾唤月"
-step("stock.data", "stock", "库存（森空岛替身 + 10-15 需求表）→ 分段「祀」「明河」选中祀；「下一位：明河（11-05 上线）」；玉中身三条词条、掉落地点、MaaEnd 一句",
+step("stock.data", "stock", "库存（森空岛替身 + 10-15 需求表）→ 分段「祀」「明河」选中祀；「下一位：明河（11-05）」；玉中身三条词条、掉落地点、MaaEnd 一句",
      [("skland", "on"), ("tab", "终末地"), ("top", 4), tap("库存")],
-     expect=["祀", "明河", "~下一位：明河（11-05 上线）", "基质刷取 · 玉中身", "~智识提升", "~寒冷伤害提升", "~效益",
+     expect=["祀", "明河", "~下一位：明河（11-05）", "基质刷取 · 玉中身", "~智识提升", "~寒冷伤害提升", "~效益",
              "~枢纽区、源石研究园、矿脉源区、藏剑谷、应龙关", SI_ONLY], absent=[MINGHE_ONLY],
      # a cold start, then 40-odd material pictures loading from bbs.hycdn.cn keep the tree from settling: 18 s on the
      # iOS simulator, 27.9 s and a miss at 31 s on ark37 (10-15), with everything on screen in the miss's screenshot
@@ -324,12 +329,20 @@ step("stock.shot.dark", "stock", "截图：库存页（深色）", [("appearance
      expect=["基质刷取 · 玉中身"])
 step("stock.next", "stock", "点「明河」→ 唤月的词条和掉落地点、只勾唤月；说明行是她自己的，没有「下一位：」",
      [tap("明河"), ("wait", 0.8)], expect=["基质刷取 · 唤月", "~意志提升", "~攻击提升", "~附术", "~首墩", MINGHE_ONLY,
-                                          "~下一位六星，11-05 上线，专武 唤月"], absent=[SI_ONLY, "~下一位：明河"])
+                                          "~下一位六星，11-05 上线，专武「唤月」"], absent=[SI_ONLY, "~下一位：明河"])
 step("stock.next.shot", "stock", "截图：选明河（深色、浅色）",
      [("shot", "stock-minghe-dark"), ("appearance", "light"), ("shot", "stock-minghe-light")], expect=["基质刷取 · 唤月"])
 step("stock.back", "stock", "点「祀」→ 回到玉中身", [tap("祀"), ("wait", 0.8)], expect=["基质刷取 · 玉中身", SI_ONLY],
      absent=[MINGHE_ONLY])
-step("stock.rows", "stock", "往下滑 → 材料按「干员精英化」等分组，右边是人份", [("swipe", "up", 2)], expect=["~人份"])
+step("stock.rows", "stock", "往下滑 → 材料按「干员精英化」等分组，右边是人份；缺图的协议圆盘组是系统图片符号（安卓没有警告三角）",
+     [("swipe", "up", 2), ("shot", "stock-rows")], expect=["~人份"], absent=[MISSING_ICON])
+# the footnote's lines behind the last row since the HIG review of 0.5.2 (about ten lines were too long for a footer)
+step("stock.notes", "stock", "滑到底 →「关于这些数字」→ 推入页：人份、差 N、数据来源各一行",
+     # 50-odd rows: the tap's own search (8 swipes down, then back up) can stop short of the last row on Android
+     [("swipe", "up", 8), tap("关于这些数字"), ("wait", 0.8), ("shot", "stock-notes")],
+     expect=["~人份 = 材料库存 ÷ 一人所需", "~差 N = ", "~基质词条和掉落地点取自 MaaEnd"])
+step("stock.notes.back", "stock", "返回 → 回到库存页", [("back",), ("wait", 0.8)], expect=["关于这些数字"],
+     absent=["~人份 = 材料库存 ÷ 一人所需"])
 step("stock.off", "stock", "拿掉替身和编的森空岛 → 终末地根页，库存行又是「没配森空岛」",
      [("skland", "off"), ("tab", "终末地"), ("top", 4)], expect=["库存", "没配森空岛", EF_MORE], timeout=12)
 # 基质刷取设置 is in cards since the 10-14 review (EndfieldSchema.moreCards); 哪几天跑 is on the 终末地 page itself

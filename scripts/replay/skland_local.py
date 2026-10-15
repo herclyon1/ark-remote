@@ -11,7 +11,9 @@ http://10.0.2.2:8933 from the Android emulator (its alias of the host loopback).
 
 What it answers:
   /need.json                                         Tests/Fixtures/need-1015.json, the table the relay built on
-                                                     2026-10-15 16:05 (two standards: 祀 + 玉中身, then 明河 + 唤月)
+                                                     2026-10-15 16:05 (two standards: 祀 + 玉中身, then 明河 + 唤月),
+                                                     with 协议圆盘组's picture set to a URL that cannot load (NO_PICTURE)
+                                                     so the page's stand-in picture (the photo symbol) is on screen
   /web/v1/auth/refresh                               {"code": 0, "data": {"token": "replay"}}
   /web/v1/game/endfield/calculate/material-list      Tests/Fixtures/skland-material-list.json (森空岛's public catalogue)
   /web/v1/game/endfield/calculate/user-game-data     made-up counts (see counts()): NOT anyone's warehouse
@@ -40,6 +42,23 @@ def base_for(platform):
 def _read(name):
     with open(os.path.join(FIXTURES, name), "rb") as f:
         return f.read()
+
+
+# 协议圆盘组 (in 祀's first group, on screen after the stock.rows swipe): a picture URL with no host, which no platform can
+# load, so the replay sees the missing-picture stand-in (EWLive.swift: Image(systemName: "photo"); on Android the
+# photo.symbolset in Module.xcassets, a black warning triangle without it)
+NO_PICTURE = ("ccb6b7ea66bdaf9f5923e171f45fb622", "/replay-no-picture.png")
+
+
+def no_picture(table):
+    """The table with NO_PICTURE's row's icon replaced, in the game's rows and in every standard's."""
+    rid, url = NO_PICTURE
+    for g in table.get("games", []):
+        for rows in [g.get("rows", [])] + [s.get("rows", []) for s in g.get("standards", [])]:
+            for r in rows:
+                if r.get("id") == rid:
+                    r["icon"] = url
+    return table
 
 
 def counts(table):
@@ -113,7 +132,7 @@ class LocalSkland:
             self.log(f"森空岛替身已在 127.0.0.1:{self.port}，沿用")
             return self
         table = json.loads(_read("need-1015.json"))
-        Handler.need = _read("need-1015.json")
+        Handler.need = json.dumps(no_picture(json.loads(_read("need-1015.json"))), ensure_ascii=False).encode()
         Handler.mat = _read("skland-material-list.json")
         Handler.ugd = json.dumps({"code": 0, "message": "OK", "data": {"userGameData": {"itemCount": counts(table)}}}).encode()
         # 127.0.0.1 only: the Android emulator's 10.0.2.2 is this loopback

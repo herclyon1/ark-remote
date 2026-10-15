@@ -74,11 +74,11 @@ struct StatusPage: View {
                     }
                     .pickerStyle(.segmented)
                     #if !os(Android)
-                    // on the page ground, not in a card, as Health's D / W / M control (ios27-健康Steps详情);
-                    // skip-ui: listRowInsets unavailable
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())   // skip-ui: listRowInsets unavailable (skip-fuse-ui List.swift:381)
                     #endif
+                    // on the page ground, not in a card, as Health's D / W / M control (ios27-健康Steps详情), on both
+                    // platforms (skip-fuse-ui List.swift:336 has listRowBackground)
+                    .listRowBackground(Color.clear)
                 } footer: {
                     // the control has no title and, since the 班次 list below shows every shift, nothing on this page
                     // changes when it is flipped: it picks the shift the game tabs edit and 现在跑一趟 runs (decision G1

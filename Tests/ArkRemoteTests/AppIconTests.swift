@@ -30,6 +30,15 @@ final class AppIconTests: XCTestCase {
         XCTAssertTrue(mono.contains("gamecontroller.fill"), "monochrome is not the SF gamecontroller.fill artwork")
         XCTAssertFalse(fg.contains("sports_esports") || mono.contains("sports_esports"), "the Material controller is back")
         XCTAssertTrue(bg.contains("#0094FF") || bg.contains("#FF0094FF"), "background is not iOS's system-blue gradient")
+        // HIG review 0.5.2: at full size the glyph's farthest white reached 86.4 % of the launcher circle's radius (Google
+        // Camera 75.9 %); both layers scale it 0.85 about the centre, the same factor so the themed icon matches
+        for (name, xml) in [("foreground", fg), ("monochrome", mono)] {
+            for attr in ["android:pivotX=\"54\"", "android:pivotY=\"54\"", "android:scaleX=\"0.85\"", "android:scaleY=\"0.85\""] {
+                XCTAssertTrue(xml.contains(attr), "\(name) glyph is not scaled 0.85 about the centre: \(attr) missing")
+            }
+            XCTAssertLessThan(xml.range(of: "<group")?.lowerBound ?? xml.endIndex, xml.range(of: "<path")?.lowerBound ?? xml.startIndex,
+                              "\(name): the paths must be inside the scaling group")
+        }
         let launcher = try RepoFiles.text("Android/app/src/main/res/mipmap-anydpi/ic_launcher.xml")
         for part in ["@drawable/ic_launcher_background", "@drawable/ic_launcher_foreground", "@drawable/ic_launcher_monochrome"] {
             XCTAssertTrue(launcher.contains(part), part)
