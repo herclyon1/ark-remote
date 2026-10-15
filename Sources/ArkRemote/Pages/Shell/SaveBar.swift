@@ -175,8 +175,12 @@ struct EWSaveBar: ViewModifier {
             // the app took when it got round to handling them let an early press through on a slow emulator (0.5.2 r3
             // and-final5). The down is used once, so a later press with none (TalkBack's activate) is judged by now.
             let shown = ReviewGateClock.shownAt(), down = ReviewGateClock.takeDown()
-            let open = MistapGate.allows(shownAt: shown > 0 ? shown : nil, downAt: down > 0 ? down : nil,
-                                         now: ReviewGateClock.now())
+            let now = ReviewGateClock.now()
+            let open = MistapGate.allows(shownAt: shown > 0 ? shown : nil, downAt: down > 0 ? down : nil, now: now)
+            // the gate's own times, for the replay's gate trials and the 诊断记录 (a no-op while that is off)
+            let line = ["shown": "\(Int(shown))", "down": "\(Int(down))", "now": "\(Int(now))", "open": open ? "1" : "0"]
+            logger.info("review gate: \(line.description)")
+            DiagLog.shared.record("gate", line)
             #else
             // iOS: UIKit takes no touches while the sheet is being presented (replay gate.early), so a press reaching
             // 寄出 began after that; this also holds the 400 ms from the presentation's start, judged at the release
