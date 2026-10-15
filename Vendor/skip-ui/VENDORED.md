@@ -1,7 +1,7 @@
 # Vendored skip-ui
 
 This directory is skip-ui **1.61.0** (https://github.com/skiptools/skip-ui, revision
-`0787680f42258100db5e3fe2d7b4b358641a8dc8`) without its `.git`, with two patches. The root `Package.swift` depends on it
+`0787680f42258100db5e3fe2d7b4b358641a8dc8`) without its `.git`, with three patches. The root `Package.swift` depends on it
 by path; a root path dependency with the identity `skip-ui` stands in for the remote one skip-fuse-ui asks for, so
 `Package.resolved` has no skip-ui pin. Both patches are Android-only (Compose code under `#if SKIP`); the iOS build uses
 SwiftUI itself and is unchanged.
@@ -67,10 +67,31 @@ pass.
 5. Process death is no second path to a null restore here: `Main.kt` calls `saveableStateHolder.removeState(true)`, so
    the activity saves no Compose state to restore.
 
+## Patch 3: a sheet shows the smallest of its detents (`Sources/SkipUI/SkipUI/Layout/Presentation.swift`, 0.5.2 r5)
+
+`presentationDetents(_:)` keeps every detent in `PresentationDetentPreferences` (compared as a set) and
+`SheetPresentation` shows the smallest one, through `PresentationDetent.sheetInset(of:screenHeight:largeInset:)` (the
+largest top inset). Upstream (1.61.0) kept `detents.first`.
+
+1. Measured defect: on Android the review sheet (`SaveBar.swift`, `.presentationDetents([.medium, .large])`) opened at
+   half or full height at random and jumped between them while open: 7 of 12 openings moved within 12 s on ark37
+   (`BOARD/app-work/0.5.2/r5/sheet-watch.txt`); a tap aimed at its ✕ (and the replay's presses on 寄出) then landed on
+   something else (1 of 80 ✕ taps by `input tap`, 2 of 120 by raw 80 ms touches, `r5/close-test-*.txt`).
+2. Cause: skip-fuse-ui's `presentationDetents(_:)` (`SkipSwiftUI/Layout/Presentation.swift`) bridges the `Set` in the
+   order Swift iterates it, and a Swift `Set`'s order differs from one instance to the next (per-instance hash seed), so
+   every evaluation of the sheet's view could hand skip-ui another `first`.
+3. Why the smallest: UIKit opens a sheet with no selected detent at its smallest
+   (`UISheetPresentationController.selectedDetentIdentifier`: "the default value is nil, which means the sheet
+   displays at the smallest detent you specify in detents"), which is also the App's intent (SaveBar.swift: half
+   height first). skip-ui shows one detent only (its `TODO: Add support for multiple detents`), so it shows that one.
+4. Tests: `Android/app/src/test/kotlin/ark/remote/SheetDetentTest.kt` (the choice in either order) and the replay step
+   `status.skip.steady` (the open sheet stays at half height for 8 s; after the patch 12 of 12 openings stayed,
+   `r5/sheet-watch-fixed.txt`).
+
 ## Upgrading Skip
 
 Copy the new skip-ui release over this directory (keep this file), re-apply the lines marked `ark-remote patch`, update
-the revision above, then build Android, run `gradle :app:testDebugUnitTest` (IdStateSaverTest) and the replay's `layout`
+the revision above, then build Android, run `gradle :app:testDebugUnitTest` (IdStateSaverTest, SheetDetentTest) and the replay's `layout`
 page (`--only setup,layout`). If skip-ui gains a
 working `listSectionSpacing`, drop this directory and the path dependency instead and use the modifier on both
 platforms.

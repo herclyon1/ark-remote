@@ -145,22 +145,13 @@ private let AlertDialogMaxWidth: Dp = 560.dp
 
                 // TODO: add custom cases
                 // Add inset depending on the presentation detent
-                let inset: Dp
                 let screenHeight = LocalConfiguration.current.screenHeightDp.dp
-                let detent: PresentationDetent = reducedDetentPreferences.detent
-                switch detent {
-                case .medium:
-                    inset = screenHeight / 2
-                case let .height(h):
-                    inset = screenHeight - h.dp
-                case let .fraction(f):
-                    inset = screenHeight * Float(1 - f)
-                default:
-                    // We have to delay access to WindowInsets until inside the ModalBottomSheet composable to get accurate values
-                    let topBarHeight = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
-                    // Add 44 for draggable area in case content is not draggable
-                    inset = topBarHeight + (24 * sheetDepth).dp + 44.dp
-                }
+                // We have to delay access to WindowInsets until inside the ModalBottomSheet composable to get accurate values
+                let topBarHeight = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
+                // Add 44 for draggable area in case content is not draggable
+                let largeInset = topBarHeight + (24 * sheetDepth).dp + 44.dp
+                // ark-remote patch (Vendor/skip-ui/VENDORED.md): the smallest of the detents, not the first one
+                let inset = PresentationDetent.sheetInset(of: reducedDetentPreferences.detents, screenHeight: screenHeight, largeInset: largeInset)
 
                 topInset.value = inset
                 // Draw the drag handle and the presentation root content area below it
@@ -725,6 +716,34 @@ public enum PresentationDetent : Hashable {
 //        public subscript<T>(dynamicMember keyPath: KeyPath<EnvironmentValues, T>) -> T { get { fatalError() } }
     }
 
+    #if SKIP
+    /// ark-remote patch (Vendor/skip-ui/VENDORED.md): the sheet's top inset for the smallest of `detents`, the one with
+    /// the largest inset, whatever order the set iterates in. UIKit opens a sheet at its smallest detent when no detent
+    /// is selected (UISheetPresentationController.selectedDetentIdentifier: "the default value is nil, which means the
+    /// sheet displays at the smallest detent you specify in detents"); skip-ui shows one detent, so it shows that one.
+    /// `largeInset` is the inset of `.large` (and of a custom detent, as upstream).
+    public static func sheetInset(of detents: Set<PresentationDetent>, screenHeight: Dp, largeInset: Dp) -> Dp {
+        var inset: Dp? = nil
+        for detent in detents {
+            let next: Dp
+            switch detent {
+            case .medium:
+                next = screenHeight / 2
+            case let .height(h):
+                next = screenHeight - h.dp
+            case let .fraction(f):
+                next = screenHeight * Float(1 - f)
+            default:
+                next = largeInset
+            }
+            if inset == nil || next > inset! {
+                inset = next
+            }
+        }
+        return inset ?? largeInset
+    }
+    #endif
+
     static func forBridged(identifier: Int, value: CGFloat) -> PresentationDetent? {
         switch identifier {
         case 0: // For bridging
@@ -812,11 +831,14 @@ struct PresentationDetentPreferenceKey: PreferenceKey {
     }
 }
 
+// ark-remote patch (Vendor/skip-ui/VENDORED.md): every detent the view lists, compared as a set. Upstream kept
+// `detents.first`, and the set reaches Kotlin in the order Swift iterated it on skip-fuse-ui's side, which changes from
+// one evaluation of the view to the next, so an open sheet jumped between half and full height on its own.
 struct PresentationDetentPreferences: Equatable {
-    let detent: PresentationDetent
+    let detents: Set<PresentationDetent>
 
-    init(detent: PresentationDetent? = nil) {
-        self.detent = detent ?? PresentationDetent.large
+    init(detents: Set<PresentationDetent>? = nil) {
+        self.detents = detents ?? [PresentationDetent.large]
     }
 
     func reduce(_ next: PresentationDetentPreferences) -> PresentationDetentPreferences {
@@ -824,7 +846,7 @@ struct PresentationDetentPreferences: Equatable {
     }
 
     public static func ==(lhs: PresentationDetentPreferences, rhs: PresentationDetentPreferences) -> Bool {
-        return lhs.detent == rhs.detent
+        return lhs.detents == rhs.detents
     }
 }
 
@@ -1189,8 +1211,8 @@ extension View {
         if detents.count == 0 {
             return self
         }
-        let selectedDetent = detents.first
-        return preference(key: PresentationDetentPreferences.self, value: PresentationDetentPreferences(detent: selectedDetent))
+        // ark-remote patch (Vendor/skip-ui/VENDORED.md): all of them; the sheet takes the smallest (sheetInset)
+        return preference(key: PresentationDetentPreferences.self, value: PresentationDetentPreferences(detents: detents))
         #else
         return self
         #endif
