@@ -134,8 +134,9 @@ save bar putting the keyboard away (理智药, 周本, 循环执行), the 诊断
 「就是这里」, flush with the tab bar when off), and launches with a link / text / nothing on the clipboard, configured or
 not (iOS; the system paste alert is answered 「Allow Paste」).
 
-Steps known to be timing-sensitive on emulators: the 400 ms guard steps (`gate.*`: 不判 on Android; on iOS a press that
-may have landed after the gate reads 不判（模拟器）) and the live-state step (`noef.jump`). Confirmation alerts and review
+Steps known to be timing-sensitive on emulators: the 400 ms guard steps (`gate.*`: on Android judged only at a
+1-minute Mac load under 4.5, else 不判; `gate.diag.check` reads the app's own gate decisions and leaves out its watch /
+refresh sends; on iOS a press that may have landed after the gate reads 不判（模拟器）) and the live-state step (`noef.jump`). Confirmation alerts and review
 sheets ignore presses in their first 400 ms, so the table waits 0.5 s before pressing a button on them. The iOS picker
 wheels are turned with synthesized drags, not `adjust(toPickerWheelValue:)`, which waits for an idle app (60 s a time
 when it never idles).

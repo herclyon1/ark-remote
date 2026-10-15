@@ -689,7 +689,8 @@ class Runner:
             not taken: 0.5.2 r5 close-test, 1 of ~20 `input tap`s on the ✕'s centre left the sheet up and a second tap
             on the same point closed it (the button's action had not run), so the next trial's ✓ fell on the old
             sheet and its press on 寄出 sent (r4 and-gate4 / and-gate9: a sheet up for 16-17 s). So: up to three taps,
-            each followed by a wait until the sheet is gone, then back; a sheet still up stops the trials (NoJudge).
+            each followed by a wait until the sheet is gone, then back; a sheet still up after that is the app's
+            failure (StepFail): with the sheet held at one detent (Vendor/skip-ui patch 3) 0 of 155 closes needed it.
             (This waited on 「确认这次修改」, the title before 64064c7, never waited, and the next ✓ fell on a sheet still
             going away.)"""
             for attempt in range(4):
@@ -707,7 +708,7 @@ class Runner:
                     time.sleep(0.4)
             else:
                 if sheet_top() is not None:
-                    raise NoJudge("确认单点了三次 ✕ 又按了返回还关不掉")
+                    raise StepFail("确认单点了三次 ✕ 又按了返回还关不掉")
             time.sleep(0.8)
 
         # where 寄出 sits: x from the tree, y at the medium detent, whose top edge is the screen's middle (1211 of 2424 on
