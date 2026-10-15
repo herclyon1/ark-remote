@@ -178,15 +178,16 @@ step("status.skip.think", "status", "再想想 → 关单，改动还在",
 
 # ------------------------------------------------------------------ 400 ms confirmation guard
 # Android: judged by the app's own send log (诊断记录, turned on for this block only) and the mailbox; each early press is
-# timed against the sheet window's first frame (gate_trials). iOS: 寄出 is .disabled for 400 ms, one early press; a sheet
+# timed against the sheet window's first frame (gate_trials). A press begun under 380 ms after that frame that reached 寄出
+# (pressed state in a screenshot taken while held) tests the gate (对 / 不对); with none the two Android steps read 不判. iOS: 寄出 is .disabled for 400 ms, one early press; a sheet
 # still up afterwards is 对; gone is 「不判（模拟器）」 (the press may have landed after the gate on a slow simulator).
 step("gate.diag.on", "gate", "手机 · 诊断记录打开（门测试用 App 自己的发送记录判断）→ 回状态",
      [("tab", "手机"), ("toggle", "诊断记录"), ("tab", "状态")], expect=[HOME, "~1 项未寄出"], on="android")
 step("gate.early", "gate", "400 ms 门：✓ 后 150 ms 按下「寄出」按住 0.9 秒 → 不寄出、单子还在",
      [("gate", "save", "send", 150, 900)], expect=["寄出前看一下"], nocmd=3, nojudge_fail="模拟器",
-     android={"say": "400 ms 门：✓ 后马上按住「寄出」1.5 秒（按下早于门开、松手晚于门开）× 2 → 一次都不寄出",
-              "do": [("gate_trials", 2, 150, 1500)], "expect": ["~1 项未寄出"], "absent": ["寄出前看一下"],
-              "nocmd": 1, "timeout": 12, "nojudge": "模拟器"})
+     android={"say": "400 ms 门：✓ 后马上按住「寄出」1.5 秒（按下早于门开、松手晚于门开）× 8 → 一次都不寄出",
+              "do": [("gate_trials", 8, 300, 1500)], "expect": ["~1 项未寄出"], "absent": ["寄出前看一下"],
+              "nocmd": 1, "timeout": 12})
 step("gate.close", "gate", "再想想 → 关单", [tap("再想想")], absent=["寄出前看一下"], on="ios")
 step("gate.late", "gate", "✓ 等单子停稳再点「寄出」→ 寄出 skip_today",
      [tap(SAVE, region="top"), tap("寄出 1 项", stable=True)], absent=["寄出前看一下"], cmd={"action": "skip_today"},
@@ -196,7 +197,7 @@ step("gate.clear", "gate", "不再显示进度 → 早班开关回到开",
      offline={"say": "（上一步已放弃改动）早班开关回到开、没有未寄出", "do": [], "absent": ["~未寄出"]})
 step("gate.diag.check", "gate", "App 自己的发送记录（打开分享诊断记录让它存盘）：门测试 0 条、停稳后寄出 ≥1 条",
      [("tab", "手机"), tap("~分享诊断记录"), ("wait", 1.5), ("back",), ("app_posts", {"gate.early": 0, "gate.late": 1})],
-     expect=["运行自检"], on="android", nojudge="模拟器")
+     expect=["运行自检"], on="android")
 step("gate.diag.off", "gate", "手机 · 诊断记录关掉 → 回状态",
      [("toggle", "诊断记录"), ("tab", "状态")], expect=[HOME], on="android")
 

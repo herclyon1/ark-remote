@@ -677,7 +677,7 @@ class AndroidDriver:
         w, h = self.size
         return [(3, 47, 0), (3, 57, tid), (3, 53, x * 32767 // w), (3, 54, y * 32767 // h), (3, 58, 60), (0, 0, 0)]
 
-    def gate_trial(self, x1, y1, x2, y2, gap_ms, hold_ms):
+    def gate_trial(self, x1, y1, x2, y2, gap_ms, hold_ms, shot=None):
         """Raw touches: tap (x1, y1), wait gap_ms, press (x2, y2) for hold_ms. Returns the kernel times (ms, CLOCK_MONOTONIC,
         the clock of the frame stats) of [tap down, tap up, press down, press up], read from a getevent -t running alongside."""
         d = self.touch_dev()
@@ -688,8 +688,14 @@ class AndroidDriver:
         t = "/data/local/tmp/replay-"
         script = (f"D={d}; rm -f {t}ge.txt; getevent -t $D > {t}ge.txt & GP=$!; sleep 0.4; "
                   f"cat {t}a.bin > $D; sleep 0.06; cat {t}u.bin > $D; sleep {gap_ms / 1000:.3f}; cat {t}b.bin > $D; "
-                  f"sleep {hold_ms / 1000:.3f}; cat {t}u.bin > $D; sleep 0.3; kill $GP; cat {t}ge.txt")
+                  + (f"sleep 1.0; screencap -p {t}hold.png; " if shot else f"sleep {hold_ms / 1000:.3f}; ")
+                  + f"cat {t}u.bin > $D; sleep 0.3; kill $GP; cat {t}ge.txt")
         out = self.sh(script, timeout=30)
+        if shot:
+            # the screen while the press is still held (1 s after it began, the sheet settled): a press that reached
+            # 寄出 shows the button's pressed state; the hold lasts as long as the screenshot takes, at least 1 s
+            with open(shot, "wb") as f:
+                f.write(self.adb("exec-out", "cat", f"{t}hold.png", binary=True))
         syn = [float(m.group(1)) * 1000 for m in re.finditer(r"\[\s*([\d.]+)\]\s+0000 0000 00000000", out)]
         return syn[:4]
 
@@ -717,7 +723,9 @@ class AndroidDriver:
 
     def sheet_frames(self, after_ms):
         """Frames of the window that first drew after after_ms (the sheet's dialog window), as
-        (first frame traversal start ms, first frame completed ms, number of frames); None if no such window."""
+        (first frame traversal start ms, first frame completed ms, number of frames, settled ms); None if no such window.
+        settled = when the opening animation's last frame completed: the end of the first run of frames with no pause
+        over 50 ms (a press right after it may run on into the button's ripple, which only makes settled later)."""
         best = None
         for i, w in enumerate(self.frame_windows()):
             fr = [f for f in w["frames"] if f.get("PerformTraversalsStart", 0) > 0]
@@ -726,7 +734,15 @@ class AndroidDriver:
             t0 = fr[0]["PerformTraversalsStart"] / 1e6
             if t0 < after_ms - 50:
                 continue
-            cand = (t0, fr[0]["FrameCompleted"] / 1e6, len(fr))
+            settled = fr[0]["FrameCompleted"] / 1e6
+            fr = [f for f in fr if f.get("FrameCompleted", 0) > 0]   # a frame still in flight has no completion time
+            if not fr:
+                continue
+            for a, b in zip(fr, fr[1:]):
+                if b["PerformTraversalsStart"] / 1e6 - a["FrameCompleted"] / 1e6 > 50:
+                    break
+                settled = b["FrameCompleted"] / 1e6
+            cand = (t0, fr[0]["FrameCompleted"] / 1e6, len(fr), settled)
             if best is None or cand[0] < best[0]:
                 best = cand
         return best

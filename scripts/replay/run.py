@@ -597,56 +597,124 @@ class Runner:
                 return
 
     def gate_trials(self, n, gap_ms, hold_ms):
-        """Android 400 ms gate (EWLive.swift go(): a press that began before armedAt does not send; armedAt is set 400 ms
-        after the sheet's onAppear). n trials: raw tap on ✓, after gap_ms a raw press on 寄出 (its position with the sheet
-        fully up, remembered as "send") held hold_ms, so the press begins early and ends after the gate opened. Each trial
-        is timed against the sheet window's own first frame (dumpsys gfxinfo framestats, same clock as the kernel touch
-        times). None may send: judged by the mailbox here and by the app's own send log in the step (appsent=0)."""
+        """Android 400 ms gate (SaveBar.swift go(): a press that began before opensAt does not send; opensAt is the sheet's
+        onAppear + 400 ms). n trials: raw tap on ✓, after a gap a raw press on 寄出 held ~1.5 s, so the press begins inside
+        the 400 ms and ends after the gate opened. Each trial is timed against the sheet window's own first frame (dumpsys
+        gfxinfo framestats, the clock of the kernel touch times), and a screenshot taken while the press is held shows
+        whether it reached 寄出 (its pressed state): the sheet slides in for ~600 ms and stops at the medium or the large
+        detent, so an early press is on the button only some of the times. A trial that reached it, began under 380 ms
+        and released on it would send but for the gate. None may send: judged by the mailbox here and by the app's own
+        send log in gate.diag.check."""
         if self.drv.platform != "android":
             raise StepFail("gate_trials 只在安卓上跑")
-        if "save" not in self.ctx or "send" not in self.ctx:
+        if "save" not in self.ctx:
             raise StepFail("门测试缺坐标（先跑记坐标的步骤）")
-        (x1, y1), (x2, y2) = self.ctx["save"], self.ctx["send"]
+        x1, y1 = self.ctx["save"]
+        self.ctx["gate_inwin"] = 0     # gate.diag.check judges only after trials that pressed inside the gate
+
+        shot = os.path.join(self.out, "gate-sheet.png")
+
+        def sheet_top():
+            """The review sheet's top edge on the screen (px), from a screenshot; None when no sheet is up. The sheet stops
+            at the medium or the large detent (both seen on ark37: the first opening on a page large, later ones medium),
+            and the accessibility tree does not follow it: uiautomator kept the large detent's bounds for 寄出 while the
+            sheet stood at medium (0.5.2 r3), so a press aimed by the dump fell on the dimmed page and closed the sheet."""
+            from PIL import Image
+            self.drv.screenshot(shot)
+            im = Image.open(shot).convert("RGB")
+            if sum(im.getpixel((120, 180))) / 3 > 215:
+                return None      # no scrim over the top bar: no sheet
+            near = lambda y: all(abs(c - v) <= 6 for c, v in zip(im.getpixel((120, y)), (236, 235, 245)))
+            for y in range(180, im.height - 30):
+                if near(y) and near(y + 25):
+                    return y
+            return None
+
+        BTN = 84     # 寄出's centre below the sheet's top edge (measured at both detents: 257 → 341, 1211 → 1295)
+
+        def pressed(png, x, y):
+            """Whether the screenshot taken while the press (at x, y) was held shows 寄出 in its pressed state (Material's
+            pressed overlay fills the button's box: 0.66 of the box off the sheet colour against 0.09 unpressed, 0.5.2 r3)
+            with the button settled under the finger. Both are needed: a sheet sliding up to the large detent can carry
+            寄出 through the finger early on (pressed) and then away from it, and a release off the button sends nothing
+            with or without the gate. Pressed and released on it, it would send unless the gate stopped it."""
+            from PIL import Image
+            im = Image.open(png).convert("RGB")
+            if sum(im.getpixel((120, 180))) / 3 > 215:
+                return False
+            near = lambda p: all(abs(c - v) <= 6 for c, v in zip(p, (236, 235, 245)))
+            top = next((y for y in range(180, im.height - 30)
+                        if near(im.getpixel((120, y))) and near(im.getpixel((120, y + 25)))), None)
+            if top is None:
+                return False
+            px = [im.getpixel((xx, yy)) for xx in range(x - 110, x + 110, 4) for yy in range(top + BTN - 75, top + BTN + 75, 4)]
+            return sum(map(near, px)) / len(px) < 0.8 and abs(top + BTN - y) <= 50
+
+        def close_sheet():
+            # the sheet stays open when nothing was sent: close it with its ✕ (再想想), then wait until it is gone
+            # (this waited on 「确认这次修改」, the title before 64064c7, never waited, and the next trial's ✓ fell on a
+            # sheet still going away)
+            top = sheet_top()
+            if top is not None:
+                self.drv.tap(64, top + BTN)
+            end = time.time() + 12
+            while time.time() < end and sheet_top() is not None:
+                time.sleep(0.4)
+            time.sleep(0.8)
+
+        # where 寄出 sits: x from the tree, y from the medium detent (aimed there, a press on a large-detent sheet lands in
+        # the empty list and does nothing; aimed at the large one, it closes a medium sheet)
+        x2, y2 = None, None
+        for _ in range(3):
+            self.drv.tap(x1, y1)
+            time.sleep(1.5)
+            top = sheet_top()
+            if top is None:
+                raise StepFail("✓ 没点开确认单")
+            if x2 is None:
+                self.invalidate()
+                x2 = self.locate("寄出 1 项", scroll=False)["x"]
+            y2 = top + BTN if y2 is None else max(y2, top + BTN)
+            close_sheet()
+            if y2 > self.drv.size[1] // 3:
+                break       # a medium opening seen
         rows = []
         gap = gap_ms
         for k in range(n):
-            t = self.drv.gate_trial(x1, y1, x2 + (k % 2), y2 + (k % 3), gap, hold_ms)
+            t = self.drv.gate_trial(x1, y1, x2, y2 + (k % 3), gap, hold_ms,
+                                    shot=os.path.join(self.out, f"gate-trial{k + 1}-hold.png"))
             if len(t) < 4:
                 raise StepFail(f"第 {k + 1} 次：getevent 没录到四次触摸（{len(t)}）")
             sheet = self.drv.sheet_frames(t[1])
+            time.sleep(0.3)
+            top = sheet_top()
             if sheet is None:
-                raise StepFail(f"第 {k + 1} 次：没找到确认单的窗口帧（✓ 没点开？）")
-            first, drawn, nfr = sheet
-            # where 寄出 sits once the sheet is up: the sheet opens at the medium or the large detent, so a press
-            # aimed at the remembered spot is on the button only when this trial's sheet stopped at the same height
-            self.invalidate()
-            b = self.locate("寄出 1 项", scroll=False)
-            for _ in range(8):
-                time.sleep(0.4)
-                self.invalidate()
-                b2 = self.locate("寄出 1 项", scroll=False)
-                if (b2["x"], b2["y"]) == (b["x"], b["y"]):
-                    break
-                b = b2
-            on_button = abs(b["y"] - y2) <= b["h"] // 2 and abs(b["x"] - x2) <= b["w"] // 2
+                wins = [(w["name"][-40:], len(w["frames"]), w["frames"][0].get("Flags") if w["frames"] else None,
+                         round(w["frames"][0].get("PerformTraversalsStart", 0) / 1e6 - t[1]) if w["frames"] else None)
+                        for w in self.drv.frame_windows()]
+                raise StepFail(f"第 {k + 1} 次：没找到确认单的窗口帧（单子{'还在' if top is not None else '不在'}；窗口 {wins}）；前面几次：{rows}")
+            first, drawn, nfr, settled = sheet
+            on_button = pressed(os.path.join(self.out, f"gate-trial{k + 1}-hold.png"), x2, y2 + (k % 3))
             rows.append({"down_after_first": round(t[2] - first), "first_drawn": round(drawn - first),
-                         "up_after_first": round(t[3] - first), "tap_to_first": round(first - t[1]), "on_button": on_button})
-            self.ctx["send"] = (x2, y2) = (b["x"], b["y"])    # aim the next trial where the button was this time
-            # aim the next press just after this trial's first frame was done, if that is still inside the 400 ms
-            target = min(rows[-1]["first_drawn"] + 30, 380)
-            gap = max(0, gap + target - rows[-1]["down_after_first"])
-            # the sheet stays open when nothing was sent: close it with 再想想
-            n_ = self.locate("再想想", scroll=False)
-            self.drv.tap(n_["x"], n_["y"])
-            end = time.time() + 12
-            while time.time() < end and self.find("确认这次修改", self.dump(True)):
-                time.sleep(0.5)
-        inwin = [r for r in rows if r["on_button"] and r["first_drawn"] <= r["down_after_first"] < 400]
-        self.note = (f"{n} 次（按在寄出停稳的位置上 {sum(r['on_button'] for r in rows)} 次）：按下距单子首帧开始 {min(r['down_after_first'] for r in rows)}–{max(r['down_after_first'] for r in rows)} ms，"
-                     f"松手 {min(r['up_after_first'] for r in rows)}–{max(r['up_after_first'] for r in rows)} ms；"
-                     f"单子首帧画完要 {min(r['first_drawn'] for r in rows)}–{max(r['first_drawn'] for r in rows)} ms；"
-                     f"落在「首帧已画完且不到 400 ms」的 {len(inwin)} 次")
+                         "settled": round(settled - first), "up_after_first": round(t[3] - first),
+                         "tap_to_first": round(first - t[1]), "on_button": on_button,
+                         "pressed": (x2, y2), "sheet_top": top})
+            # aim the next press 330 ms after the sheet's first frame began: inside the gate, late in the opening slide
+            # (~600 ms on ark37), so a medium-detent sheet has 寄出 under the finger by then
+            gap = max(0, gap + 330 - rows[-1]["down_after_first"])
+            close_sheet()
+        inwin = [r for r in rows if r["on_button"] and r["down_after_first"] < 380]
+        self.note = (f"{n} 次（按到寄出上 {sum(r['on_button'] for r in rows)} 次）：按下距单子首帧开始 "
+                     f"{'/'.join(str(r['down_after_first']) for r in rows)} ms，松手 {'/'.join(str(r['up_after_first']) for r in rows)} ms；"
+                     f"单子首帧画完 {'/'.join(str(r['first_drawn']) for r in rows)} ms；"
+                     f"按到停在手指下的寄出（按住时呈按下状态）且按下在 380 ms 内的 {len(inwin)} 次")
         self.ctx["gate_rows"] = rows
+        # only a press on the settled button that began inside the gate tests it: with none, a clean mailbox proves
+        # nothing (r2 at Mac load 10: the first frame alone took 453-677 ms), so the step reads 不判 with the measured
+        # times; a send from any trial still reads 不对 (run_step)
+        self.ctx["gate_inwin"] = len(inwin)
+        if not inwin:
+            self.nojudge_reason = f"模拟器：{n} 次都没有在 380 ms 内按到寄出上"
 
     def own_link(self, old=False):
         """A 免输入链接 for the THROWAWAY mailbox (PhoneTab.swift PhoneLink.make: linkBase#k=base64url({"t","p"})); never
@@ -759,6 +827,9 @@ class Runner:
         self.note = "App 自己的发送记录：" + "；".join(said)
         if bad:
             raise StepFail("；".join(bad))
+        # 「门测试 0 条」 says something only when a gate trial pressed the drawn button inside the 400 ms (gate_trials)
+        if "gate.early" in want and not self.ctx.get("gate_inwin"):
+            self.nojudge_reason = "模拟器：门测试没有一次按在 400 ms 里，0 条不说明门拦住了"
 
     @staticmethod
     def cmd_action(m):
@@ -1118,6 +1189,8 @@ class Runner:
         marker = self.drv.log_marker()
         err = None
         self.note = None
+        # set by an action whose run could not test what the step claims (gate_trials); read only when nothing failed
+        self.nojudge_reason = None
         try:
             for a in step.get("do", []):
                 self.act(a, step)
@@ -1154,6 +1227,8 @@ class Runner:
             verdict, ok, err = f"不判（{step['nojudge_fail']}：{err}）", True, None
         if step.get("nojudge") and (ok or not crash):
             verdict, ok, err = f"不判（{step['nojudge']}）", True, None
+        if ok and self.nojudge_reason:
+            verdict = f"不判（{self.nojudge_reason}）"
         shot = None
         if not ok:
             shot = os.path.join(self.out, f"{i:03d}-{step['id']}.png")

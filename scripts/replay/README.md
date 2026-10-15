@@ -33,7 +33,8 @@ base state), `--out <dir>` (default `scripts/replay/out/<platform>-<time>/`), `-
 Android app data could not be put back (the backup path is printed).
 
 A step reads 对, 不对, 跳过（reason） (it ran but is not judged, e.g. 额度) or 不判（reason） (not judgeable on this
-device, e.g. the 400 ms guard on the Android emulator, which draws 2-3 frames a second). The summary counts all four.
+device, e.g. the 400 ms guard on an Android emulator too slow for any early press to reach 寄出; boot it with
+`-gpu host -cores 4`, where it draws at 60 fps and the guard is judged). The summary counts all four.
 
 ## The local ntfy server (default)
 
