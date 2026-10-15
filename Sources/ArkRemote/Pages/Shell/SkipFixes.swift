@@ -387,6 +387,8 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
 import kotlinx.coroutines.flow.distinctUntilChanged
+import androidx.compose.ui.draw.drawWithContent
+import android.os.SystemClock
 
 /// See `clearsFocusOnOutsideTap()`. `composed` because composeModifier's block is not composable
 /// (skip-ui ComposeView.swift:55) and the focus manager and IME insets are read from the composition.
@@ -432,6 +434,75 @@ struct ClearFocusOnPress: ContentModifier {
         }
     }
 }
+/// The review sheet's 400 ms gate clock (SaveBar.swift MistapGate): when the sheet of review `seq` first drew and when
+/// the latest press on it touched down, both SystemClock.uptimeMillis (ms), the clock of MotionEvent.getEventTime
+/// (PointerInputChange.uptimeMillis): the press's own time, not when the main thread got to it. Main thread only.
+/// Public, as TopBarReselect: native Swift calls these through the generated bridge.
+public final class ReviewGateClock {
+    private static var seq = 0
+    private static var shown = 0.0
+    private static var down = 0.0
+
+    /// A new review opens (SaveBar.openReview): forget the last sheet's times.
+    public static func reset(_ review: Int) {
+        seq = review
+        shown = 0.0
+        down = 0.0
+    }
+
+    /// The first draw of review `seq`'s sheet; 0 before it.
+    public static func shownAt() -> Double {
+        return shown
+    }
+
+    /// The latest touch-down on the sheet, then cleared; 0 for none.
+    public static func takeDown() -> Double {
+        let d = down
+        down = 0.0
+        return d
+    }
+
+    public static func now() -> Double {
+        return Double(SystemClock.uptimeMillis())
+    }
+
+    static func drew(_ review: Int) {
+        if review == seq && shown == 0.0 {
+            shown = Double(SystemClock.uptimeMillis())
+        }
+    }
+
+    static func pressed(_ review: Int, at: Double) {
+        if review == seq {
+            down = at
+        }
+    }
+}
+
+/// See ReviewGateClock. The draw stamp is taken in the sheet window's first frame (a draw pass, after composition and
+/// layout), not at onAppear, which ran before anything was on screen; the press is watched in the Initial pass without
+/// consuming it, so 寄出 still gets its click.
+struct ReviewGateStamps: ContentModifier {
+    let seq: Int
+
+    func modify(view: any View) -> any View {
+        let review = seq
+        return view.composeModifier { modifier in
+            modifier
+                .drawWithContent {
+                    drawContent()
+                    ReviewGateClock.drew(review)
+                }
+                .pointerInput(review) {
+                    awaitEachGesture {
+                        let first = awaitFirstDown(requireUnconsumed: false, pass: PointerEventPass.Initial)
+                        ReviewGateClock.pressed(review, at: Double(first.uptimeMillis))
+                    }
+                }
+        }
+    }
+}
+
 /// The reselect counts as Compose state, for the top bar closure below. TabReselect (an @Observable in compiled Swift) is
 /// not bridged to Kotlin (its TabReselect.kt has no class), and an environment value set on the NavigationStack did not
 /// reach the tab roots on Android (TabReselect.swift:1-6), so TabReselect.bump bumps these too.

@@ -26,13 +26,15 @@ struct EWSaveBar: ViewModifier {
     /// presents one thing at a time), so it waits for the sheet's onDismiss (Pages/Shell/Feedback.swift).
     @State var heldFail: String? = nil
     @State var sheetUp = false
-    #if os(Android)
     /// view.js:1619 goArmedAt: while the review lists a 今天不跑 / 今天照常跑, a press that began in the sheet's first
-    /// 400 ms is no confirm (the 08:46 skips, 检查 09-30); the sheet stays. The web judges by when the press began
-    /// (view.js:2953-2955 goPressAt), so this is the time the sheet came up plus 400 ms (RecKit.mono, ms), compared with
-    /// the press's start (ReviewPress) in go(); 0 = no gate this review (nothing to skip listed). A comparison, not a wait.
-    /// iOS needs none: UIKit takes no touches while the sheet is still being presented (replay gate.early).
-    @State var opensAt = 0.0
+    /// 400 ms is no confirm (the 08:46 skips, 检查 09-30); the sheet stays (MistapGate, judged in go()).
+    @State var gated = false
+    /// Which review this is: the Android stamps (ReviewGateStamps) count only for the sheet of this review, not for a
+    /// sheet still going away.
+    @State var reviewSeq = 0
+    #if !os(Android)
+    /// iOS: when the sheet's content appeared (RecKit.mono, ms), the start of its presentation.
+    @State var shownAt = 0.0
     #endif
 
     private var edits: [String: EWEdit] { EWEdits.shared.items }
@@ -102,15 +104,17 @@ struct EWSaveBar: ViewModifier {
                 // content.")
                 .presentationDetents([.medium, .large])
                 #if os(Android)
-                // where each press on the sheet began (ReviewPress); the sheet is its own dialog window, which the
-                // activity's touch feed (Main.kt dispatchTouchEvent) never sees
-                .simultaneousGesture(DragGesture(minimumDistance: 0)
-                    .onChanged { _ in ReviewPress.down() }
-                    .onEnded { _ in ReviewPress.up() })
-                .onAppear {
-                    opensAt = edits.values.contains(where: EWSave.isSkip) ? RecKit.mono() + 400 : 0   // view.js:1619
-                }
+                // the sheet's first drawn frame and each press's touch-down, both on the events' own clock
+                // (ReviewGateStamps); the sheet is its own dialog window, which the activity's touch feed (Main.kt
+                // dispatchTouchEvent) never sees
+                .composeModifier { ReviewGateStamps(seq: reviewSeq) }
                 #endif
+                .onAppear {
+                    gated = edits.values.contains(where: EWSave.isSkip)   // view.js:1619
+                    #if !os(Android)
+                    shownAt = RecKit.mono()
+                    #endif
+                }
             }
             // view.js:3007: ask("有改动没发出去", …, "好", false, { single: true })
             .alert("有改动没发出去", isPresented: Binding(get: { failNote != nil }, set: { if !$0 { failNote = nil } })) {
@@ -152,8 +156,9 @@ struct EWSaveBar: ViewModifier {
     }
 
     private func openReview() {
+        reviewSeq += 1
         #if os(Android)
-        ReviewPress.reset()
+        ReviewGateClock.reset(reviewSeq)
         #endif
         sheetUp = true
         reviewing = true
@@ -162,12 +167,23 @@ struct EWSaveBar: ViewModifier {
     /// #go (view.js:2954-3016). Android: a press that began in the first 400 ms while a skip is listed does nothing and
     /// the sheet stays.
     private func go() {
-        #if os(Android)
         // view.js:2953-2955 judges by when the press began. `.disabled` alone did not hold on Android: of six presses begun
-        // 0.35-0.40 s after ✓ and let go after the gate opened, three sent (test pass 1, 问题 11). No recorded start (the
-        // gesture saw nothing, e.g. TalkBack's activate) is judged by now, the press's end.
-        if opensAt > 0, (ReviewPress.began ?? RecKit.mono()) < opensAt { return }
-        #endif
+        // 0.35-0.40 s after ✓ and let go after the gate opened, three sent (test pass 1, 问题 11).
+        if gated {
+            #if os(Android)
+            // the press's own touch-down time against the sheet's first frame, both SystemClock.uptimeMillis: the times
+            // the app took when it got round to handling them let an early press through on a slow emulator (0.5.2 r3
+            // and-final5). The down is used once, so a later press with none (TalkBack's activate) is judged by now.
+            let shown = ReviewGateClock.shownAt(), down = ReviewGateClock.takeDown()
+            let open = MistapGate.allows(shownAt: shown > 0 ? shown : nil, downAt: down > 0 ? down : nil,
+                                         now: ReviewGateClock.now())
+            #else
+            // iOS: UIKit takes no touches while the sheet is being presented (replay gate.early), so a press reaching
+            // 寄出 began after that; this also holds the 400 ms from the presentation's start, judged at the release
+            let open = MistapGate.allows(shownAt: shownAt, downAt: nil, now: RecKit.mono())
+            #endif
+            if !open { return }
+        }
         let pool = EWEdits.shared
         guard !pool.saving else { return }   // 2026-09-01: three taps sent three times; one flag across the tabs
         pool.saving = true
@@ -202,20 +218,15 @@ struct EWSaveBar: ViewModifier {
     static func unsentLine(count: Int) -> String? { count == 0 ? nil : "\(count) 项未寄出" }
 }
 
-/// When the current press on the review sheet began (Android). skip-ui's simultaneous DragGesture with minimumDistance 0
-/// reports the down itself on the Initial pass and consumes nothing (Gesture.swift:972-984 detectSimultaneousDragGestures),
-/// then every move: only the first report of a press is its start. The press's up reaches this parent (Initial pass)
-/// before the 寄出 button's click, so `began` still holds that press's start when go() runs. One review sheet is up at a
-/// time; main thread only.
-enum ReviewPress {
-    nonisolated(unsafe) static var began: Double? = nil
-    nonisolated(unsafe) static var pressing = false
+/// view.js:1619 / 2953-2955 (goArmedAt, goPressAt): on a review that lists a skip, 寄出 counts only for a press that
+/// touched down at least 400 ms after the sheet was first on screen. Both times are on one clock in ms: Android the
+/// events' own SystemClock.uptimeMillis (ReviewGateClock), iOS RecKit.mono. `shownAt` nil = not drawn yet, so nothing
+/// on it can have been seen; `downAt` nil = no touch-down recorded (an accessibility activate), judged by `now`.
+enum MistapGate {
+    static let ms = 400.0
 
-    static func reset() { began = nil; pressing = false }
-    static func down() {
-        guard !pressing else { return }
-        pressing = true
-        began = RecKit.mono()
+    static func allows(shownAt: Double?, downAt: Double?, now: Double) -> Bool {
+        guard let shownAt else { return false }
+        return (downAt ?? now) - shownAt >= ms
     }
-    static func up() { pressing = false }
 }
