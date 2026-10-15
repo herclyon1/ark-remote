@@ -139,7 +139,11 @@ func stampFrom(_ epoch: Double?) -> String {
     static let tokensKey = "ark-remote-tokens"
     /// The last good reading, shown at once on the next open (behaviour 2, 2026-09-19).
     static let cacheKey = "ark-remote-stamina"
-    static let zonai = "https://zonai.skland.com"
+    static let zonaiDefault = "https://zonai.skland.com"
+    /// 森空岛's API host; the replay test's stand-in (scripts/replay/skland_local.py) when it has set "ark-skland-base"
+    /// to a loopback address (loopbackOverride: no other host is taken).
+    static var zonai: String { loopbackOverride(skBaseKey) ?? zonaiDefault }
+    static let skBaseKey = "ark-skland-base"
     static let kuroBase = "https://api.kurobbs.com"
     static let minGapMs: Double = 60 * 1000
 

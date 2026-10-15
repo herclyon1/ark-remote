@@ -28,8 +28,13 @@ import steps as stepsmod   # noqa: E402
 BACKGROUND_ACTIONS = {"refresh", "watch"}      # sent by the app on its own (open / refresh), never a test failure
 RESET_KEYS = ["ark-remote-pending", "ark-remote-acked", "ark-remote-estop", "ark-remote-cfg-queue", "ark-remote-cfg-snap",
               "tab", "ark-diag", "ark-diag-events", "ark-remote-tokens", "ark-remote-link-taken", "ark-remote-hb",
-              "ark-ntfy-base"]
+              "ark-ntfy-base", "ark-skland-base", "ark-need-url"]
 NTFY_BASE_KEY = "ark-ntfy-base"                # Net.swift ntfyBase: the app's mailbox server (the local one by default)
+# ("skland", "on"): the 库存 page with numbers - 森空岛 and the need table answered by skland_local.py on this Mac
+# (Stamina.swift StaminaStore.skBaseKey, Inventory.swift InventoryStore.needURLKey; both loopback only) and a made-up
+# 森空岛 session that only that stand-in ever sees
+SKLAND_KEYS = ["ark-skland-base", "ark-need-url", "ark-remote-tokens"]
+REPLAY_SK = {"sk": {"cred": "replay", "token": "replay", "dId": "replay", "uid": "replay", "efRole": "1", "efServer": "1"}}
 DIAG_BLACKHOLE = "http://127.0.0.1:9"          # ark-diag-bucket override: diag / crash / fluency uploads go nowhere
 
 
@@ -347,6 +352,28 @@ class Runner:
             self.check_stored_config()
             self.drv.launch()
             self.ctx["crash_marker"] = self.drv.log_marker()
+        elif kind == "skland":
+            # ("skland", "on" | "off"): stop the app, point it at the local stand-in with a made-up session (or take
+            # both away again), start it
+            self.drv.terminate()
+            if rest[0] == "on":
+                if not self.ctx.get("skland"):
+                    import skland_local
+                    self.ctx["skland"] = skland_local.LocalSkland(log=lambda m: print(m, flush=True)).start()
+                base = __import__("skland_local").base_for(self.a.platform)
+                self.drv.write_default("ark-skland-base", base)
+                self.drv.write_default("ark-need-url", base + "/need.json")
+                self.drv.write_default("ark-remote-tokens", json.dumps(REPLAY_SK, separators=(",", ":")))
+            else:
+                self.drv.delete_defaults(SKLAND_KEYS)
+            self.check_stored_config()
+            self.drv.launch()
+            self.ctx["crash_marker"] = self.drv.log_marker()
+        elif kind == "appearance":
+            # ("appearance", "dark" | "light"): the system's dark mode (simctl ui appearance / cmd uimode night)
+            self.drv.appearance(rest[0] == "dark")
+            self.ctx["dark"] = rest[0] == "dark"
+            time.sleep(1.5)
         elif kind == "state":
             self.mb.publish_state(rest[0] if rest else "base", self.ctx.get("receipts"))
         elif kind == "receipt":
@@ -1134,7 +1161,7 @@ class Runner:
 
 
 ACTIONS = {"bottom", "until", "gone", "nokb", "retry", "tap", "tab", "toggle", "field", "type", "enter", "hidekb", "swipe", "top", "back", "wait", "relaunch", "state",
-           "receipt", "clear_receipts", "hb", "remember", "gate", "gate_trials", "app_posts", "shot", "clipboard", "forget_config", "restore_config", "fluency",
+           "receipt", "clear_receipts", "hb", "remember", "gate", "gate_trials", "app_posts", "shot", "clipboard", "forget_config", "restore_config", "fluency", "skland", "appearance",
            "dismiss", "discard", "clear", "pick", "tapout", "time", "see", "point", "allow_paste"}
 STEP_KEYS = {"id", "page", "say", "do", "on", "expect", "absent", "visible", "keyboard", "cmd", "nocmd", "timeout", "cmd_timeout",
              "ios", "android", "always", "settle", "pause", "relaunch_on_crash", "switch", "offline",
@@ -1436,15 +1463,22 @@ def main():
             except Exception as e:
                 print("偏好恢复失败：", e, "备份在", prefs_saved)
                 rc = rc or 4
-        if local and not prefs_saved:
-            try:   # iOS: the simulator's app goes back to ntfy.sh (Android: the defaults.xml restore above did it)
-                drv.delete_defaults([NTFY_BASE_KEY])
+        if (local or r.ctx.get("skland")) and not prefs_saved:
+            try:   # iOS: the simulator's app goes back to ntfy.sh and 森空岛 (Android: the defaults.xml restore above did it)
+                drv.delete_defaults(([NTFY_BASE_KEY] if local else []) + (SKLAND_KEYS if r.ctx.get("skland") else []))
             except Exception:
                 pass
+        try:   # a run that turned dark mode on and stopped before turning it off
+            if r.ctx.get("dark"):
+                drv.appearance(False)
+        except Exception:
+            pass
         drv.stop()
         mb.stop()
         if local:
             local.stop()
+        if r.ctx.get("skland"):
+            r.ctx["skland"].stop()
     took = time.time() - t_start
     bad = [x for x in r.results if not x["ok"]]
     n_ok = sum(1 for x in r.results if x.get("verdict") == "对")

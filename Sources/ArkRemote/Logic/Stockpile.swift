@@ -56,6 +56,44 @@ struct StockSection: Identifiable, Sendable, Equatable {
     let rows: [StockRow]
 }
 
+/// One segment of the 库存 page's picker: a build standard of the need table (祀, 明河), by standardFor's key.
+struct StockChoice: Identifiable, Sendable, Equatable {
+    let id: String
+    let title: String
+}
+
+/// One essence term row: 「基础属性」 → 「智识提升」.
+struct StockTerm: Identifiable, Sendable, Equatable {
+    var id: String { slot + name }
+    let slot: String
+    let name: String
+}
+
+/// The essence advice for the signature weapon of the standard shown (need table standards[].weapon.essence).
+struct StockEssence: Sendable, Equatable {
+    /// 「基质刷取 · 玉中身」.
+    let header: String
+    let terms: [StockTerm]
+    /// 「重度能量淤积点」 (what the places are), or 「掉落地点」 when the table does not say.
+    let pointsTitle: String
+    /// 「枢纽区、源石研究园、…」, nil when the table names none.
+    let points: String?
+    /// How MaaEnd's 基质刷取 farms it by itself (the table's `maaend` line), nil when it has none.
+    let footer: String?
+}
+
+/// What the 库存 page shows above the materials: which standard (a picker when the table has more than one) and
+/// that standard's essence advice.
+struct StockTop: Sendable, Equatable {
+    /// The picker's segments, in the table's order (newest released first); empty = no picker.
+    var choices: [StockChoice] = []
+    /// The key of the standard shown.
+    var selected: String = ""
+    /// Under the picker: who it is and when she came / comes, and the next one.
+    var caption: String?
+    var essence: StockEssence?
+}
+
 /// What the 库存 page shows.
 enum StockpileContent: Sendable, Equatable {
     /// One-line loading cell with a spinner: 「正在从森空岛读取…」.
@@ -85,11 +123,16 @@ enum StockpileEmptyAction: Sendable, Equatable {
     static let boxSection = "资源箱"
 
     var content: StockpileContent = .loading
+    /// Above the materials (only with a list): the standard picker and the essence advice; nil = nothing there.
+    var top: StockTop?
     /// The 刷新 button is disabled while a read runs.
     var busy = false
 
     /// Inventory.refresh(force) → inventory.js's result object ({取自, games: [...]}).
     @ObservationIgnored var loader: (@MainActor (Bool) async throws -> JSONValue)?
+    /// The picker: choose the standard with this key (Inventory.setStandard) and hand back the last read worked out
+    /// again for it (Inventory.repick), or nil when there is none to reuse.
+    @ObservationIgnored var picker: (@MainActor (String) async -> JSONValue?)?
 
     @ObservationIgnored private var lastGood: JSONValue?
     @ObservationIgnored private var lastErr = ""
@@ -111,6 +154,12 @@ enum StockpileEmptyAction: Sendable, Equatable {
         }
     }
 
+    /// The picker was set to `key`: the same read for that standard at once, or a new read when there is none to reuse.
+    func pick(_ key: String) async {
+        guard !key.isEmpty, key != top?.selected else { return }
+        if let picked = await picker?(key) { paint(picked) } else { await load(force: true) }
+    }
+
     /// Forget the last good read (the acceptance script walks the no-data states first; nothing on the page calls it).
     func reset() {
         lastGood = nil
@@ -128,11 +177,84 @@ enum StockpileEmptyAction: Sendable, Equatable {
         }
         if let good = lastGood, let gg = good["games"]?[0] {
             content = Self.list(gg, good, err: lastErr)
+            top = Self.top(gg)
         } else if err == "没配森空岛" {
             content = .empty(title: "没配森空岛", text: "库存从森空岛读，在「手机」页填好密钥串后再来。", button: "去手机页", action: .phone)
+            top = nil
         } else {
             content = .empty(title: "读不到库存", text: err, button: "重试", action: .retry)
+            top = nil
         }
+    }
+
+    // MARK: who and the essence advice
+
+    /// "2026-10-15" → "10-15"; anything else as is.
+    static func monthDay(_ date: String) -> String {
+        let p = date.split(separator: "-")
+        guard p.count == 3, p[0].count == 4, p[1].count == 2, p[2].count == 2 else { return date }
+        return "\(p[1])-\(p[2])"
+    }
+
+    /// 「下一位：明河（11-05 上线）」.
+    static func nextLine(_ n: JSONValue) -> String {
+        let name = n["name"]?.jsString ?? ""
+        let day = monthDay(n["releasedAt"]?.string ?? "")
+        return "下一位：\(name)" + (day.isEmpty ? "" : "（\(day) 上线）")
+    }
+
+    /// The part above the materials for game `g` of a reading (Inventory's shape): the picker when the table has two
+    /// or more standards (the newest released six-star first, the announced one second: the table's order), and the
+    /// essence advice of the standard shown - only that one's, since each advice names its own weapon to tick in MaaEnd.
+    /// nil when there is neither (a table from before 2026-10-15).
+    static func top(_ g: JSONValue) -> StockTop? {
+        let std = g["standard"]
+        let options = g["standards"]?.array ?? []
+        var top = StockTop()
+        if options.count >= 2 {
+            top.choices = options.compactMap { o in
+                let key = o["key"]?.string ?? ""
+                let name = o["name"]?.jsString ?? ""
+                return key.isEmpty || name.isEmpty ? nil : StockChoice(id: key, title: name)
+            }
+            if top.choices.count < 2 { top.choices = [] }
+        }
+        top.selected = std?["key"]?.string ?? ""
+        if !top.choices.isEmpty {
+            var parts: [String] = []
+            if let l = std?["label"]?.string, !l.isEmpty { parts.append(l) }
+            let day = monthDay(std?["releasedAt"]?.string ?? "")
+            if !day.isEmpty { parts.append("\(day) 上线") }
+            if let w = std?["weapon"]?.string, !w.isEmpty { parts.append("专武 \(w)") }
+            var caption = parts.joined(separator: "，")
+            // the next one named under the newest one; not under the next one herself
+            if let n = g["next"], n.truthy, (n["name"]?.jsString ?? "") != (std?["name"]?.jsString ?? ""),
+               (std?["role"]?.string ?? "current") != "next" {
+                caption += (caption.isEmpty ? "" : "。") + nextLine(n)
+            }
+            top.caption = caption.isEmpty ? nil : caption
+        }
+        if let e = std?["essence"], e.truthy, let terms = e["terms"]?.array, !terms.isEmpty {
+            let weapon = e["weapon"]?.jsString ?? ""
+            let points = (e["points"]?.array ?? []).map { $0.jsString }.filter { !$0.isEmpty }
+            let kind = e["pointKind"]?.string ?? ""
+            let maaend = e["maaend"]?.string ?? ""
+            top.essence = StockEssence(
+                header: weapon.isEmpty ? "基质刷取" : "基质刷取 · \(weapon)",
+                terms: terms.map { StockTerm(slot: $0["slot"]?.jsString ?? "", name: $0["name"]?.jsString ?? "") },
+                pointsTitle: kind.isEmpty ? "掉落地点" : kind,
+                points: points.isEmpty ? nil : points.joined(separator: "、"),
+                footer: maaend.isEmpty ? nil : maaend)
+        }
+        return top.choices.isEmpty && top.essence == nil ? nil : top
+    }
+
+    /// The last bracket of a standard's footnote when there are two at its end, e.g. 「上线前按客户端预览表，棱柱和折金票
+    /// 含天赋树」 of 明河's (the table adds it to a standard whose numbers come from the client's preview table); nil else.
+    static func caveat(_ footnote: String?) -> String? {
+        guard let f = footnote, f.hasSuffix("）"), let r = f.range(of: "）（", options: .backwards) else { return nil }
+        let inner = f[r.upperBound..<f.index(before: f.endIndex)]
+        return inner.isEmpty ? nil : String(inner)
     }
 
     // MARK: listHtml
@@ -270,6 +392,26 @@ enum StockpileEmptyAction: Sendable, Equatable {
         if let note = box?["note"], note.truthy { foot.append(note.jsString) }
         if nf.usedK { foot.append("k = 千") }
         if let lag = g["lagNote"], lag.truthy { foot.append(lag.jsString) }
+        let std = g["standard"]
+        // a standard counted from the client's preview table (明河 before she is out) says so in its own footnote
+        if let c = caveat(g["footnote"]?.string) {
+            let who = std?["name"]?.string ?? ""
+            foot.append(who.isEmpty ? c : "\(who)：\(c)")
+        }
+        // the next one: in the picker's caption when the table has her numbers; here when it has only her name
+        let picker = (g["standards"]?.array ?? []).count >= 2
+        let nextErr = g["nextError"]?.string ?? ""
+        if let n = g["next"], n.truthy, !picker {
+            foot.append(nextLine(n) + (nextErr.isEmpty ? "" : "，她的用量这次没算出来：\(nextErr)"))
+        } else if !nextErr.isEmpty {
+            foot.append("下一位六星的用量这次没算出来：\(nextErr)")
+        }
+        if let e = std?["essence"], e.truthy {
+            let v = e["dataVersion"]?.string ?? ""
+            foot.append("基质词条和掉落地点取自 MaaEnd 的数据" + (v.count >= 10 ? "（\(v.prefix(10)) 版）" : ""))
+        } else if let r = std?["essenceReason"]?.string, !r.isEmpty {
+            foot.append("基质刷取建议这次没有：\(r)")
+        }
         return .list(sections: sections, footnote: foot)
     }
 }

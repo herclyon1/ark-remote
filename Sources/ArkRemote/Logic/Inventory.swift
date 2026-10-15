@@ -88,6 +88,28 @@ struct BoxUse: Codable, Sendable, Equatable {
     var left: Int
 }
 
+/// One essence term of a weapon: the slot it sits in (基础属性 / 附加属性 / 技能属性) and its name.
+struct EssenceTerm: Codable, Sendable, Equatable {
+    var slot: String
+    var name: String
+}
+
+/// standards[].weapon.essence (maa-automation needtable build.py essence_advice, since 2026-10-15): the signature
+/// weapon's three essence terms, the energy points that drop all three, and how MaaEnd's 目标选择 farms it. Taken from
+/// the table only when `terms` is a non-empty array; otherwise only `reason` (why there is no advice) is kept.
+struct EssenceAdvice: Codable, Sendable, Equatable {
+    var weapon: String
+    var terms: [EssenceTerm]
+    /// The points' short names (「枢纽区」), in the table's order.
+    var points: [String]
+    /// What every point is, when their full names share it (「重度能量淤积点」 of 「重度能量淤积点·枢纽区」), else "".
+    var pointKind: String
+    var engrave: String
+    var maaend: String
+    var dataVersion: String
+    var reason: String
+}
+
 /// games[].standard: the build standard in force.
 struct InventoryStandard: Codable, Sendable, Equatable {
     var charId: String?
@@ -97,6 +119,15 @@ struct InventoryStandard: Codable, Sendable, Equatable {
     var status: String?
     var weapon: String?
     var sources: JSONValue?
+    /// The key standardFor matches a choice by: charId, else wikiItemId (an announced six-star has no charId yet).
+    var key: String?
+    /// "current" | "next" | "named"; nil in tables built before 2026-10-15.
+    var role: String?
+    /// 「最新六星」 / 「下一位六星」 / 「指定干员」; nil in older tables.
+    var label: String?
+    var essence: EssenceAdvice?
+    /// Why there is no essence advice (the table's `reason`), "" when there is advice or nothing was said.
+    var essenceReason: String?
 }
 
 /// One entry of standards(): what a picker shows.
@@ -108,7 +139,19 @@ struct StandardOption: Codable, Sendable, Equatable, Identifiable {
     var status: String?
     var weapon: String?
     var caliber: String?
-    var id: String { charId ?? name ?? "" }
+    /// standardFor's key (charId, else wikiItemId); "" only when the table names neither.
+    var key: String = ""
+    var role: String?
+    var label: String?
+    var id: String { key.isEmpty ? (name ?? "") : key }
+}
+
+/// The six-star after the one shown: coverage.next, else the table's `role: "next"` standard.
+struct NextStandard: Codable, Sendable, Equatable {
+    var name: String
+    var releasedAt: String
+    var status: String?
+    var weapon: String?
 }
 
 /// One game of the reading.
@@ -129,13 +172,18 @@ struct InventoryGame: Codable, Sendable, Equatable {
     var lagNote: String?
     var standard: InventoryStandard?
     var standards: [StandardOption] = []
+    /// The announced six-star after the newest released one (coverage.next / the `role: "next"` standard), nil when the
+    /// table names none (tables before 2026-10-15).
+    var next: NextStandard?
+    /// coverage.nextError: why the table could not build the next one's numbers, "" when it could.
+    var nextError: String = ""
     var box: InventoryBox?
     var boxUse: BoxUse?
     var rows: [InventoryRow] = []
 
     enum CodingKeys: String, CodingKey {
         case game, gameId, error = "错误", caliber, footnote, source, built, gameLevel, sections, groups, useSource,
-             originSource, lagMinutes, lagNote, standard, standards, box, boxUse, rows
+             originSource, lagMinutes, lagNote, standard, standards, next, nextError, box, boxUse, rows
     }
 }
 
@@ -324,6 +372,9 @@ enum InventoryCalc {
     /// The page read "data/need.json" next to itself; this is that file on the deployed site. Since the relay
     /// rebuilds the table itself (`relayNeedURL`), this is the fallback: it was last built 2026-09-23.
     static let needURL = "https://herclyon1.github.io/maa/data/need.json"
+    /// The replay test's own copy of the table (scripts/replay/skland_local.py), read before the others when this key
+    /// names a loopback URL (loopbackOverride: no other host is taken). Nothing in the app writes it.
+    static let needURLKey = "ark-need-url"
     static let matKey = "ark-remote-matlist"
     static let standardKey = "ark-remote-need-standard"
     static let minGapMs: Double = 60 * 1000
@@ -359,7 +410,7 @@ enum InventoryCalc {
     @discardableResult
     func loadNeed(force: Bool = false) async throws -> JSONValue {
         var last: Error = AppError("需求表拿不到")
-        for url in [relayNeedURL, Self.needURL].compactMap({ $0 }) {
+        for url in [loopbackOverride(Self.needURLKey), relayNeedURL, Self.needURL].compactMap({ $0 }) {
             do {
                 let (body, status) = try await fetchNeed(url)
                 guard (200..<300).contains(status) else { throw AppError("需求表拿不到（\(status)）") }
@@ -385,8 +436,51 @@ enum InventoryCalc {
         (needFor(gameId)?["standards"]?.array ?? []).map { s in
             StandardOption(charId: strOrNil(s["charId"]), name: strOrNil(s["name"]), rarity: intOrNil(s["rarity"]),
                            releasedAt: strOrNil(s["releasedAt"]), status: strOrNil(s["status"]),
-                           weapon: strOrNil(s["weapon"]?["name"]), caliber: strOrNil(s["caliber"]))
+                           weapon: strOrNil(s["weapon"]?["name"]), caliber: strOrNil(s["caliber"]),
+                           key: Self.standardKey(s) ?? "", role: strOrNil(s["role"]), label: strOrNil(s["label"]))
         }
+    }
+
+    /// The key a standard is chosen by: its charId, else its wikiItemId (an announced six-star has no charId until the
+    /// calculator lists her: 明河 in the 2026-10-15 table); nil when it has neither.
+    nonisolated static func standardKey(_ s: JSONValue) -> String? {
+        let c = jsStr(s["charId"])
+        if !c.isEmpty { return c }
+        let w = jsStr(s["wikiItemId"])
+        return w.isEmpty ? nil : w
+    }
+
+    /// standards[].weapon.essence as the page uses it: the advice when it has terms, else only its reason.
+    nonisolated static func essence(_ v: JSONValue?) -> (advice: EssenceAdvice?, reason: String) {
+        guard let e = nonNull(v), e.object != nil else { return (nil, "") }
+        let reason = strOrNil(e["reason"]) ?? ""
+        let terms: [EssenceTerm] = (e["terms"]?.array ?? []).compactMap { t in
+            let name = jsStr(t["name"])
+            return name.isEmpty ? nil : EssenceTerm(slot: jsStr(t["slot"]), name: name)
+        }
+        guard !terms.isEmpty else { return (nil, reason) }
+        let pts = (e["points"]?.array ?? []).filter { !jsStr($0["name"]).isEmpty }
+        let points = pts.map { jsStr($0["name"]) }
+        let kinds = Set(pts.map { p -> String in
+            let full = jsStr(p["full"])
+            guard let dot = full.firstIndex(of: "·") else { return "" }
+            return String(full[..<dot])
+        })
+        let kind = kinds.count == 1 ? (kinds.first ?? "") : ""
+        return (EssenceAdvice(weapon: jsStr(e["weapon"]), terms: terms, points: points, pointKind: kind, engrave: jsStr(e["engrave"]),
+                              maaend: jsStr(e["maaend"]), dataVersion: jsStr(e["dataVersion"]), reason: reason), reason)
+    }
+
+    /// The next six-star: coverage.next when the table says, else its `role: "next"` standard; nil for older tables.
+    nonisolated static func nextStandard(_ ng: JSONValue?) -> NextStandard? {
+        if let n = ng?["coverage"]?["next"], n.object != nil, !jsStr(n["name"]).isEmpty {
+            return NextStandard(name: jsStr(n["name"]), releasedAt: jsStr(n["releasedAt"]), status: strOrNil(n["status"]),
+                                weapon: strOrNil(n["weapon"]))
+        }
+        guard let s = (ng?["standards"]?.array ?? []).first(where: { jsStr($0["role"]) == "next" }),
+              !jsStr(s["name"]).isEmpty else { return nil }
+        return NextStandard(name: jsStr(s["name"]), releasedAt: jsStr(s["releasedAt"]), status: strOrNil(s["status"]),
+                            weapon: strOrNil(s["weapon"]?["name"]))
     }
 
     /// inventory.js chosenStandard(gameId): the charId picked on this phone, "" for the file's default.
@@ -405,14 +499,8 @@ enum InventoryCalc {
     func standardFor(_ g: JSONValue?) -> JSONValue? {
         let list = g?["standards"]?.array ?? []
         let want = chosenStandard(jsStr(g?["gameId"]))
-        func key(_ s: JSONValue) -> String? {
-            let c = jsStr(s["charId"])
-            if !c.isEmpty { return c }
-            let w = jsStr(s["wikiItemId"])
-            return w.isEmpty ? nil : w
-        }
         let def = jsStr(g?["standard"])
-        return list.first { key($0) == want } ?? list.first { key($0) == def } ?? list.first
+        return list.first { Self.standardKey($0) == want } ?? list.first { Self.standardKey($0) == def } ?? list.first
     }
 
     // MARK: material-list cache
@@ -439,8 +527,11 @@ enum InventoryCalc {
 
     // MARK: one game
 
-    /// inventory.js endfield(sk).
-    func endfield(_ sk: JSONValue) async -> InventoryGame {
+    /// The need-table half of the 终末地 game for the standard in force (standardFor): who the build is for, how the page
+    /// words it, and the rows of that standard. Since 2026-10-15 a standard carries its own `groups` / `useSource` (明河's
+    /// groups are per owner, 「明河」 / 「专武 唤月」, so the game-level list, a mirror of the first standard, would sort her
+    /// sections wrong); a table without them falls back to the game's.
+    func shell() -> (game: InventoryGame, needRows: [JSONValue], needGame: JSONValue?) {
         var g = InventoryGame(game: Self.gameName, gameId: Self.gameIdEndfield)
         let needGame = needFor(Self.gameIdEndfield)
         let std = standardFor(needGame)
@@ -450,19 +541,63 @@ enum InventoryCalc {
             g.source = strOrNil(ng["source"])
             g.built = strOrNil(need?["built"])
             g.sections = strings(ng["sections"])
-            g.groups = strings(ng["groups"])
-            g.useSource = strOrNil(ng["useSource"]) ?? ""
+            // absent (a table before 2026-10-15) falls back to the game's list; present stays the standard's own
+            g.groups = std?["groups"]?.array != nil ? strings(std?["groups"]) : strings(ng["groups"])
+            g.useSource = (std?["useSource"].flatMap { $0.isNull ? nil : $0.jsString }) ?? (strOrNil(ng["useSource"]) ?? "")
             g.originSource = strOrNil(ng["originSource"]) ?? ""
             g.lagMinutes = intOrNil(ng["lagMinutes"])
             g.lagNote = strOrNil(ng["lagNote"]) ?? ""
             if let s = std {
+                let e = Self.essence(s["weapon"]?["essence"])
                 g.standard = InventoryStandard(charId: strOrNil(s["charId"]), name: strOrNil(s["name"]), rarity: intOrNil(s["rarity"]),
                                                releasedAt: strOrNil(s["releasedAt"]), status: strOrNil(s["status"]),
-                                               weapon: strOrNil(s["weapon"]?["name"]), sources: nonNull(s["sources"]))
+                                               weapon: strOrNil(s["weapon"]?["name"]), sources: nonNull(s["sources"]),
+                                               key: Self.standardKey(s), role: strOrNil(s["role"]), label: strOrNil(s["label"]),
+                                               essence: e.advice, essenceReason: e.reason)
             }
             g.standards = standards(Self.gameIdEndfield)
+            g.next = Self.nextStandard(ng)
+            g.nextError = strOrNil(ng["coverage"]?["nextError"]) ?? ""
         }
-        let needRows: [JSONValue] = (std ?? needGame)?["rows"]?.array ?? []
+        return (g, (std ?? needGame)?["rows"]?.array ?? [], needGame)
+    }
+
+    /// The rows of `g`'s standard from one read's counts (rowsFor + the self-select box).
+    private static func fill(_ g: inout InventoryGame, _ needRows: [JSONValue], _ needGame: JSONValue?, _ h: HeldRead) {
+        var rows = InventoryCalc.rowsFor(needRows, h.counts, h.mat)
+        g.box = InventoryCalc.box(needGame?["box"])
+        g.boxUse = InventoryCalc.applyBox(&rows, g.box)
+        g.rows = rows
+        g.gameLevel = h.gameLevel
+    }
+
+    /// What the last good read of 森空岛 answered, so the page's picker can show another standard without asking again.
+    struct HeldRead {
+        var counts: [String: JSONValue]
+        var mat: [String: MaterialInfo]
+        var gameLevel: JSONValue?
+    }
+    @ObservationIgnored private(set) var held: HeldRead?
+
+    /// The 库存 page's picker: `data` worked out again for the standard picked now (setStandard), from the counts of the
+    /// last read - no request, so switching between 祀 and 明河 is at once and does not ask 森空岛 twice. nil when there is
+    /// no good read to reuse (the page then reads again).
+    func repick() -> InventoryReading? {
+        guard var d = data, let h = held, need != nil, let first = d.games.first, first.error.isEmpty,
+              first.gameId == Self.gameIdEndfield else { return nil }
+        let sh = shell()
+        var g = sh.game
+        Self.fill(&g, sh.needRows, sh.needGame, h)
+        d.games[0] = g
+        data = d
+        return d
+    }
+
+    /// inventory.js endfield(sk).
+    func endfield(_ sk: JSONValue) async -> InventoryGame {
+        let sh = shell()
+        var g = sh.game
+        let needRows = sh.needRows, needGame = sh.needGame
         do {
             let efRole = jsStr(sk["efRole"])
             if efRole.isEmpty { throw AppError("密钥串里没有终末地的角色") }
@@ -481,12 +616,11 @@ enum InventoryCalc {
             if counts.keys.contains(where: { !known.contains($0) && mat[$0] == nil }) {
                 mat = try await materialList(sk, ts, force: true)
             }
-            var rows = InventoryCalc.rowsFor(needRows, counts, mat)
-            g.box = InventoryCalc.box(needGame?["box"])
-            g.boxUse = InventoryCalc.applyBox(&rows, g.box)
-            g.rows = rows
-            g.gameLevel = nonNull(ugd?["gameLevel"])
+            let h = HeldRead(counts: counts, mat: mat, gameLevel: nonNull(ugd?["gameLevel"]))
+            held = h
+            Self.fill(&g, needRows, needGame, h)
         } catch {
+            held = nil
             g.error = errorMessage(error)
         }
         return g

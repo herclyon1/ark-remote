@@ -152,6 +152,11 @@ class AndroidDriver:
         self.sh(f"am force-stop {PKG}")
         self.pid = None
 
+    def appearance(self, dark):
+        """The system's dark theme (Settings › Display › Dark theme); the activity handles uiMode itself (manifest
+        configChanges), so the app redraws in place."""
+        self.sh("cmd uimode night " + ("yes" if dark else "no"))
+
     def launch(self):
         if not getattr(self, "activity", None):
             lines = [l.strip() for l in self.sh(f"cmd package resolve-activity --brief {PKG}").splitlines() if "/" in l]

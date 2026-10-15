@@ -26,7 +26,7 @@ scripts/replay/run.py ... --offline
 scripts/replay/run.py --platform ios --dry-run
 ```
 
-Useful options: `--only status,monthcard` (pages: setup status gate shift receipts d39 monthcard arknights endfield wuwa
+Useful options: `--only status,monthcard` (pages: setup status gate shift receipts d39 monthcard arknights endfield stock wuwa
 phone layout), `--from <step id>` / `--to <step id>` (see `--list`), `--pin` (default 0000), `--state <file>` (a saved
 base state), `--out <dir>` (default `scripts/replay/out/<platform>-<time>/`), `--timeout` (default 8 s per step),
 `--verbose`. Exit code 0 = all 对, 1 = some 不对, 2 = refused to run, 3 = aborted by the safety check, 4 = the
@@ -47,6 +47,17 @@ on 8932 (another run) it is reused; a run stops only the server it started, at e
 afterwards it is deleted on iOS and restored with `defaults.xml` on Android, so the app goes back to ntfy.sh.
 Caveat: a run that started the server stops it when it ends, even under a concurrent run that reused it; start
 `ntfy_local.py serve` in a terminal first when running iOS and Android side by side.
+
+## The 库存 page with numbers (skland_local.py)
+
+The `stock` steps open 库存 with a table and a warehouse on it. `("skland", "on")` stops the app, starts
+`skland_local.py` on `127.0.0.1:8933` (once per run) and writes three keys: `ark-skland-base` and `ark-need-url` (taken by
+the app only on a loopback address, Net.swift `loopbackOverride`) and `ark-remote-tokens` with a made-up 森空岛 session
+that only the stand-in ever sees. The stand-in answers `/need.json` with `Tests/Fixtures/need-1015.json` (the relay's
+2026-10-15 table: 祀 + 玉中身 first, 明河 + 唤月 second), the material list with `Tests/Fixtures/skland-material-list.json`,
+and the warehouse with made-up counts (not anyone's). `("skland", "off")` deletes the three keys again; the end of a run
+deletes them on iOS too, Android gets its whole `defaults.xml` back. `("appearance", "dark" | "light")` switches the
+system's dark mode for the screenshots (`simctl ui … appearance`, `cmd uimode night`).
 
 ## --offline
 

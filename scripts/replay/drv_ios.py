@@ -106,6 +106,10 @@ class IOSDriver:
     def screenshot(self, path):
         self.simctl("io", self.udid, "screenshot", path)
 
+    def appearance(self, dark):
+        """The simulator's Light / Dark appearance (Settings › Display & Brightness)."""
+        self.simctl("ui", self.udid, "appearance", "dark" if dark else "light")
+
     # The app's preferences live in two places on the simulator: its data container's Library/Preferences/<bundle>.plist
     # (everything the app itself writes) and the simulator home's domain <bundle> (what `simctl spawn defaults <bundle>`
     # reads and writes). The app reads the container first and falls back to the home domain, so a key the app once

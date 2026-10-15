@@ -48,6 +48,13 @@ import SwiftUI
             guard let r = await InventoryStore.shared.refresh(force: force) else { throw AppError("没有读数") }
             return try JSONValue.parse(try JSONEncoder().encode(r))
         }
+        // the 库存 page's picker: the chosen standard stays on this phone (inventory.js setStandard); the last read is
+        // worked out again for it without a request
+        Stockpile.shared.picker = { key in
+            InventoryStore.shared.setStandard(key)
+            guard let r = InventoryStore.shared.repick() else { return nil }
+            return try? JSONValue.parse(try JSONEncoder().encode(r))
+        }
 
         // live.js ping(): the stamina numbers come along
         Live.shared.refreshStamina = {

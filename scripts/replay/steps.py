@@ -305,6 +305,28 @@ step("ef.stock.tophone", "endfield", "库存页「去手机页」→ 跳到手�
 step("ef.stock.popped", "d39", "回终末地 → 库存页已退掉", [("tab", "终末地")], expect=["库存", EF_MORE])
 step("ef.stock.tabpop", "d39", "再进库存 → 点「终末地」→ 回根页",
      [tap("库存"), ("wait", 1.0), ("tab", "终末地")], expect=["库存", EF_MORE], absent=["~去手机页"])
+# 库存 with numbers (0.5.2): 森空岛 and the need table answered on this Mac by skland_local.py (the relay's 2026-10-15
+# table: 祀 + 玉中身 first, 明河 + 唤月 second; the warehouse counts are made up), then taken away again. Each standard
+# shows only its own weapon's essence advice: the MaaEnd line names the one weapon to tick.
+SI_ONLY = "~只勾玉中身"
+MINGHE_ONLY = "~只勾唤月"
+step("stock.data", "stock", "库存（森空岛替身 + 10-15 需求表）→ 分段「祀」「明河」选中祀；「下一位：明河（11-05 上线）」；玉中身三条词条、掉落地点、MaaEnd 一句",
+     [("skland", "on"), ("tab", "终末地"), ("top", 4), tap("库存")],
+     expect=["祀", "明河", "~下一位：明河（11-05 上线）", "基质刷取 · 玉中身", "~智识提升", "~寒冷伤害提升", "~效益",
+             "~枢纽区、源石研究园、矿脉源区、藏剑谷、应龙关", SI_ONLY], absent=[MINGHE_ONLY], timeout=30)
+step("stock.shot.light", "stock", "截图：库存页（浅色）", [("shot", "stock-si-light")], expect=["基质刷取 · 玉中身"])
+step("stock.shot.dark", "stock", "截图：库存页（深色）", [("appearance", "dark"), ("shot", "stock-si-dark")],
+     expect=["基质刷取 · 玉中身"])
+step("stock.next", "stock", "点「明河」→ 唤月的词条和掉落地点、只勾唤月；说明行是她自己的，没有「下一位：」",
+     [tap("明河"), ("wait", 0.8)], expect=["基质刷取 · 唤月", "~意志提升", "~攻击提升", "~附术", "~首墩", MINGHE_ONLY,
+                                          "~下一位六星，11-05 上线，专武 唤月"], absent=[SI_ONLY, "~下一位：明河"])
+step("stock.next.shot", "stock", "截图：选明河（深色、浅色）",
+     [("shot", "stock-minghe-dark"), ("appearance", "light"), ("shot", "stock-minghe-light")], expect=["基质刷取 · 唤月"])
+step("stock.back", "stock", "点「祀」→ 回到玉中身", [tap("祀"), ("wait", 0.8)], expect=["基质刷取 · 玉中身", SI_ONLY],
+     absent=[MINGHE_ONLY])
+step("stock.rows", "stock", "往下滑 → 材料按「干员精英化」等分组，右边是人份", [("swipe", "up", 2)], expect=["~人份"])
+step("stock.off", "stock", "拿掉替身和编的森空岛 → 终末地根页，库存行又是「没配森空岛」",
+     [("skland", "off"), ("tab", "终末地"), ("top", 4)], expect=["库存", "没配森空岛", EF_MORE], timeout=12)
 # 基质刷取设置 is in cards since the 10-14 review (EndfieldSchema.moreCards); 哪几天跑 is on the 终末地 page itself
 step("ef.more", "endfield", "基质刷取设置 → 推入页分卡「领奖」「战后筛选」（先点「终末地」：只跑 endfield 时 ef.stock.tophone 停在手机页）",
      [("tab", "终末地"), tap(EF_MORE)], expect=["~领取方式", "战后筛选"], absent=["~随机模式 · "])

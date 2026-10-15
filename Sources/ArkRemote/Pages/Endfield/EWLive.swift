@@ -233,6 +233,44 @@ struct EndfieldStockpilePage: View {
                 EmptyView()   // iOS: the empty state is the List's overlay (below), centred on the page
                 #endif
             case .list(let sections, let footnote):
+                // which six-star the numbers are for: the newest released one first, the announced one second, as the
+                // table orders them; a segmented control as Health's D / W / M over its list (HIG Segmented controls: "closely
+                // related choices that affect an object, state, or view"), on the page ground as the 状态 tab's 班次
+                listSection("stock-pick", ifLet: s.top.flatMap { $0.choices.isEmpty ? nil : $0 }) { top in
+                    Section {
+                        Picker("按哪位干员算", selection: Binding(get: { top.selected },
+                                                             set: { k in Task { await Stockpile.shared.pick(k) } })) {
+                            ForEach(top.choices) { c in Text(c.title).tag(c.id) }
+                        }
+                        .pickerStyle(.segmented)
+                        #if !os(Android)
+                        // skip-ui: listRowInsets unavailable
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        #endif
+                    } footer: {
+                        if let c = top.caption { Text(c) }
+                    }
+                }
+                // the shown one's essence advice, before the 40-odd material rows: three terms as plain label / value rows
+                // (Settings › General › About), where it drops, and the one line on MaaEnd's 目标选择
+                listSection("stock-essence", ifLet: s.top?.essence) { e in
+                    Section {
+                        ForEach(e.terms) { t in
+                            LabeledContent(t.slot, value: t.name)
+                        }
+                        ForEach(e.points.map { [$0] } ?? [], id: \.self) { p in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(e.pointsTitle)
+                                Text(p).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    } header: {
+                        Text(e.header)
+                    } footer: {
+                        if let f = e.footer { Text(f) }
+                    }
+                }
                 ForEach(sections) { sec in
                     Section {
                         ForEach(sec.rows) { r in
