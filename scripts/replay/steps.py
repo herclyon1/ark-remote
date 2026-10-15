@@ -299,8 +299,10 @@ step("ef.open", "endfield", "终末地标签 → 库存 / 基质刷取设置 / �
 # the task cards have no header: the switch row names the task (10-14 review: the header said it again)
 step("ef.title", "endfield", "任务卡没有标题：没有「另一个任务」「终末地 · 」；三张卡都有「哪几天跑」；菜单叫「刷取方式」",
      [("swipe", "up", 3)], expect=["自动采集设置"], absent=["另一个任务", "~另外两个任务", "~终末地 · ", "刷取设置"])
+# the page reads the need table over the network (COS, then github.io) before it says 没配森空岛 (Inventory.refresh):
+# 11.2 s on ark37 for 0.5.1, 13.6 s and 17.5 s on 10-15
 step("ef.stock", "endfield", "库存 → 推入库存页（没配森空岛）",
-     [("top", 4), tap("库存")], expect=["~去手机页"], timeout=10)
+     [("top", 4), tap("库存")], expect=["~去手机页"], timeout=25)
 step("ef.stock.tophone", "endfield", "库存页「去手机页」→ 跳到手机标签", [tap("~去手机页")], expect=[VERSION])
 step("ef.stock.popped", "d39", "回终末地 → 库存页已退掉", [("tab", "终末地")], expect=["库存", EF_MORE])
 step("ef.stock.tabpop", "d39", "再进库存 → 点「终末地」→ 回根页",
@@ -313,7 +315,10 @@ MINGHE_ONLY = "~只勾唤月"
 step("stock.data", "stock", "库存（森空岛替身 + 10-15 需求表）→ 分段「祀」「明河」选中祀；「下一位：明河（11-05 上线）」；玉中身三条词条、掉落地点、MaaEnd 一句",
      [("skland", "on"), ("tab", "终末地"), ("top", 4), tap("库存")],
      expect=["祀", "明河", "~下一位：明河（11-05 上线）", "基质刷取 · 玉中身", "~智识提升", "~寒冷伤害提升", "~效益",
-             "~枢纽区、源石研究园、矿脉源区、藏剑谷、应龙关", SI_ONLY], absent=[MINGHE_ONLY], timeout=30)
+             "~枢纽区、源石研究园、矿脉源区、藏剑谷、应龙关", SI_ONLY], absent=[MINGHE_ONLY],
+     # a cold start, then 40-odd material pictures loading from bbs.hycdn.cn keep the tree from settling: 18 s on the
+     # iOS simulator, 27.9 s and a miss at 31 s on ark37 (10-15), with everything on screen in the miss's screenshot
+     timeout=45)
 step("stock.shot.light", "stock", "截图：库存页（浅色）", [("shot", "stock-si-light")], expect=["基质刷取 · 玉中身"])
 step("stock.shot.dark", "stock", "截图：库存页（深色）", [("appearance", "dark"), ("shot", "stock-si-dark")],
      expect=["基质刷取 · 玉中身"])
@@ -362,18 +367,20 @@ step("ef.protocol", "endfield", "协议空间 选「武器养成」→ 未寄出
 step("ef.collect.more", "endfield", "自动采集设置 → 推入页 → 返回",
      [tap("自动采集设置"), ("wait", 1.0), ("back",)], expect=[HOME_EF, "~自动采集"],
      absent=[BACK_BTN_EF], timeout=10)
-# two rows of the pushed page put back by ✕ (e17db83): 随机地区 (the base state has 2 of 12) and 使用刻写券
-step("ef.ticket.open", "endfield", "再进「基质刷取设置」→ 随机地区「已选 2/12」、使用刻写券关（机器值）",
-     [("tab", "终末地"), ("top", 3), tap(EF_MORE)], expect=["已选 2/12", "使用刻写券"], switch={"使用刻写券": False})
-step("ef.ticket.on", "endfield", "打开「使用刻写券」→ 那行出现小字「未寄出」",
-     [("toggle", "使用刻写券")], expect=["未寄出", "~1 项未寄出"], switch={"使用刻写券": True})
+# two rows of the pushed page put back by ✕ (e17db83): 随机地区 (the base state has 2 of 12) and 使用刻写券, whose
+# machine value is read from the base state (the real machine's: he turned it on 10-15; it was off until then)
+TICKET = "machine:MaaEnd:AutoEssence/AutoEssenceDoOverride"
+step("ef.ticket.open", "endfield", "再进「基质刷取设置」→ 随机地区「已选 2/12」、使用刻写券是机器值",
+     [("tab", "终末地"), ("top", 3), tap(EF_MORE)], expect=["已选 2/12", "使用刻写券"], switch={"使用刻写券": TICKET})
+step("ef.ticket.on", "endfield", "拨「使用刻写券」→ 和机器值相反，那行出现小字「未寄出」",
+     [("toggle", "使用刻写券")], expect=["未寄出", "~1 项未寄出"], switch={"使用刻写券": "!" + TICKET})
 step("ef.ticket.days", "endfield", "随机地区加上「枢纽区」→ 「已选 3/12」「2 项未寄出」",
      # the first tap on a sheet still sliding up: wait until it stands still (stable), as a lost tap left the list as it
      # was and ✓ grey (app-r1 fix round 2, final full run step 80)
      [tap("~随机地区"), tap("枢纽区", stable=True), tap(SAVE, region="top")], expect=["~3/12", "~2 项未寄出"])
-step("ef.ticket.discard", "endfield", "保存条 ✕ → 控件回到机器值（2/12、刻写券关），还在基质刷取设置页（e17db83）",
+step("ef.ticket.discard", "endfield", "保存条 ✕ → 控件回到机器值（2/12、刻写券同机器），还在基质刷取设置页（e17db83）",
      [("discard",)], expect=["已选 2/12", "使用刻写券"], absent=["未寄出", "~2 项未寄出", "库存"],
-     switch={"使用刻写券": False}, nocmd=2)
+     switch={"使用刻写券": TICKET}, nocmd=2)
 step("ef.loop.x", "endfield", "每趟最多几轮改 20（键盘开着）→ 点 ✕ → 回原值、键盘收起、没有未寄出、还在基质刷取设置页（0878f3b）",
      [("field", "每趟最多几轮", "20"), ("wait", 0.6), ("discard",)], keyboard=False,
      expect=[{"t": "99", "kind": ["TextField", "EditText"]}, "每趟最多几轮"], absent=["~未寄出", "库存"], nocmd=2)

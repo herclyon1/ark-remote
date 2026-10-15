@@ -770,6 +770,19 @@ class Runner:
             return n["kind"] == "EditText"
         return n["kind"] in ("TextField", "SecureTextField", "TextView")
 
+    def machine_bool(self, want):
+        """A step's switch value: True / False as written, or "machine:<game>:<path>" = the base state's value of that
+        setting (the real machine's, read at the start of the run), "!machine:…" = its opposite. The machine's value is
+        whatever he last set (10-15 he turned 使用刻写券 on), so a step about 「机器值」 cannot hard-code it."""
+        if not isinstance(want, str):
+            return want
+        neg = want.startswith("!")
+        _, game, path = want.lstrip("!").split(":", 2)
+        v = (((self.mb.base.get("master") or {}).get(game) or {}).get("values") or {}).get(path)
+        if not isinstance(v, bool):
+            raise StepFail(f"机器状态里 {game} {path} 不是开关值：{v!r}")
+        return (not v) if neg else v
+
     def switch_on_row(self, n, nodes):
         """The switch on the row of node n (iOS: Switch / Toggle element; Android: the checkable node), or None."""
         if self.drv.platform == "ios":
@@ -944,6 +957,7 @@ class Runner:
             miss = [f"缺「{sel_text(s)}」" + (f" ×{norm_sel(s)['count']}" if norm_sel(s).get("count") else "")
                     for s in exp if len(self.find(s, dump)) < norm_sel(s).get("count", 1)]
             for s, want in (step.get("switch") or {}).items():
+                want = self.machine_bool(want)
                 rows = [n for n in self.find(s, dump) if self.on_screen(n)]
                 sw = self.switch_on_row(rows[0], dump["nodes"]) if rows else None
                 if sw is None:
