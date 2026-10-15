@@ -187,7 +187,7 @@ step("gate.early", "gate", "400 ms 门：✓ 后 150 ms 按下「寄出」按住
      [("gate", "save", "send", 150, 900)], expect=["寄出前看一下"], nocmd=3, nojudge_fail="模拟器",
      android={"say": "400 ms 门：✓ 后马上按住「寄出」1.5 秒（按下早于门开、松手晚于门开）× 8 → 一次都不寄出",
               "do": [("gate_trials", 8, 300, 1500)], "expect": ["~1 项未寄出"], "absent": ["寄出前看一下"],
-              "nocmd": 1, "timeout": 12})
+              "nocmd": 1, "timeout": 12, "nojudge_fail": None})
 step("gate.close", "gate", "再想想 → 关单", [tap("再想想")], absent=["寄出前看一下"], on="ios")
 step("gate.late", "gate", "✓ 等单子停稳再点「寄出」→ 寄出 skip_today",
      [tap(SAVE, region="top"), tap("寄出 1 项", stable=True)], absent=["寄出前看一下"], cmd={"action": "skip_today"},

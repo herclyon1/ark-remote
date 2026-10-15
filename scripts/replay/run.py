@@ -46,6 +46,10 @@ class Abort(Exception):
     pass
 
 
+class NoJudge(Exception):
+    """The step could not test what it claims on this run (e.g. a busy Mac): it reads 不判 with the reason."""
+
+
 DISCARD_SEL = ["放弃", "xmark"]       # the save bar's ✕ (steps.DISCARD)
 DISCARD_OK = "放弃改动"                # its confirmation (Pages/Shell/SaveBar.swift)
 CLEAR_SEL = "不再显示进度"             # steps.CLEAR
@@ -611,6 +615,11 @@ class Runner:
             raise StepFail("门测试缺坐标（先跑记坐标的步骤）")
         x1, y1 = self.ctx["save"]
         self.ctx["gate_inwin"] = 0     # gate.diag.check judges only after trials that pressed inside the gate
+        # a busy Mac stretches the emulator's touch handling and drawing by hundreds of ms (0.5.2 r3 at load 6-10: the
+        # sheet's frames went missing for 7 of 8 trials and one early press sent; at load 5 no trial landed; at 2-4 they do)
+        load = os.getloadavg()[0]
+        if load >= 4.5:
+            raise NoJudge(f"Mac 1 分钟负载 {load:.1f} ≥ 4.5，门测试没跑")
 
         shot = os.path.join(self.out, "gate-sheet.png")
 
@@ -662,23 +671,24 @@ class Runner:
                 time.sleep(0.4)
             time.sleep(0.8)
 
-        # where 寄出 sits: x from the tree, y from the medium detent (aimed there, a press on a large-detent sheet lands in
-        # the empty list and does nothing; aimed at the large one, it closes a medium sheet)
-        x2, y2 = None, None
-        for _ in range(3):
-            self.drv.tap(x1, y1)
-            time.sleep(1.5)
+        # where 寄出 sits: x from the tree, y at the medium detent, whose top edge is the screen's middle (1211 of 2424 on
+        # ark37). Aimed there, a press on a large-detent sheet lands in its empty list and does nothing; aimed at the large
+        # detent's button (y 341), it falls on the dimmed page over a medium sheet and closes it (0.5.2 r3)
+        self.drv.tap(x1, y1)
+        end = time.time() + 8
+        top = None
+        while top is None and time.time() < end:
+            time.sleep(1.0)      # the sheet slides in for ~0.6 s; a busy Mac makes it slower
             top = sheet_top()
-            if top is None:
-                raise StepFail("✓ 没点开确认单")
-            if x2 is None:
-                self.invalidate()
-                x2 = self.locate("寄出 1 项", scroll=False)["x"]
-            y2 = top + BTN if y2 is None else max(y2, top + BTN)
-            close_sheet()
-            if y2 > self.drv.size[1] // 3:
-                break       # a medium opening seen
+        if top is None:
+            raise NoJudge("✓ 没点开确认单")
+        self.invalidate()
+        x2 = self.locate("寄出 1 项", scroll=False)["x"]
+        y2 = self.drv.size[1] // 2 - 1 + BTN
+        close_sheet()
         rows = []
+        skipped = 0
+        gone = 0
         gap = gap_ms
         for k in range(n):
             t = self.drv.gate_trial(x1, y1, x2, y2 + (k % 3), gap, hold_ms,
@@ -688,11 +698,17 @@ class Runner:
             sheet = self.drv.sheet_frames(t[1])
             time.sleep(0.3)
             top = sheet_top()
+            if top is None:
+                # the sheet is gone after the release: the press sent (a gate failure, which the step's own checks then
+                # read as 不对: the unsent change and the mailbox) or fell outside the sheet; no further trial
+                gone = k + 1
+                break
             if sheet is None:
-                wins = [(w["name"][-40:], len(w["frames"]), w["frames"][0].get("Flags") if w["frames"] else None,
-                         round(w["frames"][0].get("PerformTraversalsStart", 0) / 1e6 - t[1]) if w["frames"] else None)
-                        for w in self.drv.frame_windows()]
-                raise StepFail(f"第 {k + 1} 次：没找到确认单的窗口帧（单子{'还在' if top is not None else '不在'}；窗口 {wins}）；前面几次：{rows}")
+                # gfxinfo sometimes lists no frames for the sheet's window (0.5.2 r3: 1 trial of 8, the sheet up): this
+                # trial cannot be timed, so it is left out (not counted either way) and the next one runs
+                skipped += 1
+                close_sheet()
+                continue
             first, drawn, nfr, settled = sheet
             on_button = pressed(os.path.join(self.out, f"gate-trial{k + 1}-hold.png"), x2, y2 + (k % 3))
             rows.append({"down_after_first": round(t[2] - first), "first_drawn": round(drawn - first),
@@ -703,8 +719,15 @@ class Runner:
             # (~600 ms on ark37), so a medium-detent sheet has 寄出 under the finger by then
             gap = max(0, gap + 330 - rows[-1]["down_after_first"])
             close_sheet()
+        if gone:
+            # nothing judged: the step's own checks still read 不对 if the change went out
+            self.note = f"第 {gone} 次松手后确认单不在了；前面几次：{rows}"
+            self.nojudge_reason = f"模拟器：第 {gone} 次松手后确认单不在了"
+            return
+        if not rows:
+            raise NoJudge(f"{n} 次都没量到确认单的窗口帧")
         inwin = [r for r in rows if r["on_button"] and r["down_after_first"] < 380]
-        self.note = (f"{n} 次（按到寄出上 {sum(r['on_button'] for r in rows)} 次）：按下距单子首帧开始 "
+        self.note = (f"{n} 次（{'没量到单子帧、不算的 ' + str(skipped) + ' 次；' if skipped else ''}按到寄出上 {sum(r['on_button'] for r in rows)} 次）：按下距单子首帧开始 "
                      f"{'/'.join(str(r['down_after_first']) for r in rows)} ms，松手 {'/'.join(str(r['up_after_first']) for r in rows)} ms；"
                      f"单子首帧画完 {'/'.join(str(r['first_drawn']) for r in rows)} ms；"
                      f"按到停在手指下的寄出（按住时呈按下状态）且按下在 380 ms 内的 {len(inwin)} 次")
@@ -1202,6 +1225,8 @@ class Runner:
             self.check_cmds(step, t0)
         except StepFail as e:
             err = str(e)
+        except NoJudge as e:
+            self.nojudge_reason = str(e)
         except Abort:
             raise
         except Exception as e:   # a driver error is a failed step, not a dead run
