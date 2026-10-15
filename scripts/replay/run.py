@@ -461,6 +461,8 @@ class Runner:
             self.drv.tap(self.drv.size[0] - 8, n["y"])
         elif kind == "app_posts":
             self.check_app_posts(rest[0])
+        elif kind == "sheet_steady":
+            self.sheet_steady(rest[0])
         elif kind == "clipboard":
             if rest and rest[0] == "@link":
                 self.drv.set_clipboard(self.own_link())
@@ -600,6 +602,41 @@ class Runner:
                     continue
                 return
 
+    def review_sheet_top(self, shot):
+        """Android: the review sheet's top edge on the screen (px), from a screenshot; None when no sheet is up. The
+        accessibility tree does not follow the sheet: uiautomator kept the large detent's bounds for 寄出 while the
+        sheet stood at medium (0.5.2 r3), so a press aimed by the dump fell on the dimmed page and closed the sheet."""
+        from PIL import Image
+        self.drv.screenshot(shot)
+        im = Image.open(shot).convert("RGB")
+        if sum(im.getpixel((120, 180))) / 3 > 215:
+            return None      # no scrim over the top bar: no sheet
+        near = lambda y: all(abs(c - v) <= 6 for c, v in zip(im.getpixel((120, y)), (236, 235, 245)))
+        for y in range(180, im.height - 30):
+            if near(y) and near(y + 25):
+                return y
+        return None
+
+    def sheet_steady(self, secs):
+        """Android: the review sheet (open) stays at the medium detent, its top edge at the screen's middle, for secs.
+        0.5.2 r5: it jumped between half and full height on its own (7 of 12 openings within 12 s, r5/sheet-watch.txt),
+        as skip-ui took the first of a set whose order changed between evaluations of the view; the vendored patch
+        shows the smallest detent (Vendor/skip-ui/VENDORED.md)."""
+        if self.drv.platform != "android":
+            raise StepFail("sheet_steady 只在安卓上跑")
+        shot = os.path.join(self.out, "sheet-steady.png")
+        mid = self.drv.size[1] // 2 - 1
+        seen, t0 = [], time.time()
+        while time.time() - t0 < secs:
+            seen.append((round(time.time() - t0, 1), self.review_sheet_top(shot)))
+        tops = sorted({t for _, t in seen}, key=str)
+        self.note = f"{secs} 秒里截了 {len(seen)} 张，单子上沿 {'/'.join(str(t) for t in tops)} px（屏幕中线 {mid}）"
+        if any(t is None for _, t in seen):
+            raise StepFail("确认单中途不见了：" + self.note)
+        if any(abs(t - mid) > 3 for _, t in seen):
+            moved = [(a, t) for a, t in seen if abs(t - mid) > 3][:3]
+            raise StepFail(f"确认单没停在半高、自己跳了：{moved}；" + self.note)
+
     def gate_trials(self, n, gap_ms, hold_ms):
         """Android 400 ms gate (SaveBar.swift go(): a press that began before opensAt does not send; opensAt is the sheet's
         onAppear + 400 ms). n trials: raw tap on ✓, after a gap a raw press on 寄出 held ~1.5 s, so the press begins inside
@@ -623,21 +660,7 @@ class Runner:
 
         shot = os.path.join(self.out, "gate-sheet.png")
 
-        def sheet_top():
-            """The review sheet's top edge on the screen (px), from a screenshot; None when no sheet is up. The sheet stops
-            at the medium or the large detent (both seen on ark37: the first opening on a page large, later ones medium),
-            and the accessibility tree does not follow it: uiautomator kept the large detent's bounds for 寄出 while the
-            sheet stood at medium (0.5.2 r3), so a press aimed by the dump fell on the dimmed page and closed the sheet."""
-            from PIL import Image
-            self.drv.screenshot(shot)
-            im = Image.open(shot).convert("RGB")
-            if sum(im.getpixel((120, 180))) / 3 > 215:
-                return None      # no scrim over the top bar: no sheet
-            near = lambda y: all(abs(c - v) <= 6 for c, v in zip(im.getpixel((120, y)), (236, 235, 245)))
-            for y in range(180, im.height - 30):
-                if near(y) and near(y + 25):
-                    return y
-            return None
+        sheet_top = lambda: self.review_sheet_top(shot)
 
         BTN = 84     # 寄出's centre below the sheet's top edge (measured at both detents: 257 → 341, 1211 → 1295)
 
@@ -659,16 +682,32 @@ class Runner:
             px = [im.getpixel((xx, yy)) for xx in range(x - 110, x + 110, 4) for yy in range(top + BTN - 75, top + BTN + 75, 4)]
             return sum(map(near, px)) / len(px) < 0.8 and abs(top + BTN - y) <= 50
 
+        retaps = []
+
         def close_sheet():
-            # the sheet stays open when nothing was sent: close it with its ✕ (再想想), then wait until it is gone
-            # (this waited on 「确认这次修改」, the title before 64064c7, never waited, and the next trial's ✓ fell on a
-            # sheet still going away)
-            top = sheet_top()
-            if top is not None:
-                self.drv.tap(64, top + BTN)
-            end = time.time() + 12
-            while time.time() < end and sheet_top() is not None:
-                time.sleep(0.4)
+            """Close the review sheet with its ✕ (再想想) and return only once it is gone. A tap on the ✕ is sometimes
+            not taken: 0.5.2 r5 close-test, 1 of ~20 `input tap`s on the ✕'s centre left the sheet up and a second tap
+            on the same point closed it (the button's action had not run), so the next trial's ✓ fell on the old
+            sheet and its press on 寄出 sent (r4 and-gate4 / and-gate9: a sheet up for 16-17 s). So: up to three taps,
+            each followed by a wait until the sheet is gone, then back; a sheet still up stops the trials (NoJudge).
+            (This waited on 「确认这次修改」, the title before 64064c7, never waited, and the next ✓ fell on a sheet still
+            going away.)"""
+            for attempt in range(4):
+                top = sheet_top()
+                if top is None:
+                    break
+                if attempt:
+                    retaps.append(attempt)
+                if attempt < 3:
+                    self.drv.tap(64, top + BTN)
+                else:
+                    self.drv.back()
+                end = time.time() + 4
+                while time.time() < end and sheet_top() is not None:
+                    time.sleep(0.4)
+            else:
+                if sheet_top() is not None:
+                    raise NoJudge("确认单点了三次 ✕ 又按了返回还关不掉")
             time.sleep(0.8)
 
         # where 寄出 sits: x from the tree, y at the medium detent, whose top edge is the screen's middle (1211 of 2424 on
@@ -730,7 +769,8 @@ class Runner:
         self.note = (f"{n} 次（{'没量到单子帧、不算的 ' + str(skipped) + ' 次；' if skipped else ''}按到寄出上 {sum(r['on_button'] for r in rows)} 次）：按下距单子首帧开始 "
                      f"{'/'.join(str(r['down_after_first']) for r in rows)} ms，松手 {'/'.join(str(r['up_after_first']) for r in rows)} ms；"
                      f"单子首帧画完 {'/'.join(str(r['first_drawn']) for r in rows)} ms；"
-                     f"按到停在手指下的寄出（按住时呈按下状态）且按下在 380 ms 内的 {len(inwin)} 次")
+                     f"按到停在手指下的寄出（按住时呈按下状态）且按下在 380 ms 内的 {len(inwin)} 次"
+                     + (f"；关单时 ✕ 没接住、补点 {len(retaps)} 次" if retaps else ""))
         self.ctx["gate_rows"] = rows
         # only a press on the settled button that began inside the gate tests it: with none, a clean mailbox proves
         # nothing (r2 at Mac load 10: the first frame alone took 453-677 ms), so the step reads 不判 with the measured
@@ -810,48 +850,94 @@ class Runner:
         if load1 >= 8:
             raise StepFail(f"量完 Mac 1 分钟负载 {load1:.1f} ≥ 8，这组数不作数")
 
-    def app_posts(self, since, until):
-        """The app's own send log: 诊断记录 (DiagLog, key ark-diag-events) fetch events with method POST to the mailbox
-        (url <ntfy host>/<信箱>) between since and until (epoch s). DiagLog saves at most every 5 s, on the next event, so
-        this waits until the saved log reaches past `until`. Returns [(t, status or error)], or None if the log
-        never caught up (诊断记录 off?)."""
-        deadline = time.time() + 20
+    def app_log(self, ready, secs=20):
+        """The app's saved 诊断记录 (DiagLog, key ark-diag-events): [event dict]. DiagLog saves at most every 5 s, on the
+        next event, and on export (分享诊断记录: DiagLog.exportObject -> persist), so this re-reads until ready(events)
+        holds or secs pass. Returns (events, ready)."""
+        deadline = time.time() + secs
         while True:
             raw = self.drv.read_default("ark-diag-events")
             try:
                 ev = json.loads(raw) if raw else []
             except ValueError:
                 ev = []
-            newest = max((e.get("t", 0) for e in ev if isinstance(e, dict)), default=0) / 1000
-            if newest >= until:
-                return [(e["t"] / 1000, e.get("status") or e.get("error") or "?") for e in ev
-                        if isinstance(e, dict) and e.get("kind") == "fetch" and e.get("method") == "POST"
-                        and "<信箱>" in (e.get("url") or "") and since * 1000 <= e.get("t", 0) <= until * 1000 + 2000]
+            ev = [e for e in ev if isinstance(e, dict)]
+            if ready(ev):
+                return ev, True
             if time.time() > deadline:
-                return None
+                return ev, False
             time.sleep(2)
 
+    def app_posts(self, ev, a, b):
+        """POSTs to the mailbox (url <ntfy host>/<信箱>) in the app's log between a and b (epoch s), less the ones the app
+        sends on its own (BACKGROUND_ACTIONS: watch on open, refresh), as check_cmds leaves them out of every step. The
+        log has no body, so each POST is paired with the mailbox's command nearest in time (ntfy's receive time, within
+        3 s, each command once); a POST with no command near it is counted. Returns (counted, background) as
+        [(t, status or error)]."""
+        posts = sorted((e["t"] / 1000, e.get("status") or e.get("error") or "?") for e in ev
+                       if e.get("kind") == "fetch" and e.get("method") == "POST" and "<信箱>" in (e.get("url") or "")
+                       and a * 1000 <= e.get("t", 0) <= b * 1000)
+        cmds = [[t, self.cmd_action(m), False] for t, m in self.mb.cmds(a - 5)]
+        counted, background = [], []
+        for t, st in posts:
+            near = sorted((c for c in cmds if not c[2] and abs(c[0] - t) <= 3), key=lambda c: abs(c[0] - t))
+            if near:
+                near[0][2] = True
+            (background if near and near[0][1] in BACKGROUND_ACTIONS else counted).append((t, st))
+        return counted, background
+
     def check_app_posts(self, want):
-        """want = {step id: 0 (no send) | n (at least n)}: the app's own send log during each of those steps' windows.
-        The log must be saved first (a step that opens 分享诊断记录 does that: DiagUI.prepareSheet -> persist)."""
-        posts = self.app_posts(min(self.windows[k][0] for k in want if k in self.windows) - 1, time.time() - 1)
-        if posts is None:
-            raise StepFail("App 的诊断记录没有跟上（诊断记录没开？）")
+        """want = {step id: 0 (no send) | n (at least n)}: the app's own send log during each of those steps' windows,
+        background sends left out (app_posts). The log must be saved first: a step that opens 分享诊断记录 does that
+        (DiagUI.prepareSheet -> persist). For the gate steps this waits for the gate decision the app logs on every
+        release on 寄出 (SaveBar.swift go(), 「gate」 events: shown / down / now / open) instead of a later save by
+        chance: gate.late's press must be there with open 1, and every gate.early press with open 0; a gate.early press
+        that touched down under 400 ms after the sheet's first frame is one that tested the gate."""
+        win = {k: self.windows[k] for k in want if k in self.windows}
+        gates = lambda ev, k: [e for e in ev if e.get("kind") == "gate" and k in win
+                               and (win[k][0] - 1) * 1000 <= e.get("t", 0) <= (win[k][1] + 2) * 1000]
+        if "gate.late" in win:
+            ready = lambda ev: any(e.get("open") == "1" for e in gates(ev, "gate.late"))
+        else:   # no gate decision to wait on: the newest saved event must reach the last window's end
+            last = max((w[1] for w in win.values()), default=time.time())
+            ready = lambda ev: max((e.get("t", 0) for e in ev), default=0) / 1000 >= last
+        ev, caught_up = self.app_log(ready)
+        if not ev:
+            raise StepFail("App 的诊断记录是空的（诊断记录没开？）")
         bad, said = [], []
         for k, n in want.items():
-            if k not in self.windows:
+            if k not in win:
                 bad.append(f"{k} 没跑")
                 continue
-            a, b = self.windows[k]
-            got = [p for p in posts if a - 1 <= p[0] <= b + 2]
-            said.append(f"{k} {len(got)} 条" + (f"（{', '.join(str(s) for _, s in got)}）" if got else ""))
+            a, b = win[k]
+            got, bg = self.app_posts(ev, a - 1, b + 2)
+            said.append(f"{k} {len(got)} 条" + (f"（{', '.join(str(s) for _, s in got)}）" if got else "")
+                        + (f"，另有后台 watch/refresh {len(bg)} 条不算" if bg else ""))
             if (n == 0 and got) or (n > 0 and len(got) < n):
                 bad.append(f"{k} 应为 {'0' if n == 0 else '≥' + str(n)} 条，实际 {len(got)} 条")
-        self.note = "App 自己的发送记录：" + "；".join(said)
+        tested = 0
+        if "gate.early" in win:
+            g = gates(ev, "gate.early")
+            opened = [e for e in g if e.get("open") == "1"]
+            early = [e for e in g if int(e.get("shown") or 0) > 0
+                     and (int(e.get("down") or 0) or int(e.get("now") or 0)) - int(e.get("shown")) < 400]
+            tested = len(early)
+            said.append(f"门测试松手在寄出上 {len(g)} 次，其中按下距单子首帧 < 400 ms 的 {tested} 次"
+                        + (f"（{'/'.join(str((int(e.get('down') or 0) or int(e['now'])) - int(e['shown'])) for e in early)} ms）" if early else "")
+                        + (f"，放行 {len(opened)} 次" if opened else ""))
+            if opened:
+                bad.append(f"门测试里门放行了 {len(opened)} 次（{', '.join(e.get('down', '?') + '-' + e.get('shown', '?') for e in opened)}）")
+        if "gate.late" in win:
+            gl = gates(ev, "gate.late")
+            said.append(f"停稳后寄出的门记录 {len(gl)} 条（放行 {sum(e.get('open') == '1' for e in gl)}）")
+            if not caught_up:
+                bad.append("App 的诊断记录里没有停稳后寄出那一下的放行记录（诊断记录没存盘？）")
+        self.note = "App 自己的记录：" + "；".join(said)
         if bad:
             raise StepFail("；".join(bad))
-        # 「门测试 0 条」 says something only when a gate trial pressed the drawn button inside the 400 ms (gate_trials)
-        if "gate.early" in want and not self.ctx.get("gate_inwin"):
+        # 「门测试 0 条」 says something only when a press reached 寄出 inside the 400 ms: by the app's own gate record, or
+        # by gate_trials' screenshots when the record has none
+        if "gate.early" in want and not tested and not self.ctx.get("gate_inwin"):
             self.nojudge_reason = "模拟器：门测试没有一次按在 400 ms 里，0 条不说明门拦住了"
 
     @staticmethod
@@ -1275,7 +1361,7 @@ class Runner:
 
 
 ACTIONS = {"bottom", "until", "gone", "nokb", "retry", "tap", "tab", "toggle", "field", "type", "enter", "hidekb", "swipe", "top", "back", "wait", "relaunch", "state",
-           "receipt", "clear_receipts", "hb", "remember", "gate", "gate_trials", "app_posts", "shot", "clipboard", "forget_config", "restore_config", "fluency", "skland", "appearance",
+           "receipt", "clear_receipts", "hb", "remember", "gate", "gate_trials", "app_posts", "sheet_steady", "shot", "clipboard", "forget_config", "restore_config", "fluency", "skland", "appearance",
            "dismiss", "discard", "clear", "pick", "tapout", "time", "see", "point", "allow_paste"}
 STEP_KEYS = {"id", "page", "say", "do", "on", "expect", "absent", "visible", "keyboard", "cmd", "nocmd", "timeout", "cmd_timeout",
              "ios", "android", "always", "settle", "pause", "relaunch_on_crash", "switch", "offline",

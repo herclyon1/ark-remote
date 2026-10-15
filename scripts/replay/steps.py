@@ -27,7 +27,9 @@ Each step is a dict:
              ("gate", key1, key2, gap_ms, hold_ms)   tap key1, after gap_ms press key2 for hold_ms (the 400 ms guard)
              ("gate_trials", n, gap_ms, hold_ms)     Android: n timed raw-touch trials of the guard (run.py gate_trials)
              ("app_posts", {step id: n})  the app's own send log (诊断记录 on): 0 = no POST to the mailbox during that
-                                       step, n = at least n (the log must have been saved: open 分享诊断记录 first)
+                                       step, n = at least n, watch / refresh left out (the log must have been saved:
+                                       open 分享诊断记录 first); with gate.late, also the app's gate decisions (run.py)
+             ("sheet_steady", s)       Android: the open review sheet stays at the medium detent for s seconds
   expect   selectors that must be present (polled until timeout)
   absent   selectors that must be gone
   visible  selectors that must be on screen inside the content area (D39 scroll-to-top)
@@ -173,6 +175,10 @@ step("status.skip.pending", "status", "早班开关关掉 → 「今天不跑，
      [("toggle", "re:(^|, |、)早班 · (机器|今天)")], expect=["~今天不跑，明天照常", "~1 项未寄出"])
 step("status.skip.review", "status", "✓ → 确认单红字「今天不跑：早班」",
      [("remember", SAVE, "save", {"region": "top"}), tap(SAVE, region="top")], expect=["寄出前看一下", "~今天不跑：早班", "寄出 1 项"])
+# 0.5.2 r5: on Android the open sheet jumped between half and full height by itself (skip-ui took the first of a set whose
+# order changed between evaluations; Vendor/skip-ui/VENDORED.md patch 3), so a tap on ✕ / 寄出 could land elsewhere
+step("status.skip.steady", "status", "确认单开着 8 秒：一直停在半高，不自己跳到全高",
+     [("sheet_steady", 8)], expect=["寄出前看一下"], on="android", timeout=4)
 step("status.skip.think", "status", "再想想 → 关单，改动还在",
      [("remember", "寄出 1 项", "send"), ("wait", 0.3), tap("再想想")], absent=["寄出前看一下"], expect=["~1 项未寄出"], nocmd=2)
 
