@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon background: full-bleed 108x108dp, two layers so it is not a flat fill:
-     vertical blue gradient #4A90FF -> #1A5FE0 (the app's system-blue family, see data/icon-source/remote.icon
-     fill 0,0.533,1) plus a soft white radial light from the upper left (22% -> 0). -->
+<!-- Adaptive icon background, 108x108dp: a plain vertical gradient #0094FF -> #0087FF. These are the top and bottom
+     colours iOS 27 draws for the iPhone icon from its Icon Composer fill (automatic gradient of #0088FF, system blue),
+     measured on the simulator home screen, so both phones show the same blue. No light spot, no second layer. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
@@ -16,19 +16,8 @@
                 android:startY="0"
                 android:endX="54"
                 android:endY="108"
-                android:startColor="#FF4A90FF"
-                android:endColor="#FF1A5FE0" />
-        </aapt:attr>
-    </path>
-    <path android:pathData="M0,0h108v108h-108z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:type="radial"
-                android:centerX="30"
-                android:centerY="22"
-                android:gradientRadius="60"
-                android:startColor="#38FFFFFF"
-                android:endColor="#00FFFFFF" />
+                android:startColor="#FF0094FF"
+                android:endColor="#FF0087FF" />
         </aapt:attr>
     </path>
 </vector>
