@@ -714,7 +714,7 @@ func receiptShortAt(_ at: String, now: Date = Date()) -> String {
     }
 }
 
-private extension Text {
+extension Text {   // also the 用药 rows (Pages/Phone/MedicationRows.swift)
     /// Digits of equal width, so a changing number or time does not shift (the Health Summary value and the Clock alarm
     /// time). Android: skip-fuse-ui marks Text.monospacedDigit() unavailable (Text/Text.swift:347-350); Roboto's
     /// digits are tabular by default, so the Text is used as it is.

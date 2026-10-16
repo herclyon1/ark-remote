@@ -45,6 +45,9 @@ struct MedicationClock<Content: View>: View {
 /// scheduled and as-needed medicines in groups of their own, so each medicine is its own Section (按时 / 按需).
 struct MedicationSection: View {
     var med: Medication
+    /// 「记录服用」: PhonePage presents MedicationLogSheet itself, outside its List's `.refreshable`, which a sheet presented
+    /// from a row would inherit (PhonePage's comment at its `.refreshable`; 9668e7d).
+    var log: (Medication) -> Void
 
     var body: some View {
         Section {
@@ -57,7 +60,7 @@ struct MedicationSection: View {
                     }
                 }
             }
-            MedicationLogButton(med: med)
+            Button("记录服用") { log(med) }
         } header: {
             Text(med.perDay == nil ? "用药 · 按需" : "用药 · 按时")
         }
@@ -72,11 +75,11 @@ struct MedicationSummary: View {
     var body: some View {
         let doses = MedicationStore.shared.doses
         VStack(alignment: .leading, spacing: 2) {
-            Text(MedicationStore.sinceLine(doses, med, now: now)).monospacedDigit()
+            Text(MedicationStore.sinceLine(doses, med, now: now)).tabularDigits()
             if let line = MedicationStore.intervalLine(doses, med, now: now) {
-                Text(line).font(.subheadline).monospacedDigit().foregroundStyle(waiting(doses) ? Color.orange : Color.secondary)
+                Text(line).font(.subheadline).tabularDigits().foregroundStyle(waiting(doses) ? Color.orange : Color.secondary)
             }
-            Text(MedicationStore.countLine(doses, med, now: now)).font(.footnote).monospacedDigit().foregroundStyle(.secondary)
+            Text(MedicationStore.countLine(doses, med, now: now)).font(.footnote).tabularDigits().foregroundStyle(.secondary)
         }
     }
 
@@ -88,49 +91,42 @@ struct MedicationSummary: View {
     }
 }
 
-/// 「记录服用」 and its sheet (Health's Log: the medicine's name, the time it was taken starting at now, Cancel / Log).
-struct MedicationLogButton: View {
+/// Health's Log sheet: the medicine's name, the time it was taken (date and time, starting at now, never past it),
+/// Cancel / 记录. Opened fresh each time, so its time starts at the moment it opens.
+struct MedicationLogSheet: View {
     var med: Medication
+    var close: () -> Void
 
-    @State var shown = false
     @State var at = Date()
     /// The latest time the picker allows: now, read when the sheet opens.
     @State var latest = Date()
 
     var body: some View {
-        Button("记录服用") {
-            let now = Date()
-            at = now
-            latest = now
-            shown = true
-        }
-        .sheet(isPresented: $shown) {
-            NavigationStack {
-                List {
-                    Section {
-                        Text(med.name).font(.headline)
-                        // date and time: a dose remembered late can be moved back, never past now (Health's Log time row)
-                        DatePicker("服用时间", selection: $at, in: latest.addingTimeInterval(-30 * 86400)...latest,
-                                   displayedComponents: [.date, .hourAndMinute])
-                    } footer: {
-                        Text(med.howTo)
-                    }
+        NavigationStack {
+            List {
+                Section {
+                    Text(med.name).font(.headline)
+                    // date and time: a dose remembered late can be moved back, never past now (Health's Log time row)
+                    DatePicker("服用时间", selection: $at, in: latest.addingTimeInterval(-30 * 86400)...latest,
+                               displayedComponents: [.date, .hourAndMinute])
+                } footer: {
+                    Text(med.howTo)
                 }
-                .navigationTitle("记录服用")
-                #if !os(macOS)
-                .navigationBarTitleDisplayMode(.inline)
-                #endif
-                .toolbar {
-                    // Cancel leading, the action trailing (HIG Sheets: "the Cancel button belongs on the leading edge of
-                    // the top toolbar. When present, the Done button belongs on the trailing edge"), as SaveBar's sheet
-                    ToolbarItem(placement: .cancellationAction) {
-                        cancelButton.accessibilityLabel("取消")
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("记录", role: .confirm) {
-                            MedicationStore.shared.log(med, at: at)
-                            shown = false
-                        }
+            }
+            .navigationTitle("记录服用")
+            #if !os(macOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                // Cancel leading, the action trailing (HIG Sheets: "the Cancel button belongs on the leading edge of
+                // the top toolbar. When present, the Done button belongs on the trailing edge"), as SaveBar's sheet
+                ToolbarItem(placement: .cancellationAction) {
+                    cancelButton.accessibilityLabel("取消")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("记录", role: .confirm) {
+                        MedicationStore.shared.log(med, at: at)
+                        close()
                     }
                 }
             }
@@ -140,9 +136,9 @@ struct MedicationLogButton: View {
     /// The system ✕ (iOS 26 `Button(role: .cancel)`); Android: the same ✕ glyph as SaveBar's and the paste sheet's cancel.
     @ViewBuilder private var cancelButton: some View {
         #if os(Android)
-        Button { shown = false } label: { Image(systemName: "xmark") }
+        Button { close() } label: { Image(systemName: "xmark") }
         #else
-        Button(role: .cancel) { shown = false }
+        Button(role: .cancel) { close() }
         #endif
     }
 }
@@ -151,6 +147,8 @@ struct MedicationLogButton: View {
 /// time and how long ago, each deletable by swipe (ForEach.onDelete; skip-fuse-ui Containers/ForEach.swift:168).
 struct MedicationPage: View {
     var med: Medication
+
+    @State var logging = false
 
     var body: some View {
         MedicationClock { now in page(now) }
@@ -171,7 +169,7 @@ struct MedicationPage: View {
                 Text(med.howTo)
             }
             Section {
-                MedicationLogButton(med: med)
+                Button("记录服用") { logging = true }
             }
             Section {
                 if history.isEmpty {
@@ -179,9 +177,9 @@ struct MedicationPage: View {
                 } else {
                     ForEach(history.indices, id: \.self) { i in
                         LabeledContent {
-                            Text(MedicationStore.agoText(history[i].at, now: now)).monospacedDigit()
+                            Text(MedicationStore.agoText(history[i].at, now: now)).tabularDigits()
                         } label: {
-                            Text(MedicationStore.timeText(history[i].at, now: now)).monospacedDigit()
+                            Text(MedicationStore.timeText(history[i].at, now: now)).tabularDigits()
                         }
                     }
                     .onDelete { offsets in
@@ -195,6 +193,10 @@ struct MedicationPage: View {
             } footer: {
                 Text("记错了的话，向左滑删除。")
             }
+        }
+        // this page has no refresh action (PhonePage registers its navigationDestination outside its `.refreshable`)
+        .sheet(isPresented: $logging) {
+            MedicationLogSheet(med: med) { logging = false }
         }
         .navigationTitle(med.shortName)
         #if os(iOS)

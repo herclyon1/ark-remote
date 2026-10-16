@@ -12,9 +12,11 @@ import Observation
 import SkipFuse   // @Observable types only drive the Android UI with SkipFuse imported
 
 /// The two medicines of the 2026-10-16 prescription.
-enum Medication: String, Codable, CaseIterable, Hashable, Sendable {
+enum Medication: String, Codable, CaseIterable, Hashable, Identifiable, Sendable {
     case amoxicillin
     case loxoprofen
+
+    var id: String { rawValue }
 
     /// The name as on the prescription.
     var name: String {
@@ -175,12 +177,12 @@ enum MedicationInterval: Equatable, Sendable {
         guard med == .loxoprofen, let e = elapsed(doses, med, now: now) else { return nil }
         switch interval(elapsed: e) {
         case .wait(let left):
-            // minutes rounded up, so it never says 「再等 不到 1 分钟」 while short of 4 hours
-            return "再等 \(duration((left + 59) / 60 * 60)) 才到 4 小时"
+            // minutes rounded up, so it never says 「还要等 不到 1 分钟」 while short of 4 hours
+            return "还要等 \(duration((left + 59) / 60 * 60))"
         case .ready:
             return "已过 4 小时，可以吃"
         case .past6:
-            return "已过 6 小时"
+            return "已过 6 小时，可以吃"
         }
     }
 

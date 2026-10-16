@@ -61,6 +61,8 @@ struct PhonePage: View {
     @State var linkCopied = false
     /// 粘贴免输入链接 found no link on the clipboard (the alert SetupScreen shows for the same button).
     @State var noLinkShown = false
+    /// The medicine whose 「记录服用」 sheet is up (MedicationLogSheet).
+    @State var logging: Medication? = nil
     /// A reselect of the 手机 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.phone }
@@ -74,8 +76,8 @@ struct PhonePage: View {
         List {
             // 用药 first, the most visible place of the tab (owner 10-16 21:2x 「那栏比较空…最显眼的地方」): local data
             // only, so it draws with no mailbox, network or machine (Pages/Phone/MedicationRows.swift)
-            MedicationSection(med: .amoxicillin)
-            MedicationSection(med: .loxoprofen)
+            MedicationSection(med: .amoxicillin) { logging = $0 }
+            MedicationSection(med: .loxoprofen) { logging = $0 }
             Section {
                 // a name and a value, no hint under them (HIG Lists: "Keep item text succinct"; P13's rows)
                 PhoneValueRow(title: "版本", value: data.pageVersion)
@@ -144,20 +146,25 @@ struct PhonePage: View {
         // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
         // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).
         .id(reselect)
-        // a 用药 row pushes by value (PhoneRoute), so ContentView's phonePath can pop it on a reselect (D39) and push it
-        // again on a cold launch. On the List, not a Section or row (StatusPage's navigationDestination says why).
-        .navigationDestination(for: PhoneRoute.self) { route in
-            switch route {
-            case .medication(let raw):
-                MedicationPage(med: Medication(rawValue: raw) ?? .loxoprofen)
-            }
-        }
         // A pull here reads the stamina again, the one thing on this tab that comes from outside the phone; asking the
         // machine (view.js:1150 ping) changed nothing on this page and held the spinner up to 11 s (HIG Refresh content
         // controls). Inside the sheets below: a sheet's content inherits the refresh action, and the 自检结果 sheet's
         // ScrollView (DiagSheetBox) then kept room for a refresh control, its title cut at the sheet's top edge
         // (diagsheet frames4).
         .refreshable { await StaminaStore.shared.refresh(force: true) }
+        // a 用药 row pushes by value (PhoneRoute), so ContentView's phonePath can pop it on a reselect (D39) and push it
+        // again on a cold launch. On the List, not a Section or row (StatusPage's navigationDestination says why); outside
+        // `.refreshable`, so the medicine page does not inherit the stamina refresh
+        .navigationDestination(for: PhoneRoute.self) { route in
+            switch route {
+            case .medication(let raw):
+                MedicationPage(med: Medication(rawValue: raw) ?? .loxoprofen)
+            }
+        }
+        // 「记录服用」 of a 用药 row, outside `.refreshable` as the sheets below (a sheet inherits the refresh action)
+        .sheet(item: $logging) { m in
+            MedicationLogSheet(med: m) { logging = nil }
+        }
         .onDisappear { linkCopied = false }
         // 运行自检's result (PhoneDiagRows), here outside .id(reselect) so a reselect mid-run keeps it (SelfCheckRun)
         .sheet(isPresented: Binding(get: { selfCheckShown }, set: { SelfCheckRun.shared.shown = $0 })) {

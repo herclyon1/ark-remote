@@ -47,16 +47,17 @@ import XCTest
         func line(_ ago: Int) -> String? {
             MedicationStore.intervalLine([dose(.loxoprofen, t0 - ago)], .loxoprofen, now: date(t0))
         }
-        XCTAssertEqual(line(0), "再等 4 小时 才到 4 小时")
-        XCTAssertEqual(line(3 * 3600), "再等 1 小时 才到 4 小时")
-        XCTAssertEqual(line(2 * 3600 + 15 * 60), "再等 1 小时 45 分 才到 4 小时")
+        XCTAssertEqual(line(0), "还要等 4 小时")
+        XCTAssertEqual(line(60), "还要等 3 小时 59 分")
+        XCTAssertEqual(line(3 * 3600), "还要等 1 小时")
+        XCTAssertEqual(line(2 * 3600 + 15 * 60), "还要等 1 小时 45 分")
         // rounded up: 30 s short of 4 hours still waits a minute
-        XCTAssertEqual(line(4 * 3600 - 30), "再等 1 分钟 才到 4 小时")
+        XCTAssertEqual(line(4 * 3600 - 30), "还要等 1 分钟")
         XCTAssertEqual(line(4 * 3600), "已过 4 小时，可以吃")
         XCTAssertEqual(line(5 * 3600), "已过 4 小时，可以吃")
         XCTAssertEqual(line(6 * 3600 - 1), "已过 4 小时，可以吃")
-        XCTAssertEqual(line(6 * 3600), "已过 6 小时")
-        XCTAssertEqual(line(30 * 3600), "已过 6 小时")
+        XCTAssertEqual(line(6 * 3600), "已过 6 小时，可以吃")
+        XCTAssertEqual(line(30 * 3600), "已过 6 小时，可以吃")
         // amoxicillin has no interval line
         XCTAssertNil(MedicationStore.intervalLine([dose(.amoxicillin, t0 - 3600)], .amoxicillin, now: date(t0)))
         XCTAssertEqual(MedicationStore.interval(elapsed: 3600), .wait(3 * 3600))
@@ -137,5 +138,19 @@ import XCTest
         XCTAssertEqual(ContentView.restoredPhonePath(), want)
         UserDefaults.standard.set("aspirin", forKey: phoneOpenMedicationKey)
         XCTAssertEqual(ContentView.restoredPhonePath().count, 0)
+    }
+
+    /// The 记录服用 sheet and the medicine page are presented from outside PhonePage's `.refreshable`: a sheet presented
+    /// inside it inherits the stamina refresh (PhonePage's comment there; 9668e7d cut the 自检结果 sheet's title that way).
+    func testTheLogSheetAndThePageSitOutsideTheRefresh() throws {
+        let page = try RepoFiles.lines("Sources/ArkRemote/Pages/Phone/PhonePage.swift").map(RepoFiles.code)
+        let refresh = try XCTUnwrap(page.firstIndex { $0.contains(".refreshable") })
+        let sheet = try XCTUnwrap(page.firstIndex { $0.contains(".sheet(item: $logging)") })
+        let dest = try XCTUnwrap(page.firstIndex { $0.contains(".navigationDestination(for: PhoneRoute.self)") })
+        XCTAssertGreaterThan(sheet, refresh, "the 记录服用 sheet is inside the refreshable List")
+        XCTAssertGreaterThan(dest, refresh, "the medicine page is registered inside the refreshable List")
+        let rows = try RepoFiles.lines("Sources/ArkRemote/Pages/Phone/MedicationRows.swift").map(RepoFiles.code)
+        let section = try XCTUnwrap(RepoFiles.body(after: "struct MedicationSection: View", in: rows))
+        XCTAssertFalse(section.contains { $0.contains(".sheet(") }, "a 用药 row presents its own sheet again")
     }
 }
