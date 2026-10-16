@@ -72,6 +72,10 @@ struct PhonePage: View {
         // read here so its change redraws this page (the sheet's Binding is read outside body)
         let selfCheckShown = SelfCheckRun.shared.shown
         List {
+            // 用药 first, the most visible place of the tab (owner 10-16 21:2x 「那栏比较空…最显眼的地方」): local data
+            // only, so it draws with no mailbox, network or machine (Pages/Phone/MedicationRows.swift)
+            MedicationSection(med: .amoxicillin)
+            MedicationSection(med: .loxoprofen)
             Section {
                 // a name and a value, no hint under them (HIG Lists: "Keep item text succinct"; P13's rows)
                 PhoneValueRow(title: "版本", value: data.pageVersion)
@@ -140,6 +144,14 @@ struct PhonePage: View {
         // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
         // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).
         .id(reselect)
+        // a 用药 row pushes by value (PhoneRoute), so ContentView's phonePath can pop it on a reselect (D39) and push it
+        // again on a cold launch. On the List, not a Section or row (StatusPage's navigationDestination says why).
+        .navigationDestination(for: PhoneRoute.self) { route in
+            switch route {
+            case .medication(let raw):
+                MedicationPage(med: Medication(rawValue: raw) ?? .loxoprofen)
+            }
+        }
         // A pull here reads the stamina again, the one thing on this tab that comes from outside the phone; asking the
         // machine (view.js:1150 ping) changed nothing on this page and held the spinner up to 11 s (HIG Refresh content
         // controls). Inside the sheets below: a sheet's content inherits the refresh action, and the 自检结果 sheet's

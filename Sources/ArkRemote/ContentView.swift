@@ -38,7 +38,18 @@ struct ContentView: View {
     @State var arknightsPath = NavigationPath()
     @State var endfieldPath = NavigationPath()
     @State var wuwaPath = NavigationPath()
-    @State var phonePath = NavigationPath()
+    @State var phonePath = ContentView.restoredPhonePath()
+
+    /// The 手机 tab's path at launch: the medicine page that was open when the App was left (owner 10-16 21:2x: reopen
+    /// where he left it; the tab itself is the stored `tab`). Only this page is kept: the other pushed pages read the
+    /// machine's state, which a cold launch has not got yet.
+    static func restoredPhonePath() -> NavigationPath {
+        var p = NavigationPath()
+        if let raw = UserDefaults.standard.string(forKey: phoneOpenMedicationKey), Medication(rawValue: raw) != nil {
+            p.append(PhoneRoute.medication(raw))
+        }
+        return p
+    }
 
     /// The selection: a tab that has just gone (the shift changed while it was open) reads as 状态, like the web
     /// page falling back to its first tab (view.js:998; the stored tab is set back in `dropGoneTabs`).
@@ -188,6 +199,10 @@ struct ContentView: View {
         #endif
         // on a shift change, and once at the start for a stored tab that is already out of the shift (view.js:998)
         .onChange(of: shiftTabs, initial: true) { dropGoneTabs() }
+        // back at the 手机 tab's root (back, a reselect): no medicine page to reopen (MedicationPage stores it on appear)
+        .onChange(of: phonePath.count) { _, n in
+            if n == 0 { UserDefaults.standard.removeObject(forKey: phoneOpenMedicationKey) }
+        }
         // seg-frames-logger.js #diagline / #diagmark on every tab: iOS the tab view's bottom accessory, Android a row
         // under each tab's pages (Pages/Shell/DiagAccessory.swift)
         .modifier(DiagBottomAccessory())
