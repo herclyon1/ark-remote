@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "ark-remote",
     defaultLocalization: "zh-Hans",
-    platforms: [.iOS("27.0"), .macOS("27.0")],
+    platforms: [.iOS("27.1"), .macOS("27.0")],
     products: [
         .library(name: "ArkRemote", type: .dynamic, targets: ["ArkRemote"]),
     ],
