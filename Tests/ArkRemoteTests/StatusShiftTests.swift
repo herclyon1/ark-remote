@@ -149,6 +149,32 @@ import XCTest
         XCTAssertEqual(c.body["until"]?.string, "08:30")
     }
 
+    /// 2026-10-22: 打哪个 listed only 讨伐强敌, so a weekly-boss farm had to be set up by hand (「做了半截导致我现在还得手动找你」).
+    /// The menu now lists the weekly bosses after them; picking one sends its 战歌重奏 position with weekly: true
+    /// (echofarm.py start, weekly=), and 讨伐强敌's 1 stays a separate choice without it.
+    func testEchoFarmWeeklyBossIsSentAsWeekly() throws {
+        var ask: StatusAsk? = nil
+        var queue = "早班"
+        var edits: [String: EWEdit] = [:]
+        var d = StatusData()
+        d.machineOff = false
+        d.bosses = statusBosses + [StatusBoss(index: 1, name: "周本第 1 个 · 天演溯心", weekly: true),
+                                   StatusBoss(index: 2, name: "周本第 2 个", weekly: true)]
+        let a = StatusCommands.actions(d, ask: Binding(get: { ask }, set: { ask = $0 }),
+                                       storedQueue: Binding(get: { queue }, set: { queue = $0 }),
+                                       edits: Binding(get: { edits }, set: { edits = $0 }))
+        XCTAssertEqual(Set(d.bosses.map(\.id)).count, d.bosses.count, "every menu choice has its own tag")
+        let w = try XCTUnwrap(a.startEchoFarm(StatusBoss.weeklyBase + 1, "09:30"))
+        XCTAssertEqual(w.body["boss"]?.number, 1, "the 战歌重奏 position, not the menu tag")
+        XCTAssertEqual(w.body["weekly"]?.bool, true)
+        XCTAssertEqual(w.body["name"]?.string, "周本第 1 个 · 天演溯心")
+        XCTAssertTrue(w.message.contains("周本第 1 个"), w.message)
+        let o = try XCTUnwrap(a.startEchoFarm(1, "09:30"))
+        XCTAssertEqual(o.body["boss"]?.number, 1)
+        XCTAssertNil(o.body["weekly"], "an overworld boss goes out as before")
+        XCTAssertEqual(o.body["name"]?.string, "天傀劫煞")
+    }
+
     /// The 早班 / 晚班 control has no title, and since the 班次 list shows every shift nothing on 状态 changes when it is
     /// flipped. Defect guarded: the control without a line saying what it picks (the game tabs' shift and the shift
     /// 现在跑一趟 runs), so a first-time reader cannot tell what it does.

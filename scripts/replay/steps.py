@@ -128,8 +128,8 @@ step("status.stop.cancel", "status", "弹窗 · 取消 → 关掉，没寄出",
      [CONFIRM_WAIT, ("dismiss",)], absent=["停止一切？"], nocmd=3,
      offline={"say": "提示 · 好 → 关掉", "do": [CONFIRM_WAIT, tap("好", last=True)], "absent": [OFF_NOTE]})
 # the 刷声骸（4 费） menu shows the boss's name alone, without its list number (Calendar's Repeat menu: the option name)
-step("status.4c.menu", "status", "刷声骸（4 费）· 打哪个（点当前值「天傀劫煞」）→ 菜单列出 boss",
-     [tap({"t": "天傀劫煞", "kind": ["StaticText", "TextView", "Button"]})], expect=["梦魇亚当·重锤", "无铭探索者"])
+step("status.4c.menu", "status", "刷声骸（4 费）· 打哪个（点当前值「天傀劫煞」）→ 菜单列出 boss，后面接着周本",
+     [tap({"t": "天傀劫煞", "kind": ["StaticText", "TextView", "Button"]})], expect=["梦魇亚当·重锤", "无铭探索者", "~周本第 1 个"])
 step("status.4c.pick", "status", "菜单 · 选第 3 个 boss → 菜单收起，行显示「梦魇亚当·重锤」",
      [tap("梦魇亚当·重锤", last=True)], expect=["梦魇亚当·重锤"], absent=["无铭探索者", "re:^\\d\\. "])
 step("status.until.2330", "status", "刷到几点 · 点胶囊拨转盘 23 / 30 → 点外面关掉 → 胶囊「23:30」（796103b）",

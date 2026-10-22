@@ -421,7 +421,7 @@ struct StatusPage: View {
                 // the name left and the value right on one line, as Calendar's 「Repeat」 row (P10): the value is the option's
                 // name alone, as Calendar's menu shows 「Never」; the list keeps the game's order (footer)
                 Picker(selection: $bossIndex) {
-                    ForEach(data.bosses) { b in Text(b.name).tag(b.index) }
+                    ForEach(data.bosses) { b in Text(b.name).tag(b.id) }
                 } label: {
                     Text("打哪个")
                 }
@@ -447,7 +447,8 @@ struct StatusPage: View {
             // 打哪个's explanation; HIG Entering data: 开始刷 is grey until a boss and a time are there, and a line says why
             if data.echoFarm == nil {
                 let why = StatusCommands.echoFarmProblem(boss: bossIndex, until: echoUntil)
-                Text((["按游戏里「讨伐强敌」列表的顺序排。刷的期间不花波片、不领周本奖励。"] + (why.map { [$0] } ?? []))
+                Text((["先列「讨伐强敌」，再列周本，都按游戏里列表的顺序排。刷的期间不花波片、不领周本奖励。"]
+                        + (why.map { [$0] } ?? []))
                         .joined(separator: "\n"))
             }
         }

@@ -349,8 +349,16 @@ extension StatusData {
             if let t = tag(pending, id) { d.switchTags[id] = t }
         }
 
-        // 刷 4C 声骸 boss list
-        d.bosses = statusBosses
+        // 刷 4C 声骸 boss list: 讨伐强敌, then the weekly bosses by their F2 › 战歌重奏 position. The machine knows a weekly
+        // boss's name only for the one its weekly step last fought (周常.周本.名字 at 第几个周本), as the 鸣潮 tab's stepper
+        // (WuwaTab bossName); the others are their position alone, never a guessed name
+        let wb = relayObj?["周常"]?["周本"] ?? relayObj?["周本"]
+        let wbIndex = safeInt(wb?["第几个周本"]?.number) ?? 0
+        let wbName = wb?["名字"]?.string ?? ""
+        d.bosses = statusBosses + (1...StatusBoss.weeklyCount).map { n in
+            StatusBoss(index: n, name: "周本第 \(n) 个" + (n == wbIndex && !wbName.isEmpty ? " · \(wbName)" : ""),
+                       weekly: true)
+        }
 
         // 今天.最近 / 今天.失败 (how the machine's runs went) are not read: that is the daily report's (his 10-07 17:56,
         // design rule 7, regression #26; replay step status.noresult)

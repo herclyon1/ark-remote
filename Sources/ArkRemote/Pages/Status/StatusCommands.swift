@@ -97,7 +97,9 @@ enum StatusCommands {
             // `until` is the phone's clock (the page's one clock); the relay reads the machine's (echofarm.py resolve_until)
             guard echoFarmProblem(boss: boss, until: until) == nil, let t = statusTimeHHMM(until),
                   let m = machineHHMM(fromPhone: t) else { return nil }
-            let nm = statusBosses.first(where: { $0.index == boss })?.name ?? "第 \(boss) 个"
+            // `boss` is the menu's tag (StatusBoss.id): a weekly boss goes out as its 战歌重奏 position with weekly: true
+            let pick = data.bosses.first(where: { $0.id == boss }) ?? statusBosses.first(where: { $0.id == boss })
+            let nm = pick?.name ?? "第 \(boss) 个"
             // sent while the machine is off it ran at the next boot, with the time resolved at that moment: 08:30 asked at
             // 23:00 became the next day's 08:30, a farm of ~24 h over the morning shift (审查 A3; boot_stages.py:692-694,
             // echofarm.py:329 → 114-124). The relay is to refuse a stale one; the App does not send it at all.
@@ -105,12 +107,14 @@ enum StatusCommands {
                 ask.wrappedValue = StatusAsk.notice("机器关着", "刷声骸要机器开着才能开始，所以这次没有发。")
                 return nil
             }
+            var body: [String: JSONValue] = ["action": .string("echo_farm"), "confirmed": .bool(true),
+                                             "boss": .int(pick?.index ?? boss), "until": .string(m), "name": .string(nm)]
+            if pick?.weekly == true { body["weekly"] = .bool(true) }
             return StatusAsk(
                 // the relay holds no queue back for a farm (审查 B14: echofarm is read only by commands / engine tick / shutdown /
                 // phone, relay grep): a shift that comes due runs as usual
                 title: "开始刷？", message: "刷「\(nm)」到 \(t)，期间到点的班次可能和它抢游戏。", ok: "开始刷",
-                body: .object(["action": .string("echo_farm"), "confirmed": .bool(true), "boss": .int(boss),
-                               "until": .string(m), "name": .string(nm)]),
+                body: .object(body),
                 okText: "已派：刷到 \(t)", anchor: "echo_farm")   // view.js:1230
         }
         a.changeEchoFarmUntil = { until in

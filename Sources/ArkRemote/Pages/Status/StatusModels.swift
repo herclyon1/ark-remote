@@ -110,7 +110,13 @@ struct StatusEchoFarm: Hashable {
 struct StatusBoss: Hashable, Identifiable {
     var index: Int
     var name: String
-    var id: Int { index }
+    /// A weekly boss (F2 › 战歌重奏): `index` counts that list, not 讨伐强敌 (echofarm.py start, weekly=).
+    var weekly = false
+    /// The 打哪个 menu's tag: weekly ones after weeklyBase, so 讨伐强敌's 1 and 周本's 1 are two choices.
+    var id: Int { weekly ? Self.weeklyBase + index : index }
+    static let weeklyBase = 100
+    /// How many weekly bosses OK-WW can teleport to (weeklyboss.py WEEKLY_BOSSES, the relay's range for weekly=).
+    static let weeklyCount = 9
 }
 
 /// The small line under a row (pending.js applyPending; index.html:769-773): grey, or red with 「再发一次」.
