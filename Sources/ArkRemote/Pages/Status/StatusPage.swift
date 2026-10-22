@@ -420,8 +420,14 @@ struct StatusPage: View {
             } else {
                 // the name left and the value right on one line, as Calendar's 「Repeat」 row (P10): the value is the option's
                 // name alone, as Calendar's menu shows 「Never」; the list keeps the game's order (footer)
+                // 讨伐强敌, then the weekly bosses, with a separator between the two groups (HIG Menus: "To help people
+                // visually distinguish such groups, use a separator."). Not a Section: skip-ui's Picker keeps only tagged
+                // children (Picker.swift processPickerContent), so a Section's rows would vanish on Android, while the
+                // untagged Divider is skipped there; the 「周本」 in each weekly name tells the groups apart on Android.
                 Picker(selection: $bossIndex) {
-                    ForEach(data.bosses) { b in Text(b.name).tag(b.id) }
+                    ForEach(data.bosses.filter { !$0.weekly }) { b in Text(b.name).tag(b.id) }
+                    Divider()
+                    ForEach(data.bosses.filter { $0.weekly }) { b in Text(b.name).tag(b.id) }
                 } label: {
                     Text("打哪个")
                 }

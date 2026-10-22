@@ -129,7 +129,8 @@ step("status.stop.cancel", "status", "弹窗 · 取消 → 关掉，没寄出",
      offline={"say": "提示 · 好 → 关掉", "do": [CONFIRM_WAIT, tap("好", last=True)], "absent": [OFF_NOTE]})
 # the 刷声骸（4 费） menu shows the boss's name alone, without its list number (Calendar's Repeat menu: the option name)
 step("status.4c.menu", "status", "刷声骸（4 费）· 打哪个（点当前值「天傀劫煞」）→ 菜单列出 boss，后面接着周本",
-     [tap({"t": "天傀劫煞", "kind": ["StaticText", "TextView", "Button"]})], expect=["梦魇亚当·重锤", "无铭探索者", "~周本第 1 个"])
+     [tap({"t": "天傀劫煞", "kind": ["StaticText", "TextView", "Button"]}), ("wait", 0.6), ("shot", "4c-menu")],
+     expect=["梦魇亚当·重锤", "无铭探索者", "~周本第 1 个"])
 step("status.4c.pick", "status", "菜单 · 选第 3 个 boss → 菜单收起，行显示「梦魇亚当·重锤」",
      [tap("梦魇亚当·重锤", last=True)], expect=["梦魇亚当·重锤"], absent=["无铭探索者", "re:^\\d\\. "])
 step("status.until.2330", "status", "刷到几点 · 点胶囊拨转盘 23 / 30 → 点外面关掉 → 胶囊「23:30」（796103b）",
@@ -447,12 +448,16 @@ step("d39.ww.top", "d39", "D39：鸣潮滑到底再点「鸣潮」→ 回顶",
 
 # ------------------------------------------------------------------ 手机
 # 10-14 review: the links in their own 换手机 section with 粘贴免输入链接; one row per game key; 运行自检 always there
-step("ph.open", "phone", "手机标签 → 版本 / 诊断记录 / 运行自检 / 换手机两行 / 库街区密钥行",
-     [("tab", "手机")], expect=[VERSION, "诊断记录", "运行自检", "复制免输入链接", "粘贴免输入链接", "~库街区密钥"],
+# 0.5.3 put 用药 at the top of the page, so 换手机 and the key rows sit below the first screen (0.5.4 replay, step 111): the
+# page is read in two screens, the second after a swipe
+step("ph.open", "phone", "手机标签 → 版本 / 诊断记录 / 运行自检",
+     [("tab", "手机")], expect=[VERSION, "诊断记录", "运行自检"],
      absent=["已配置", "标出问题"],
-     ios={"say": "手机标签 → 版本「x.y.z (n)」/ 诊断记录（说明写「收发消息、网络通断和机器状态」）/ 运行自检 / 换手机 / 库街区密钥行",
+     ios={"say": "手机标签 → 版本「x.y.z (n)」/ 诊断记录（说明写「收发消息、网络通断和机器状态」）/ 运行自检",
           "expect": [VERSION, "re:^\\d+\\.\\d+\\.\\d+ \\(\\d+\\)$", "诊断记录", "~收发消息、网络通断和机器状态",
-                     "运行自检", "复制免输入链接", "粘贴免输入链接", "~库街区密钥"]})
+                     "运行自检"]})
+step("ph.lower", "phone", "往下滑 → 换手机两行 / 库街区密钥行",
+     [("swipe", "up", 3)], expect=["复制免输入链接", "粘贴免输入链接", "~库街区密钥"], absent=["已配置", "标出问题"])
 step("ph.pastelink.none", "phone", "粘贴免输入链接（剪贴板里没有链接）→ 提示「剪贴板里没有免输入链接」",
      [tap("粘贴免输入链接"), ("allow_paste", 4), ("wait", 0.8)], expect=["剪贴板里没有免输入链接"], timeout=10,
      android={"do": [tap("粘贴免输入链接"), ("wait", 0.8)]})   # no paste permission alert on Android
