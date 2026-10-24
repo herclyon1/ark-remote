@@ -74,10 +74,8 @@ struct PhonePage: View {
         // read here so its change redraws this page (the sheet's Binding is read outside body)
         let selfCheckShown = SelfCheckRun.shared.shown
         List {
-            // 用药 first, the most visible place of the tab (owner 10-16 21:2x 「那栏比较空…最显眼的地方」): local data
-            // only, so it draws with no mailbox, network or machine (Pages/Phone/MedicationRows.swift)
-            MedicationSection(med: .amoxicillin) { logging = $0 }
-            MedicationSection(med: .loxoprofen) { logging = $0 }
+            // 用药 is archived (owner 10-25 08:5x 「用药记录这个东西可以先归档了」: he logs medicine in Health's Medications on
+            // the iPhone now, and the course is finished). MedicationSection / MedicationStore stay in the tree, unshown.
             Section {
                 // a name and a value, no hint under them (HIG Lists: "Keep item text succinct"; P13's rows)
                 PhoneValueRow(title: "版本", value: data.pageVersion)
