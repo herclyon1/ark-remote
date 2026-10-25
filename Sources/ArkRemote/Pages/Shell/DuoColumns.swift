@@ -43,6 +43,10 @@ struct DuoColumns<First: View, Second: View>: View {
                     column { second }
                         .safeAreaPadding(.leading, gutter)
                 }
+                // the fold band between the two columns showed white between two grouped-grey lists: the page's own
+                // ground runs under it, as the HIG lets "a background image or header span the full width while
+                // scrollable content stays inset" (Designing for iPhone Duo)
+                .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
             } else {
                 column {
                     first
