@@ -78,6 +78,7 @@ struct SetupScreen: View {
                     Text(Self.linkFootNote)
                 }
             }
+            .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
             #if os(Android)
             .topNotices()   // the update notice under the top bar (Logic/AppUpdate.swift); iOS never shows it
             #endif

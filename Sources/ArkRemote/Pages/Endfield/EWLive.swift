@@ -345,6 +345,7 @@ struct EndfieldStockpilePage: View {
                 }
             }
         }
+        .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
         #if os(iOS)
         // the picker right under the bar as Health's D / W / M (review 0.5.2: 35 pt lower inside the List's first
         // section); the List's own top margin only, the rows keep theirs
@@ -446,6 +447,7 @@ struct EndfieldStockNotesPage: View {
                 }
             }
         }
+        .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
         .navigationTitle(EndfieldStockpilePage.notesTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

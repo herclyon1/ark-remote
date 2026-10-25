@@ -191,12 +191,6 @@ struct ContentView: View {
             .tabItem { Label { Text("手机") } icon: { tabSymbol("iphone", else: "tab-phone") } }
             .tag(ContentTab.phone)
         }
-        #if !os(Android)
-        // iPhone Duo's inner display (regular × regular): the tabs as a sidebar on the leading edge, the opt-in Apple
-        // gives for it ("Prepare your app for iPhone Duo", tech talk 111461: TabView .defaultTabBarPlacement(.sidebar));
-        // the outer display keeps the tab bar. Owner 10-25 08:55: only the foldable is adapted.
-        .tabViewStyle(.sidebarAdaptable)
-        #endif
         #if os(Android)
         // Apple's tab bar switches tabs at once; skip-ui's TabView cross-fades for 700 ms (Navigation 3 NavDisplay
         // defaults via NavDisplayTransitionOptions.tabViewDefaults), and a swipe during that fade is lost.

@@ -159,6 +159,7 @@ struct MonthCardPage: View {
                      + "照游戏里显示的「还剩 X 天」填。")
             }
         }
+        .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
         .clearsFocusOnOutsideTap()
         .keyboardDone()
         .navigationTitle("\(game)月卡")

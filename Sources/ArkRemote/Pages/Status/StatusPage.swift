@@ -26,6 +26,14 @@ struct StatusPage: View {
     /// Android-only machine dot (no computer symbol in skip-ui's Material table, Components/Image.swift).
     @ScaledMetric(relativeTo: .title2) var resIcon: CGFloat = 30
     @ScaledMetric(relativeTo: .body) var dotSide: CGFloat = 10
+    #if !os(Android)
+    /// iPhone Duo's inner display has regular horizontal size class in every pose (tech talk 111461 "Use size classes":
+    /// "it has regular horizontal and vertical size classes"); the outer display is compact. Layout follows the size
+    /// class, not the orientation (same talk: "avoid checking interface orientation for layout decisions").
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// the page's own space is wider than tall (the unfolded inner display held in landscape)
+    @State private var wider = false
+    #endif
     /// A reselect of the 状态 tab at its root (ContentView.reselect, D39): scroll to the top. Read in body, so the change
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.status }
@@ -46,54 +54,119 @@ struct StatusPage: View {
         #endif
     }
 
-    private var page: some View {
-        let _ = tick
-        return List {
+    /// The machine at a glance: its card, the notices, the commands and the stamina tiles.
+    @ViewBuilder private var overviewSections: some View {
+        deviceCard
+        notices
+        // view.js:362: the 月卡 0–5 days reminder card, after the notices and before the tiles (Pages/Status/MonthCard*.swift)
+        MonthCardReminder(today: MonthCardStore.today())
+        actionTiles
+        staminaSection
+        estopSection
+    }
+
+    /// What runs when: the shift picker, every shift, 刷声骸, the machine's switches, 月卡 and the receipts.
+    @ViewBuilder private var scheduleSections: some View {
+        shiftPickerSection
+        // every shift in one list right after the actions, as Clock's alarms (HIG Layout: "Group related items"): the
+        // shifts were split into 这一趟 and 明日安排 with 刷声骸, 机器 and 月卡 between them
+        shifts
+        echoFarmSection
+        machineSection
+        MonthCardRows(today: MonthCardStore.today())
+        receiptsSection
+    }
+
+    /// The emergency-stop note, while one is open.
+    @ViewBuilder private var estopSection: some View {
+        // top-level conditional sections go through listSection (Pages/Shell/SkipFixes.swift): a bare `if` leaves
+        // an empty grey section on Android
+        listSection("status-estop", ifLet: data.estopNote) { note in
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(note.title).foregroundStyle(.red)   // index.html:766 .estopnote .row label{color:var(--bad)}
+                    Text(note.receipt).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// The shift picker: which shift the game tabs edit and 现在跑一趟 runs.
+    @ViewBuilder private var shiftPickerSection: some View {
+        listSection("status-shift", if: !data.queues.isEmpty) {
+            Section {
+                Picker("班次", selection: Binding(get: { data.currentQueue }, set: { actions.selectQueue($0) })) {
+                    ForEach(data.queues) { q in
+                        Text(q.scheduled ? q.name : "\(q.name)（未启用定时）").tag(q.name)
+                    }
+                }
+                .pickerStyle(.segmented)
+                #if !os(Android)
+                .listRowInsets(EdgeInsets())   // skip-ui: listRowInsets unavailable (skip-fuse-ui List.swift:381)
+                #endif
+                // on the page ground, not in a card, as Health's D / W / M control (ios27-健康Steps详情), on both
+                // platforms (skip-fuse-ui List.swift:336 has listRowBackground)
+                .listRowBackground(Color.clear)
+            } footer: {
+                // the control has no title and, since the 班次 list below shows every shift, nothing on this page
+                // changes when it is flipped: it picks the shift the game tabs edit and 现在跑一趟 runs (decision G1
+                // keeps the control). HIG Segmented controls: "affect an object, state, or view"; say which.
+                Text("选哪一班，方舟、终末地、鸣潮页改的就是这一班的设置，「现在跑一趟」也跑这一班。")
+            }
+        }
+    }
+
+    /// iPhone Duo's inner display (regular width) when it is wider than tall: the two halves of the page side by side
+    /// in the system's ArrangementView, which splits them at the hinge as the display folds (HIG Designing for iPhone
+    /// Duo: "A split arrangement divides its area between its primary and secondary views. It splits horizontally when
+    /// the arrangement is wider than it is tall"; "Adapt your layout when the device folds"). Its reference, Health's
+    /// Summary, fills the unfolded display with two columns that divide at the fold. Taller than wide (portrait), the
+    /// arrangement would stack two scrolling halves and cut the stamina tiles at the boundary (and `.axes(.horizontal)`
+    /// drops the second half altogether), so portrait, the outer display, Split View and Android keep the one list.
+    @ViewBuilder private var arranged: some View {
+        #if !os(Android)
+        Group {
+            if sizeClass == .regular && wider {
+                // the arrangement leaves the lists about 2 pt each side of the split, so the cards of the two halves
+                // nearly touched; a gutter as wide as the outer margin (20 pt) between them
+                ArrangementView {
+                    List { overviewSections }
+                        .safeAreaPadding(.trailing, 8)
+                } secondary: {
+                    List { scheduleSections }
+                        .safeAreaPadding(.leading, 8)
+                }
+            } else {
+                List {
+                    overviewSections
+                    scheduleSections
+                }
+                .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
+            }
+        }
+        .onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { wider = $0 }
+        #else
+        // the sections listed one by one, as before: skip-ui's List finds its sections by type (MonthCardRows.swift)
+        List {
             deviceCard
             notices
-            // view.js:362: the 月卡 0–5 days reminder card, after the notices and before the tiles (Pages/Status/MonthCard*.swift)
             MonthCardReminder(today: MonthCardStore.today())
             actionTiles
             staminaSection
-            // top-level conditional sections go through listSection (Pages/Shell/SkipFixes.swift): a bare `if` leaves
-            // an empty grey section on Android
-            listSection("status-estop", ifLet: data.estopNote) { note in
-                Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(note.title).foregroundStyle(.red)   // index.html:766 .estopnote .row label{color:var(--bad)}
-                        Text(note.receipt).font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            listSection("status-shift", if: !data.queues.isEmpty) {
-                Section {
-                    Picker("班次", selection: Binding(get: { data.currentQueue }, set: { actions.selectQueue($0) })) {
-                        ForEach(data.queues) { q in
-                            Text(q.scheduled ? q.name : "\(q.name)（未启用定时）").tag(q.name)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    #if !os(Android)
-                    .listRowInsets(EdgeInsets())   // skip-ui: listRowInsets unavailable (skip-fuse-ui List.swift:381)
-                    #endif
-                    // on the page ground, not in a card, as Health's D / W / M control (ios27-健康Steps详情), on both
-                    // platforms (skip-fuse-ui List.swift:336 has listRowBackground)
-                    .listRowBackground(Color.clear)
-                } footer: {
-                    // the control has no title and, since the 班次 list below shows every shift, nothing on this page
-                    // changes when it is flipped: it picks the shift the game tabs edit and 现在跑一趟 runs (decision G1
-                    // keeps the control). HIG Segmented controls: "affect an object, state, or view"; say which.
-                    Text("选哪一班，方舟、终末地、鸣潮页改的就是这一班的设置，「现在跑一趟」也跑这一班。")
-                }
-            }
-            // every shift in one list right after the actions, as Clock's alarms (HIG Layout: "Group related items"): the
-            // shifts were split into 这一趟 and 明日安排 with 刷声骸, 机器 and 月卡 between them
+            estopSection
+            shiftPickerSection
             shifts
             echoFarmSection
             machineSection
             MonthCardRows(today: MonthCardStore.today())
             receiptsSection
         }
+        #endif
+    }
+
+    private var page: some View {
+        let _ = tick
+        return arranged
         // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
         // the real top. skip-ui's ScrollViewProxy reaches rows only (LazySupport.swift:250-288; a section header is a
         // count, :283), and the List's top inset and the first section's top (its rounded corners) are lazy items of
@@ -263,7 +336,7 @@ struct StatusPage: View {
     /// redacted placeholders (HIG Loading: "consider showing placeholder text, graphics, or animations as content
     /// loads") and 「正在读取…」 under them (view.js:293-297).
     @ViewBuilder private var staminaSection: some View {
-        listSection("status-stamina", ifLet: data.stamina) { tiles in
+        listSection("status-stamina", ifLet: data.stamina) { (tiles: [StatusStamina]) in
             // placeholder values of a typical length, drawn redacted
             let shown = tiles.isEmpty
                 ? [StatusStamina(label: "明日方舟 理智", value: 100, cap: 135, sub: "今天 00:00 回满"),
@@ -271,12 +344,32 @@ struct StatusPage: View {
                    StatusStamina(label: "鸣潮 波片", value: 100, cap: 240, sub: "今天 00:00 回满")]
                 : tiles
             Section {
-                VStack(spacing: 10) {
-                    HStack(spacing: 10) {
-                        staminaTile(shown[0], placeholder: tiles.isEmpty)
-                        if shown.count > 1 { staminaTile(shown[1], placeholder: tiles.isEmpty) }
+                Group {
+                    #if !os(Android)
+                    // two columns, as Health's Summary keeps its Pinned cards: a card left alone stays half width, and on
+                    // iPhone Duo an even number of columns divides cleanly at the hinge (HIG Designing for iPhone Duo: "In a
+                    // grid-style layout, prefer an even number of columns so content divides cleanly")
+                    Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+                        GridRow {
+                            staminaTile(shown[0], placeholder: tiles.isEmpty)
+                            if shown.count > 1 { staminaTile(shown[1], placeholder: tiles.isEmpty) }
+                        }
+                        if shown.count > 2 {
+                            GridRow {
+                                staminaTile(shown[2], placeholder: tiles.isEmpty)
+                                Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                            }
+                        }
                     }
-                    if shown.count > 2 { staminaTile(shown[2], placeholder: tiles.isEmpty) }
+                    #else
+                    VStack(spacing: 10) {
+                        HStack(spacing: 10) {
+                            staminaTile(shown[0], placeholder: tiles.isEmpty)
+                            if shown.count > 1 { staminaTile(shown[1], placeholder: tiles.isEmpty) }
+                        }
+                        if shown.count > 2 { staminaTile(shown[2], placeholder: tiles.isEmpty) }
+                    }
+                    #endif
                 }
                 #if !os(Android)
                 // Health's Summary: each card on the grouped page ground, not inside a row (a GroupBox in a row has the
@@ -688,6 +781,7 @@ struct StatusReceiptsList: View {
                 }
             }
         }
+        .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
         .navigationTitle("回执")   // view.js:1162 openPage("回执", …)
         #if os(iOS)
         // small and centred, as Health's pushed day list (P8); iOS only (MonthCardPage says why)

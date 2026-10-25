@@ -172,6 +172,7 @@ struct DiagSheetBox: View {
                     Text(verbatim: message).textCase(nil)
                 }
             }
+            .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
             .navigationTitle(title)
             #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)

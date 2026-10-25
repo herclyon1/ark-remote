@@ -84,6 +84,7 @@ struct EWSaveBar: ViewModifier {
                             }
                         }
                     }
+                    .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
                     .navigationTitle("寄出前看一下")
                     #if !os(macOS)
                     .navigationBarTitleDisplayMode(.inline)

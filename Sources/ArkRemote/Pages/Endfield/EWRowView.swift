@@ -420,6 +420,7 @@ struct EWChoiceList: View {
                 else if ewIsWeekdays(choices) { Text("按游戏里的星期算。") }
             }
         }
+        .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
         .navigationTitle(title)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
