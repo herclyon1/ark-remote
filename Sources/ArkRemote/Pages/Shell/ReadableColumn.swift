@@ -22,17 +22,37 @@ extension View {
 #if !os(Android)
 private struct ReadableColumn: ViewModifier {
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var width: CGFloat = 0
+    @State private var space = Space()
     /// The column with the list's own side margins: UIKit's readable content width (672 pt at the default text size)
     /// for the rows. It grows with the text size as the system's readable guide does (HIG Designing for iPhone Duo:
     /// "Avoid fixed widths"); at the largest sizes the list takes the whole width again.
     @ScaledMetric(relativeTo: .body) private var column: CGFloat = 712
 
+    /// The list's own width, and where the fold starts while a vertical fold (the book pose) divides it.
+    private struct Space: Equatable {
+        var width: CGFloat = 0
+        var foldStart: CGFloat?
+    }
+
     func body(content: Content) -> some View {
         // measured outside the padding: the padding narrows the safe area the list sees, not this frame
         content
-            .safeAreaPadding(.horizontal, sizeClass == .regular ? max(0, (width - column) / 2) : 0)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            .safeAreaPadding(.leading, leading)
+            .safeAreaPadding(.trailing, trailing)
+            .onGeometryChange(for: Space.self) { proxy in
+                // a page that is one list (the pushed pages; the tab pages split in DuoColumns): folded like a book, the
+                // list keeps to the half before the fold instead of running every row across it. HIG Designing for
+                // iPhone Duo: "Use the ReservedRegion API to keep important elements clear of the center if the system
+                // doesn't move them automatically."
+                let fold = proxy.reservedRegions(kind: .division).first { $0.isActive && $0.frame.height > $0.frame.width }
+                return Space(width: proxy.size.width, foldStart: fold?.frame.minX)
+            } action: { space = $0 }
     }
+
+    private var centred: CGFloat { sizeClass == .regular ? max(0, (space.width - column) / 2) : 0 }
+    private var leading: CGFloat { space.foldStart == nil ? centred : 0 }
+    /// folded: as far from the fold as the cards are from the screen's edge (the list adds no margin of its own at a
+    /// padded edge, so its cards ran up to the fold)
+    private var trailing: CGFloat { space.foldStart.map { max(0, space.width - $0) + 20 } ?? centred }
 }
 #endif

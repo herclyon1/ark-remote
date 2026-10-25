@@ -71,7 +71,9 @@ enum WuwaSchema {
                     hint: nil),
         EWFieldSpec(path: "DailyTask.json/Material Selection", type: .text, label: "刷哪种材料",
                     hint: nil),
-        EWFieldSpec(path: "DailyTask.json/Which Forgery Challenge to Farm", type: .select, label: "凝素领域打哪个",
+        // our own name, as 无音区 below: OK-WW's 「刷第几个凝素领域 (F2列表)」 won over `label`, and in a half-width column on
+        // iPhone Duo's inner display (Pages/Shell/DuoColumns.swift) it pushed the value onto a second line (review 10-25)
+        EWFieldSpec(path: "DailyTask.json/Which Forgery Challenge to Farm", type: .select, name: "凝素领域打哪个",
                     hint: "凝素领域按想要的武器材料挑。", choices: forge),
         // our own name: OK-WW's 「刷第几个无音区 (F2列表)」 wrapped the name and the value onto two lines each (review 鸣潮 2)
         EWFieldSpec(path: "DailyTask.json/Which Tacet Suppression to Farm", type: .icons, name: "无音区打哪个",
