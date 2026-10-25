@@ -294,6 +294,10 @@ struct StatusPage: View {
                 }
             }
             .modifier(StatusAsking(ask: $confirm, anchor: "run_now", confirm: actions.confirm))
+            // iOS: no 刷新 row; pulling the list down refreshes. His only words on it (09-02 10:29): 「手动刷新作为兜底选项
+            // 而不是经常行为」. Its reference, Find My › a device, has no refresh action, and Mail refreshes by pulling only;
+            // his 10-26 07:2x: what he never said follows the closest Apple page.
+            #if os(Android)
             Button { actions.refresh() } label: {
                 // the icon stays put while a refresh runs: the pull to refresh shows the one progress indicator (HIG
                 // Progress indicators: "Display a progress indicator in a consistent location."); in the tint of the
@@ -303,6 +307,7 @@ struct StatusPage: View {
                     symbol("arrow.clockwise.circle.fill", android: "Icons.Outlined.Refresh")
                 }
             }
+            #endif
             Button(role: .destructive) { confirm = actions.stopAll() } label: {
                 tileLabel("停止一切", "脚本和游戏", tint: .red) {
                     // no Material stop icon in skip-ui's table (Components/Image.swift): its close glyph

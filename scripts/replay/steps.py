@@ -108,15 +108,22 @@ def step(id, page, say, do=(), **kw):
     S.append(d)
 
 
+# iOS has no 刷新 row (0.5.4 (29)): pulling the status list down refreshes
+PULL = [("top", 3), ("swipe", "down", 1)]
+
 # ------------------------------------------------------------------ setup
 step("setup.launch", "setup", "冷启动（一次性信箱已写好）→ 状态页数据齐、设备卡「开机中」",
      [("relaunch",)], expect=[STATUS_ROOT, "刷新", "停止一切", "班次", "~开机中"], timeout=45, always=True,
+     ios={"expect": [STATUS_ROOT, "停止一切", "班次", "~开机中"]},
      offline={"say": "冷启动（一次性信箱 + 缓存注入的状态）→ 状态页数据齐、设备卡「关机」（离线没有心跳）",
-              "expect": [STATUS_ROOT, "刷新", "停止一切", "班次", "~关机"]})
+              "expect": [STATUS_ROOT, "刷新", "停止一切", "班次", "~关机"],
+              "ios": {"say": "冷启动（一次性信箱 + 缓存注入的状态）→ 状态页数据齐、设备卡「关机」（离线没有心跳）",
+                      "expect": [STATUS_ROOT, "停止一切", "班次", "~关机"]}})
 
 # ------------------------------------------------------------------ status page
 step("status.refresh", "status", "状态 · 刷新 → 寄出 refresh，设备卡仍「开机中」",
-     [tap("刷新")], expect=["~开机中"], cmd={"action": "refresh"})
+     [tap("刷新")], expect=["~开机中"], cmd={"action": "refresh"},
+     ios={"say": "状态 · 下拉刷新 → 寄出 refresh，设备卡仍「开机中」", "do": PULL})
 step("status.runnow.ask", "status", "状态 · 现在跑一趟 → 弹「现在跑一趟？」",
      [tap(STATUS_ROOT)], expect=["现在跑一趟？", "跑一趟"])
 step("status.runnow.go", "status", "弹窗 · 跑一趟（等过 400 ms 门）→ 寄出 run_now",
@@ -219,6 +226,7 @@ step("status.off.stop", "status", "关机时按停止一切 → 提示「所以�
      [tap("停止一切")], expect=[OFF_NOTE], nocmd=2)
 step("status.off.ok", "status", "好 → 关提示；心跳回来 → 「开机中」",
      [CONFIRM_WAIT, tap("好", last=True), ("hb", 300), ("state", "base"), tap("刷新")], expect=["~开机中"], timeout=20,
+     ios={"do": [CONFIRM_WAIT, tap("好", last=True), ("hb", 300), ("state", "base")] + PULL},
      offline={"say": "好 → 关提示（心跳回来那半步要 ntfy，离线不做）", "do": [CONFIRM_WAIT, tap("好", last=True)], "expect": [STATUS_ROOT],
               "absent": [OFF_NOTE]})
 
@@ -581,6 +589,7 @@ step("noef.back", "layout", "机器发回原状态 → 终末地标签回来，A
 # ------------------------------------------------------------------ duplicate receipts (pass-1 item 5, fix 3)
 step("dup.status", "receipts", "同一分钟两条一样的回执 → 状态页两行都在、不崩",
      [("state", "dup"), tap("刷新"), ("wait", 3), ("see", "周本：打第 2 个")], expect=[{"t": "周本：打第 2 个", "count": 2}],
+     ios={"do": [("state", "dup")] + PULL + [("wait", 3), ("see", "周本：打第 2 个")]},
      timeout=25,
      offline={"do": [("state", "dup"), ("see", "周本：打第 2 个")]})
 step("dup.page", "receipts", "查看全部 → 回执页也有这两行（不是旧数据）",
