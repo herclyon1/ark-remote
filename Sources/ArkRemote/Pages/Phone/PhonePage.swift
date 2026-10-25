@@ -74,6 +74,7 @@ struct PhonePage: View {
     @ViewBuilder private var thisPhoneSection: some View {
         // 用药 is archived (owner 10-25 08:5x 「用药记录这个东西可以先归档了」: he logs medicine in Health's Medications on
         // the iPhone now, and the course is finished). MedicationSection / MedicationStore stay in the tree, unshown.
+        #if os(Android)
         Section {
             // a name and a value, no hint under them (HIG Lists: "Keep item text succinct"; P13's rows)
             PhoneValueRow(title: "版本", value: data.pageVersion)
@@ -81,6 +82,22 @@ struct PhonePage: View {
         } header: {
             Text("这台手机")
         }
+        #else
+        Section {
+            // a name and a value, no hint under them (HIG Lists: "Keep item text succinct"; P13's rows)
+            PhoneValueRow(title: "版本", value: data.pageVersion)
+        } header: {
+            Text("这台手机")
+        }
+        // the diagnostics rows a section of their own with what the switch does as its footer, as Settings › Privacy &
+        // Security › Analytics puts the words under its switch (P13; review 10-26 #4; one subject a section, its
+        // footer about it alone, as the link section below)
+        Section {
+            PhoneDiagRows(appVersion: data.pageVersion)
+        } footer: {
+            Text(phoneDiagHint)
+        }
+        #endif
     }
 
     /// 换手机: the no-input link, copied here and pasted on the other phone.

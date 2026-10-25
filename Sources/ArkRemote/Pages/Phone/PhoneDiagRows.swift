@@ -10,6 +10,9 @@ import UIKit
 /// records to look at and share. The switch is its own feedback (no 「诊断记录已开 / 已关」 toast, shell API id 266; HIG
 /// Alerts: "Avoid using an alert merely to provide information"); 运行自检 shows the system spinner in its row while it
 /// runs, as Settings › General › Software Update does while it checks.
+/// What turning 诊断记录 on brings; under the switch on Android, the diagnostics section's footer on iOS.
+let phoneDiagHint = "开着时记下这台手机收发消息、网络通断和机器状态的变化。每页底下会出现诊断条，出问题时点「标出问题」把记录发去排查。"
+
 struct PhoneDiagRows: View {
     var appVersion: String
 
@@ -27,8 +30,14 @@ struct PhoneDiagRows: View {
         })) {
             // what turning it on brings: the bar under every page with the button that sends the record (HIG Toggles:
             // say what it does; the switch's own effects were not said)
-            PhoneRowLabel(title: "诊断记录",
-                          hint: "开着时记下这台手机收发消息、网络通断和机器状态的变化。每页底下会出现诊断条，出问题时点「标出问题」把记录发去排查。")
+            #if os(Android)
+            PhoneRowLabel(title: "诊断记录", hint: phoneDiagHint)
+            #else
+            // iOS: the row's own words only, the explanation in the section's footer (PhonePage) — HIG Lists and tables
+            // "Keep item text succinct so row content is comfortable to read." (review 10-26 #4: it was the one row of
+            // 这台手机 with two lines under it)
+            Text("诊断记录")
+            #endif
         }
         .onAppear { if diagOn { DiagWatch.start(); DiagUI.shared.start() } }
         if diagOn {

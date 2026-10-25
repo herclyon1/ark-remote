@@ -70,6 +70,11 @@ func ewFoot(_ shown: [EWRow], card: [EWRow]) -> String {
 struct EWRowView: View {
     var row: EWRow
     @Binding var values: [String: EWValue]
+    #if !os(Android)
+    /// A day circle's label box, following Dynamic Type with the day's subheadline (HIG Typography; it was a fixed 22 pt,
+    /// ark-native-lint 「fixed size」).
+    @ScaledMetric(relativeTo: .subheadline) var daySide: CGFloat = 22
+    #endif
     var readonly: [String: EWValue] = [:]
     var onChange: (String, EWValue) -> Void = { _, _ in }
     /// 「待保存」 / 「已寄出 …」 / 「没生效 …」 / 「已应用 …」 under the row (box sub-rows carry none; their header does).
@@ -299,7 +304,7 @@ struct EWRowView: View {
     @ViewBuilder private func dayCircle(_ c: EWChoice, on: Bool) -> some View {
         let label = Text(verbatim: String(c.label.suffix(1)))
             .font(.subheadline.weight(.semibold))
-            .frame(width: 22, height: 22)
+            .frame(width: daySide, height: daySide)
         if on {
             Button { toggleDay(c.value) } label: { label }
                 .buttonStyle(.borderedProminent)
@@ -307,10 +312,13 @@ struct EWRowView: View {
                 .accessibilityLabel(c.label)
                 .accessibilityAddTraits(.isSelected)
         } else {
+            // off: a neutral grey circle with the day in body colour, as Clock's Repeat days (his iPhone Duo,
+            // 10-26 03:32); a secondary-colour tint read as disabled (HIG Color: don't use the secondary label
+            // colour as a background colour; review 10-26 #1)
             Button { toggleDay(c.value) } label: { label }
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.circle)
-                .tint(Color.secondary)
+                .tint(.primary)
                 .accessibilityLabel(c.label)
         }
     }

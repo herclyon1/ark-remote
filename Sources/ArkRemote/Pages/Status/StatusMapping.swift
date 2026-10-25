@@ -111,7 +111,9 @@ extension StatusData {
                                         from: String(from.dropFirst(11)),
                                         until: String(until.dropFirst(11)),
                                         fromLocal: from.isEmpty ? "" : localClock(fromMachineFull: from),
-                                        untilLocal: localClock(fromMachineFull: until))
+                                        untilLocal: localClock(fromMachineFull: until),
+                                        fromDate: from.isEmpty ? nil : machineDate(full: from),
+                                        untilDate: machineDate(full: until))
         }
 
         // shifts

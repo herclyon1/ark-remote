@@ -104,6 +104,9 @@ struct StatusEchoFarm: Hashable {
     /// 从 / 到 on the phone's clock (「明天 08:30」 when not today), for the notice (审查 B4).
     var fromLocal: String = ""
     var untilLocal: String = ""
+    /// 从 / 到 as moments, for the time left and how far along on iOS (review 10-26 #3); nil when unreadable.
+    var fromDate: Date? = nil
+    var untilDate: Date? = nil
 }
 
 /// A 4C boss: 序号 = position in the game's 讨伐强敌 list.

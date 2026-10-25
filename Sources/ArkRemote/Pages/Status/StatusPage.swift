@@ -232,6 +232,9 @@ struct StatusPage: View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("正在刷「\(ef.name)」")
+                    #if !os(Android)
+                    echoFarmProgress(ef)
+                    #endif
                     // the phone's clock only, as every time on the page (审查 B4)
                     Text("刷到 \(ef.untilLocal) 为止" + (ef.fromLocal.isEmpty ? "" : "，\(ef.fromLocal) 开始"))
                         .font(.footnote).foregroundStyle(.secondary)
@@ -250,6 +253,26 @@ struct StatusPage: View {
         }
     }
 
+    #if !os(Android)
+    /// While farming: the time left and how far along, as Clock's running timer shows its time left over a ring (his
+    /// iPhone Duo, 10-26 03:34; HIG Progress indicators "When possible, use a determinate progress indicator."; review
+    /// 10-26 #3). The system's timer progress view and timer text run by themselves; nothing here redraws them.
+    @ViewBuilder private func echoFarmProgress(_ ef: StatusEchoFarm) -> some View {
+        if let end = ef.untilDate, end > Date() {
+            if let start = ef.fromDate, start < end {
+                ProgressView(timerInterval: start...end) {
+                    EmptyView()
+                } currentValueLabel: {
+                    (Text("还剩 ") + Text(end, style: .timer)).monospacedDigit()
+                }
+            } else {
+                (Text("还剩 ") + Text(end, style: .timer)).monospacedDigit()
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+    #endif
+
     /// The 收工 time 改收工时刻 sends, on the phone's clock: the one picked below, else the machine's current 到 on that clock.
     private func newUntil(_ ef: StatusEchoFarm) -> String { echoNewUntil.isEmpty ? phoneHHMM(fromMachine: ef.until) : echoNewUntil }
 
@@ -260,7 +283,15 @@ struct StatusPage: View {
             Button { confirm = actions.runNow() } label: {
                 tileLabel("现在跑一趟", data.currentQueue.isEmpty ? "" :
                           (data.nextAt.isEmpty ? data.currentQueue : "\(data.currentQueue) · 下一趟 \(data.nextAt)"),
-                          tint: .blue) { Image(systemName: "play.fill") }
+                          tint: .blue) {
+                    // the three actions in one symbol family, a filled circle each (HIG Icons: "consistent size, level of
+                    // detail, stroke thickness (or weight)"; review 10-26 #5: play.fill / arrow.clockwise / stop.fill)
+                    #if os(Android)
+                    Image(systemName: "play.fill")
+                    #else
+                    Image(systemName: "play.circle.fill")
+                    #endif
+                }
             }
             .modifier(StatusAsking(ask: $confirm, anchor: "run_now", confirm: actions.confirm))
             Button { actions.refresh() } label: {
@@ -269,13 +300,13 @@ struct StatusPage: View {
                 // row's text, as the other two rows
                 // no second line: how fresh the state is is said once, on the device card above (「17 秒前更新」)
                 tileLabel("刷新", "", tint: .blue) {
-                    symbol("arrow.clockwise", android: "Icons.Outlined.Refresh")
+                    symbol("arrow.clockwise.circle.fill", android: "Icons.Outlined.Refresh")
                 }
             }
             Button(role: .destructive) { confirm = actions.stopAll() } label: {
                 tileLabel("停止一切", "脚本和游戏", tint: .red) {
                     // no Material stop icon in skip-ui's table (Components/Image.swift): its close glyph
-                    symbol("stop.fill", android: "Icons.Filled.Close")
+                    symbol("stop.circle.fill", android: "Icons.Filled.Close")
                 }
             }
             .modifier(StatusAsking(ask: $confirm, anchor: "estop", confirm: actions.confirm))
@@ -352,9 +383,20 @@ struct StatusPage: View {
                 #endif
             } footer: {
                 if tiles.isEmpty { Text("正在读取…") }
-                else if !data.staminaSource.isEmpty { Text("\(data.staminaSource) 读取，下拉刷新会重新读") }
+                else if !data.staminaSource.isEmpty { Text(staminaFooter) }
             }
         }
+    }
+
+    /// When the numbers were read. iOS says only when, not how to refresh (HIG Progress indicators: "don't use it to
+    /// explain how to perform a refresh. Instead, provide information of value about the content being refreshed.";
+    /// review 10-26 #6).
+    private var staminaFooter: String {
+        #if os(Android)
+        return "\(data.staminaSource) 读取，下拉刷新会重新读"
+        #else
+        return "\(data.staminaSource) 读取"
+        #endif
     }
 
     private static let staminaIcon = ["明日方舟 理智": "res-ak", "终末地 理智": "res-ef", "鸣潮 波片": "res-ww"]
@@ -366,7 +408,9 @@ struct StatusPage: View {
 
     private func staminaTile(_ t: StatusStamina, placeholder: Bool) -> some View {
         let icon = Self.staminaIcon[t.label] ?? "res-ak"
+        #if os(Android)
         let colour = Self.staminaColour[t.label] ?? Color.blue
+        #endif
         return GroupBox {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .top) {
@@ -380,7 +424,14 @@ struct StatusPage: View {
                         .redacted(reason: placeholder ? .placeholder : [])
                     }
                 }
+                #if os(Android)
                 Text(t.label).font(.subheadline).bold().foregroundStyle(colour)
+                #else
+                // body colour: the tile is not tappable, and blue is the colour of the tappable rows above (HIG Color
+                // "using the same or similar color to stylize noninteractive text is confusing"; review 10-26 #2);
+                // Find My's detail tiles title in black too, the game told apart by its icon and name
+                Text(t.label).font(.subheadline).bold()
+                #endif
                 if let err = t.error {
                     Text(err).font(.footnote).foregroundStyle(.red)
                 } else if !t.sub.isEmpty {
