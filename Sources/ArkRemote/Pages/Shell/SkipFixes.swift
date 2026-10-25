@@ -129,14 +129,16 @@ struct SheetLink<Destination: View, Label: View>: View {
                 #if os(Android)
                 Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
                 #else
-                Image(systemName: "chevron.right")
+                // not chevron.right: that says the row pushes a page (HIG Lists and tables, disclosure indicator), and
+                // this one brings up a sheet over the page. Calendar's Repeat row, whose Custom brings up such a sheet,
+                // ends in the up-down chevrons a menu's value shows (his iPhone Duo, iOS 27.2, 10-25 17:36)
+                Image(systemName: "chevron.up.chevron.down")
                     .font(.footnote.weight(.semibold))
                     #if os(iOS)
-                    // the disclosure indicator's own colour (UITableViewCell's chevron is tertiaryLabel). `.tertiary`
-                    // is a level of the Button's accent here and drew the chevron light blue (鸣潮 无音区 row, app-r1)
-                    .foregroundStyle(Color(uiColor: .tertiaryLabel))
+                    // a level of the Button's accent drew it light blue (鸣潮 无音区 row, app-r1): the label colour
+                    .foregroundStyle(Color(uiColor: .secondaryLabel))
                     #else
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     #endif
                     .accessibilityHidden(true)
                 #endif

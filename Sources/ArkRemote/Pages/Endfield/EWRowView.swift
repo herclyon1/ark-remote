@@ -246,20 +246,15 @@ struct EWRowView: View {
                 .foregroundStyle(Color.primary)   // see sheetRowColour
             }
         case .pills:
-            SheetLink {   // the 37b / 38 pick page as a sheet (SkipFixes.swift)
-                EWChoiceList(title: row.label, choices: row.choices, multi: true,
-                             initial: value.items, commit: { set(.list($0)) })
-            } label: {
-                HStack {
-                    EWRowTitle(label: row.label, hint: hint)
-                    Spacer()
-                    Text(ewPillsValue(row.choices, value.items)).foregroundStyle(.secondary)
-                }
-                // sheetRowColour: the name in the label colour and 「已选 N/M」 grey, as Calendar › Repeat's row. The
-                // row is a Button (SheetLink), whose label takes the accent colour; `.primary` / `.secondary` are
-                // hierarchical styles of that accent, so only a Color resets it (the name and value were drawn blue)
-                .foregroundStyle(Color.primary)
+            #if !os(Android)
+            if ewIsWeekdays(row.choices) {
+                weekdayCircles
+            } else {
+                pillsSheet
             }
+            #else
+            pillsSheet
+            #endif
         case .boxesHeader:
             HStack {
                 EWRowTitle(label: row.label, hint: hint)
@@ -270,32 +265,110 @@ struct EWRowView: View {
         // its text at the trailing edge, as a Form's TextField beside a label. Was an HStack with the field capped at a
         // fixed 100 / 160 pt (HIG Layout: "respecting system-defined safe areas, margins, and guides").
         case .box:
-            LabeledContent {
-                TextField(row.label, text: Binding(get: { value.boxValues[row.boxKey ?? ""] ?? "" }, set: { setBox($0) }))
-                    .multilineTextAlignment(.trailing)
-                    #if !os(macOS)
-                    .keyboardType(.numberPad)
-                    #endif
-            } label: {
-                Text(row.label)
-            }
+            boxField
         case .number:
-            LabeledContent {
-                TextField(row.label, text: Binding(get: { value.display }, set: { setNumber($0) }))
-                    .multilineTextAlignment(.trailing)
-                    #if !os(macOS)
-                    .keyboardType(.numberPad)
-                    #endif
-            } label: {
-                EWRowTitle(label: row.label, hint: hint)
-            }
+            numberField
         case .text:
-            LabeledContent {
-                TextField(row.label, text: Binding(get: { value.display }, set: { set(.text($0)) }))
-                    .multilineTextAlignment(.trailing)
-            } label: {
+            textField
+        }
+    }
+
+    #if !os(Android)
+    /// 「哪几天跑」 as Clock › Add Alarm › Repeat on iOS 27 (looked at on his iPhone Duo, 10-25 17:37, owner 17:3x
+    /// 「直接上我的真机上面去看对应的界面」): the row says the days (「每天」, 「工作日」, …) with no chevron, and the seven
+    /// days sit under it as circles, one tap turning a day on or off (staged like any other row until 寄出).
+    @ViewBuilder private var weekdayCircles: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
                 EWRowTitle(label: row.label, hint: hint)
+                Spacer()
+                Text(ewPillsValue(row.choices, value.items)).foregroundStyle(.secondary)
             }
+            Divider()
+            HStack(spacing: 0) {
+                ForEach(row.choices, id: \.value) { c in
+                    Spacer(minLength: 0)
+                    dayCircle(c, on: value.items.contains(c.value))
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    /// One day: the bordered circle the system draws for a button (.buttonBorderShape(.circle)), filled when the day is on.
+    @ViewBuilder private func dayCircle(_ c: EWChoice, on: Bool) -> some View {
+        let label = Text(verbatim: String(c.label.suffix(1)))
+            .font(.subheadline.weight(.semibold))
+            .frame(width: 22, height: 22)
+        if on {
+            Button { toggleDay(c.value) } label: { label }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.circle)
+                .accessibilityLabel(c.label)
+                .accessibilityAddTraits(.isSelected)
+        } else {
+            Button { toggleDay(c.value) } label: { label }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.circle)
+                .tint(Color.secondary)
+                .accessibilityLabel(c.label)
+        }
+    }
+
+    private func toggleDay(_ v: String) {
+        var on = Set(value.items)
+        if on.contains(v) { on.remove(v) } else { on.insert(v) }
+        set(.list(row.choices.map(\.value).filter { on.contains($0) }))   // in the week's order, as the sheet commits
+    }
+    #endif
+
+    private var pillsSheet: some View {
+        SheetLink {   // the 37b / 38 pick page as a sheet (SkipFixes.swift)
+            EWChoiceList(title: row.label, choices: row.choices, multi: true,
+                         initial: value.items, commit: { set(.list($0)) })
+        } label: {
+            HStack {
+                EWRowTitle(label: row.label, hint: hint)
+                Spacer()
+                Text(ewPillsValue(row.choices, value.items)).foregroundStyle(.secondary)
+            }
+            // sheetRowColour: the name in the label colour and 「已选 N/M」 grey, as Calendar › Repeat's row. The
+            // row is a Button (SheetLink), whose label takes the accent colour; `.primary` / `.secondary` are
+            // hierarchical styles of that accent, so only a Color resets it (the name and value were drawn blue)
+            .foregroundStyle(Color.primary)
+        }
+    }
+
+    private var boxField: some View {
+        LabeledContent {
+            TextField(row.label, text: Binding(get: { value.boxValues[row.boxKey ?? ""] ?? "" }, set: { setBox($0) }))
+                .multilineTextAlignment(.trailing)
+                #if !os(macOS)
+                .keyboardType(.numberPad)
+                #endif
+        } label: {
+            Text(row.label)
+        }
+    }
+
+    private var numberField: some View {
+        LabeledContent {
+            TextField(row.label, text: Binding(get: { value.display }, set: { setNumber($0) }))
+                .multilineTextAlignment(.trailing)
+                #if !os(macOS)
+                .keyboardType(.numberPad)
+                #endif
+        } label: {
+            EWRowTitle(label: row.label, hint: hint)
+        }
+    }
+
+    private var textField: some View {
+        LabeledContent {
+            TextField(row.label, text: Binding(get: { value.display }, set: { set(.text($0)) }))
+                .multilineTextAlignment(.trailing)
+        } label: {
+            EWRowTitle(label: row.label, hint: hint)
         }
     }
 
