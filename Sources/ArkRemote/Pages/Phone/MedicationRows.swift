@@ -10,6 +10,8 @@ import SwiftUI
 enum PhoneRoute: Hashable {
     /// A 用药 row → MedicationPage(med:), by the Medication's raw value (a String payload, as StatusRoute.monthCard's).
     case medication(String)
+    /// 连点 (iOS only, ClickerPage.swift)
+    case clicker
 }
 
 /// The UserDefaults key of the medicine page left open on the 手机 tab (its raw value; absent when none is open): the

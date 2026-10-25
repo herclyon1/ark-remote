@@ -132,6 +132,17 @@ struct PhonePage: View {
         }
     }
 
+    #if os(iOS)
+    /// 连点: the Mac taps the game for him (ClickerPage.swift); Android has its own clicker.
+    @ViewBuilder private var clickerSection: some View {
+        Section {
+            NavigationLink(value: PhoneRoute.clicker) { Text("连点") }
+        } header: {
+            Text("玩游戏")
+        }
+    }
+    #endif
+
     /// 游戏账号: the two game keys.
     @ViewBuilder private var accountSection: some View {
         Section {
@@ -174,6 +185,9 @@ struct PhonePage: View {
         #else
         DuoColumns {
             thisPhoneSection
+            #if os(iOS)
+            clickerSection
+            #endif
         } second: {
             linkSection
             accountSection
@@ -202,6 +216,12 @@ struct PhonePage: View {
             switch route {
             case .medication(let raw):
                 MedicationPage(med: Medication(rawValue: raw) ?? .loxoprofen)
+            case .clicker:
+                #if os(iOS)
+                ClickerPage()
+                #else
+                EmptyView()
+                #endif
             }
         }
         // 「记录服用」 of a 用药 row, outside `.refreshable` as the sheets below (a sheet inherits the refresh action)
