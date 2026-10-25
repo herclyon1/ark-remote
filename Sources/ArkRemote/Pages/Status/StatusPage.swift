@@ -399,6 +399,17 @@ struct StatusPage: View {
         #endif
     }
 
+    /// A shift's time. iOS: the row's largest words, as Clock › Alarms puts each alarm's time first and largest (his
+    /// iPhone Duo, 10-26 03:33), in the regular weight (HIG Typography "In general, avoid light font weights.", so not
+    /// Clock's thin digits; review 10-26 2-1). Android keeps the size of 快捷指令 › 自动化's 「At 7:00, daily」 (P6).
+    private static var shiftTimeFont: Font {
+        #if os(Android)
+        return .headline
+        #else
+        return .title
+        #endif
+    }
+
     private static let staminaIcon = ["明日方舟 理智": "res-ak", "终末地 理智": "res-ef", "鸣潮 波片": "res-ww"]
     /// The web's three colours are the system blue, orange and teal (index.html #30b0c7 = systemTeal): named, so they
     /// follow light / dark (HIG Color: "Avoid hard-coding system color values in your app").
@@ -460,8 +471,7 @@ struct StatusPage: View {
                         if b.shownTime.isEmpty {
                             Text(q)
                         } else {
-                            // the size of 快捷指令 › 自动化's 「At 7:00, daily」 (P6), the iOS reference of the row
-                            Text(b.shownTime).font(.headline).tabularDigits()
+                            Text(b.shownTime).font(Self.shiftTimeFont).tabularDigits()
                         }
                         Text([b.shownTime.isEmpty ? "" : q, b.switchLine].filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(.footnote).foregroundStyle(.secondary)
@@ -475,7 +485,7 @@ struct StatusPage: View {
                 .disabled(b.passedToday)
             } else {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(b.shownTime).font(.headline).tabularDigits()
+                    Text(b.shownTime).font(Self.shiftTimeFont).tabularDigits()
                     let sub = [b.machineNote, b.after].filter { !$0.isEmpty }.joined(separator: " · ")
                     if !sub.isEmpty { Text(sub).font(.footnote).foregroundStyle(.secondary) }
                 }
