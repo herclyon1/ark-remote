@@ -40,29 +40,48 @@ struct EndfieldPage: View {
         _values = State(initialValue: ewEffectiveMaster(data.master, lastGood: data.lastGoodMaster).0?.values ?? [:])
     }
 
-    var body: some View {
-        List {
-            // 库存: a single-row card with no header, first on the page (D72, inventory-plan.md §2).
-            Section {
-                // By value (EndfieldRoute, built in the navigationDestination below), so the tab's NavigationPath holds it
-                // and a reselect of the tab can pop it (D39). Still not navigationDestination(isPresented:): the user
-                // (10-03 01:11) could not get back in after returning once - a Bool that the pop did not reset leaves the
-                // next tap with nothing to change.
-                NavigationLink(value: EndfieldRoute.stockpile) {
-                    // a row that leads somewhere shows its state at the trailing edge (Settings' Bluetooth 「Off」): without
-                    // a 森空岛 session the page behind it can only say so
-                    HStack {
-                        Text("库存")
-                        Spacer()
-                        if InventoryStore.shared.status().isEmpty { Text("没配森空岛").foregroundStyle(.secondary) }
-                    }
+    /// 库存: a single-row card with no header, first on the page (D72, inventory-plan.md §2).
+    @ViewBuilder private var stockpileSection: some View {
+        Section {
+            // By value (EndfieldRoute, built in the navigationDestination below), so the tab's NavigationPath holds it
+            // and a reselect of the tab can pop it (D39). Still not navigationDestination(isPresented:): the user
+            // (10-03 01:11) could not get back in after returning once - a Bool that the pop did not reset leaves the
+            // next tap with nothing to change.
+            NavigationLink(value: EndfieldRoute.stockpile) {
+                // a row that leads somewhere shows its state at the trailing edge (Settings' Bluetooth 「Off」): without
+                // a 森空岛 session the page behind it can only say so
+                HStack {
+                    Text("库存")
+                    Spacer()
+                    if InventoryStore.shared.status().isEmpty { Text("没配森空岛").foregroundStyle(.secondary) }
                 }
             }
+        }
+    }
+
+    /// The page's sections: one List, or on iPhone Duo's inner display held wider than tall two columns divided at
+    /// the hinge when the device folds (Pages/Shell/DuoColumns.swift).
+    @ViewBuilder private var sections: some View {
+        #if os(Android)
+        List {
+            stockpileSection
             card(EndfieldSchema.essence)
             card(EndfieldSchema.protocolSpace)
             card(EndfieldSchema.otherTasks)
         }
-        .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
+        #else
+        DuoColumns {
+            stockpileSection
+            card(EndfieldSchema.essence)
+        } second: {
+            card(EndfieldSchema.protocolSpace)
+            card(EndfieldSchema.otherTasks)
+        }
+        #endif
+    }
+
+    var body: some View {
+        sections
         // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
         // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
         // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).

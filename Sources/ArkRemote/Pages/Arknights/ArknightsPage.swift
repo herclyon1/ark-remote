@@ -15,22 +15,44 @@ struct ArknightsPage: View {
     /// redraws this page (Pages/Shell/TabReselect.swift).
     private var reselect: Int { TabReselect.shared.arknights }
 
-    var body: some View {
-        Form {
-            // listSection, not a bare `if`: a false `if` at the top of a List draws an empty grey section on Android (SkipFixes.swift)
-            listSection("ark-notinshift", if: data.notInShift) {
-                Section {
-                    Text(verbatim: "\(data.shiftName.isEmpty ? "这个班次" : data.shiftName)不跑明日方舟。换班次在「状态」页。")
-                        .foregroundStyle(.secondary)
-                }
+    /// Only when this shift does not run 方舟. listSection, not a bare `if`: a false `if` at the top of a List draws an
+    /// empty grey section on Android (SkipFixes.swift).
+    @ViewBuilder private var notInShiftSection: some View {
+        listSection("ark-notinshift", if: data.notInShift) {
+            Section {
+                Text(verbatim: "\(data.shiftName.isEmpty ? "这个班次" : data.shiftName)不跑明日方舟。换班次在「状态」页。")
+                    .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// The page's sections: one Form, or on iPhone Duo's inner display held wider than tall two columns divided at
+    /// the hinge when the device folds (Pages/Shell/DuoColumns.swift).
+    @ViewBuilder private var sections: some View {
+        #if os(Android)
+        Form {
+            notInShiftSection
             stageSection
             fightSection
             infrastSection
             awardSection
             weeklySection
         }
-        .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
+        #else
+        DuoColumns(form: true) {
+            notInShiftSection
+            stageSection
+            fightSection
+            infrastSection
+        } second: {
+            awardSection
+            weeklySection
+        }
+        #endif
+    }
+
+    var body: some View {
+        sections
         // D39 on Android (the count only moves there, ContentView.reselect): a new Form, whose new scroll state starts at
         // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
         // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)). Form is

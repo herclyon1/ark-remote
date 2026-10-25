@@ -70,77 +70,104 @@ struct PhonePage: View {
     private var hasTokens: Bool { !data.staminaStatus.isEmpty }
     private var pasteEmpty: Bool { pasteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
+    /// 这台手机: the version and the diagnostics rows.
+    @ViewBuilder private var thisPhoneSection: some View {
+        // 用药 is archived (owner 10-25 08:5x 「用药记录这个东西可以先归档了」: he logs medicine in Health's Medications on
+        // the iPhone now, and the course is finished). MedicationSection / MedicationStore stay in the tree, unshown.
+        Section {
+            // a name and a value, no hint under them (HIG Lists: "Keep item text succinct"; P13's rows)
+            PhoneValueRow(title: "版本", value: data.pageVersion)
+            PhoneDiagRows(appVersion: data.pageVersion)
+        } header: {
+            Text("这台手机")
+        }
+    }
+
+    /// 换手机: the no-input link, copied here and pasted on the other phone.
+    @ViewBuilder private var linkSection: some View {
+        // The two links in a section of their own with their footer right under them: the footer explained the last
+        // row of 「这台手机」 four diagnostics rows away (P13: one subject a section, its footer about it alone).
+        // 粘贴免输入链接 is here under the name the first-use page gives it (SetupScreen): it replaces the mailbox and
+        // PIN, which hid behind 「粘贴密钥串」 before.
+        Section {
+            Button(linkCopied ? "链接已复制" : "复制免输入链接") {
+                // view.js #mklink; prompt("长按复制这条链接：", url) when the clipboard refuses
+                switch actions.copyNoInputLink() {
+                case .copied: linkCopied = true
+                case .noConfig: break   // the button is disabled then; the footer says why
+                case .failed(let link):
+                    manualLink = link
+                    manualShown = true
+                }
+            }
+            // HIG Entering data: "make the button available only after people enter the data you require"
+            .disabled(!data.hasConfig)
+            Button("粘贴免输入链接") {
+                if !actions.pasteNoInputLink() { noLinkShown = true }
+            }
+        } header: {
+            Text("换手机")
+        } footer: {
+            // one sentence of what the link does (HIG Writing: "If you can use fewer words, do so."). The link opens
+            // the App now (PhoneLink.linkBase), not the web page, so no 「存成书签或放到主屏幕」.
+            Text((data.hasConfig ? "" : "这台手机还没填信箱和 PIN，链接里没东西可带。")
+                 + "把链接发到另一台手机，复制后打开遥控，就不用再填信箱和 PIN；别转发给别人。")
+        }
+    }
+
+    /// 游戏账号: the two game keys.
+    @ViewBuilder private var accountSection: some View {
+        Section {
+            // one row per key, each saying whose it is and what it is for (a bare 「密钥 没有」 did not say which of
+            // the two); the 森空岛 one comes from the machine, the 库街区 one is pasted here
+            PhoneValueRow(title: "库街区密钥（鸣潮体力）", value: data.hasKuro ? "已填" : "没有")
+            PhoneValueRow(title: "森空岛密钥（方舟）", value: data.hasSkland ? "游戏机已给" : "游戏机还没给")
+            Button("粘贴密钥串") {
+                pasteText = ""
+                pasteShown = true
+            }
+            if hasTokens {
+                Button("清除密钥", role: .destructive) { clearShown = true }
+                    // view.js #tokclear; from the button that asks (7b6a3f1's pattern, P10 / N9)
+                    .confirmationDialog("清除密钥？", isPresented: $clearShown, titleVisibility: .visible) {
+                        Button("清除", role: .destructive) { actions.clearTokens() }
+                        Button("取消", role: .cancel) {}
+                    } message: {
+                        Text("清除这台手机里的游戏密钥？体力数字会消失。")
+                    }
+            }
+        } header: {
+            Text("游戏账号")
+        } footer: {
+            // plain words, no paths or file names (HIG Writing: "Choose simple, plain language … avoiding jargon");
+            // what to paste is the paste field's own prompt now
+            Text("库街区的点「粘贴密钥串」填；密钥只存在这台手机里，免输入链接会一起带上。")
+        }
+    }
+
+    /// The page's sections: one List, or on iPhone Duo's inner display held wider than tall two columns divided at
+    /// the hinge when the device folds (Pages/Shell/DuoColumns.swift).
+    @ViewBuilder private var sections: some View {
+        #if os(Android)
+        List {
+            thisPhoneSection
+            linkSection
+            accountSection
+        }
+        #else
+        DuoColumns {
+            thisPhoneSection
+        } second: {
+            linkSection
+            accountSection
+        }
+        #endif
+    }
+
     var body: some View {
         // read here so its change redraws this page (the sheet's Binding is read outside body)
         let selfCheckShown = SelfCheckRun.shared.shown
-        List {
-            // 用药 is archived (owner 10-25 08:5x 「用药记录这个东西可以先归档了」: he logs medicine in Health's Medications on
-            // the iPhone now, and the course is finished). MedicationSection / MedicationStore stay in the tree, unshown.
-            Section {
-                // a name and a value, no hint under them (HIG Lists: "Keep item text succinct"; P13's rows)
-                PhoneValueRow(title: "版本", value: data.pageVersion)
-                PhoneDiagRows(appVersion: data.pageVersion)
-            } header: {
-                Text("这台手机")
-            }
-
-            // The two links in a section of their own with their footer right under them: the footer explained the last
-            // row of 「这台手机」 four diagnostics rows away (P13: one subject a section, its footer about it alone).
-            // 粘贴免输入链接 is here under the name the first-use page gives it (SetupScreen): it replaces the mailbox and
-            // PIN, which hid behind 「粘贴密钥串」 before.
-            Section {
-                Button(linkCopied ? "链接已复制" : "复制免输入链接") {
-                    // view.js #mklink; prompt("长按复制这条链接：", url) when the clipboard refuses
-                    switch actions.copyNoInputLink() {
-                    case .copied: linkCopied = true
-                    case .noConfig: break   // the button is disabled then; the footer says why
-                    case .failed(let link):
-                        manualLink = link
-                        manualShown = true
-                    }
-                }
-                // HIG Entering data: "make the button available only after people enter the data you require"
-                .disabled(!data.hasConfig)
-                Button("粘贴免输入链接") {
-                    if !actions.pasteNoInputLink() { noLinkShown = true }
-                }
-            } header: {
-                Text("换手机")
-            } footer: {
-                // one sentence of what the link does (HIG Writing: "If you can use fewer words, do so."). The link opens
-                // the App now (PhoneLink.linkBase), not the web page, so no 「存成书签或放到主屏幕」.
-                Text((data.hasConfig ? "" : "这台手机还没填信箱和 PIN，链接里没东西可带。")
-                     + "把链接发到另一台手机，复制后打开遥控，就不用再填信箱和 PIN；别转发给别人。")
-            }
-
-            Section {
-                // one row per key, each saying whose it is and what it is for (a bare 「密钥 没有」 did not say which of
-                // the two); the 森空岛 one comes from the machine, the 库街区 one is pasted here
-                PhoneValueRow(title: "库街区密钥（鸣潮体力）", value: data.hasKuro ? "已填" : "没有")
-                PhoneValueRow(title: "森空岛密钥（方舟）", value: data.hasSkland ? "游戏机已给" : "游戏机还没给")
-                Button("粘贴密钥串") {
-                    pasteText = ""
-                    pasteShown = true
-                }
-                if hasTokens {
-                    Button("清除密钥", role: .destructive) { clearShown = true }
-                        // view.js #tokclear; from the button that asks (7b6a3f1's pattern, P10 / N9)
-                        .confirmationDialog("清除密钥？", isPresented: $clearShown, titleVisibility: .visible) {
-                            Button("清除", role: .destructive) { actions.clearTokens() }
-                            Button("取消", role: .cancel) {}
-                        } message: {
-                            Text("清除这台手机里的游戏密钥？体力数字会消失。")
-                        }
-                }
-            } header: {
-                Text("游戏账号")
-            } footer: {
-                // plain words, no paths or file names (HIG Writing: "Choose simple, plain language … avoiding jargon");
-                // what to paste is the paste field's own prompt now
-                Text("库街区的点「粘贴密钥串」填；密钥只存在这台手机里，免输入链接会一起带上。")
-            }
-        }
-        .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
+        sections
         // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
         // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
         // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).

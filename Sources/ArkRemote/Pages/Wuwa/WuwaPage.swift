@@ -135,13 +135,27 @@ struct WuwaPage: View {
         _bossIndex = State(initialValue: data.weeklyBossIndex)
     }
 
-    var body: some View {
+    /// The page's sections: one List, or on iPhone Duo's inner display held wider than tall two columns divided at
+    /// the hinge when the device folds (Pages/Shell/DuoColumns.swift).
+    @ViewBuilder private var sections: some View {
+        #if os(Android)
         List {
             gameCard
             nestCard
             weeklyCard
         }
-        .readableColumn()   // iPhone Duo inner display: one centred column (Pages/Shell/ReadableColumn.swift)
+        #else
+        DuoColumns {
+            gameCard
+            nestCard
+        } second: {
+            weeklyCard
+        }
+        #endif
+    }
+
+    var body: some View {
+        sections
         // D39 on Android (the count only moves there, ContentView.reselect): a new List, whose new scroll state starts at
         // the real top. Not scrollTo(the first row): the top inset and the first section's top stay above the screen, the
         // first card's top edge cut under the title (StatusPage.swift explains, at its own .id(reselect)).
