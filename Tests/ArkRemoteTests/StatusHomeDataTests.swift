@@ -81,9 +81,18 @@ import XCTest
         line.range(of: #"(?<![\w.])"# + NSRegularExpression.escapedPattern(for: name) + #"(?!\w)"#, options: .regularExpression)?.lowerBound
     }
 
+    /// StatusPage's sections in the order the page draws them: the overview half, then the schedule half. On iPhone
+    /// Duo's inner display held wider than tall the two halves sit side by side (Pages/Shell/DuoColumns.swift);
+    /// everywhere else they are one list, the overview first. The opener of the second body is left out.
+    static func pageBody(_ lines: [String]) -> [String]? {
+        guard let a = RepoFiles.body(after: "private var overviewSections: some View", in: lines),
+              let b = RepoFiles.body(after: "private var scheduleSections: some View", in: lines) else { return nil }
+        return a + b.dropFirst()
+    }
+
     /// The problems in StatusPage's page body and section bodies.
     static func hidden(_ lines: [String]) -> [String] {
-        guard let page = RepoFiles.body(after: "private var page: some View", in: lines) else { return ["page is gone"] }
+        guard let page = pageBody(lines) else { return ["page is gone"] }
         var out: [String] = []
         var seen = Set<String>()
         // the lines whose `{` is still open, innermost last; the page's own opening line is not a condition
@@ -127,19 +136,22 @@ import XCTest
                       "    private var machineSection: some View {", "        Section { } footer: {", "            if data.configUnreadable { }",
                       "        }", "    }",
                       "    private var shifts: some View { listSection(\"t\", if: !data.machineOff) { } }"]
-        let page = ["    private var page: some View {", "        return List {",
+        let page = ["    @ViewBuilder private var overviewSections: some View {",
                     // a notice that shows only while the machine runs is fine: it is not one of the six
-                    "            listSection(\"status-busy\", if: !data.busy.isEmpty && data.online) {", "                Section(\"现在在跑\") { }",
-                    "            }",
-                    "            staminaSection", "            actionTiles",   // order is free
-                    "            if !data.queues.isEmpty {", "                shifts", "            }",   // not a state condition
-                    "            if data.online {", "                machineSection", "            }",
-                    "            listSection(\"m\", if: !data.machineOff) { MonthCardRows(today: MonthCardStore.today()) }",
-                    "        }", "    }"]
+                    "        listSection(\"status-busy\", if: !data.busy.isEmpty && data.online) {", "            Section(\"现在在跑\") { }",
+                    "        }",
+                    "        staminaSection", "        actionTiles",   // order is free
+                    "    }",
+                    "    @ViewBuilder private var scheduleSections: some View {",
+                    "        if !data.queues.isEmpty {", "            shifts", "        }",   // not a state condition
+                    "        if data.online {", "            machineSection", "        }",
+                    "        listSection(\"m\", if: !data.machineOff) { MonthCardRows(today: MonthCardStore.today()) }",
+                    "    }"]
         XCTAssertEqual(Self.hidden(page + bodies), ["machineSection is hidden by data.online",
                                                     "MonthCardRows(today: is hidden by data.machineOff",
                                                     "shifts depends on data.machineOff"])
-        XCTAssertEqual(Self.hidden(["    private var page: some View {", "        return List {", "            shifts", "        }", "    }"]
+        XCTAssertEqual(Self.hidden(["    @ViewBuilder private var overviewSections: some View {", "    }",
+                                    "    @ViewBuilder private var scheduleSections: some View {", "        shifts", "    }"]
                                    + bodies).prefix(3),
                        ["actionTiles is not drawn on the page itself", "staminaSection is not drawn on the page itself",
                         "machineSection is not drawn on the page itself"])

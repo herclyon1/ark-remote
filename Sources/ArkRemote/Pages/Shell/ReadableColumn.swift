@@ -44,8 +44,12 @@ private struct ReadableColumn: ViewModifier {
                 // list keeps to the half before the fold instead of running every row across it. HIG Designing for
                 // iPhone Duo: "Use the ReservedRegion API to keep important elements clear of the center if the system
                 // doesn't move them automatically."
+                #if os(iOS)
                 let fold = proxy.reservedRegions(kind: .division).first { $0.isActive && $0.frame.height > $0.frame.width }
                 return Space(width: proxy.size.width, foldStart: fold?.frame.minX)
+                #else
+                return Space(width: proxy.size.width)   // macOS (the unit tests' build): no ReservedRegion before 27.1
+                #endif
             } action: { space = $0 }
     }
 

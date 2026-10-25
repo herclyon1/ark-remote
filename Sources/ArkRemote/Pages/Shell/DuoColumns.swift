@@ -31,6 +31,7 @@ struct DuoColumns<First: View, Second: View>: View {
     }
 
     var body: some View {
+        #if os(iOS)
         Group {
             if sizeClass == .regular && space.wider {
                 // the arrangement leaves its panes about 2 pt each side of the split: open, the cards of the two
@@ -54,6 +55,13 @@ struct DuoColumns<First: View, Second: View>: View {
             Space(wider: proxy.size.width > proxy.size.height,
                   folded: proxy.reservedRegions(kind: .division).contains { $0.isActive })
         } action: { space = $0 }
+        #else
+        // macOS (the unit tests' build): no ArrangementView or ReservedRegion before 27.1, one list
+        column {
+            first
+            second
+        }
+        #endif
     }
 
     private var gutter: CGFloat { space.folded ? 18 : 8 }

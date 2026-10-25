@@ -54,9 +54,14 @@ import XCTest
         }
     }
 
-    /// Where each everyday block is first drawn in StatusPage's `page` body, in source order.
+    /// Where each everyday block is first drawn in StatusPage's page (the overview half, then the schedule half), in
+    /// source order.
     static func blockOrder(_ lines: [String]) -> [String] {
-        guard let page = RepoFiles.body(after: "private var page: some View", in: lines) else { return [] }
+        guard let page = StatusHomeDataTests.pageBody(lines) else { return [] }
+        return firstSeen(page)
+    }
+
+    static func firstSeen(_ page: [String]) -> [String] {
         var seen: [String] = []
         for line in page {
             for s in StatusHomeDataTests.sections where !seen.contains(s) {
@@ -68,8 +73,15 @@ import XCTest
 
     func testTheBlocksKeepTheirOrder() throws {
         let lines = try RepoFiles.lines("Sources/ArkRemote/Pages/Status/StatusPage.swift")
-        XCTAssertEqual(Self.blockOrder(lines), ["actionTiles", "staminaSection", "shifts", "machineSection", "MonthCardRows(today:"],
-                       "the everyday blocks of 状态 changed places")
+        let order = ["actionTiles", "staminaSection", "shifts", "machineSection", "MonthCardRows(today:"]
+        XCTAssertEqual(Self.blockOrder(lines), order, "the everyday blocks of 状态 changed places")
+        // the page puts the overview half first (iOS: DuoColumns' first column, or the top of the one list), and
+        // Android's flat list draws the same blocks in the same order
+        let arranged = try XCTUnwrap(RepoFiles.body(after: "private var arranged: some View", in: lines))
+        let o = try XCTUnwrap(arranged.firstIndex { $0.contains("overviewSections") })
+        let sch = try XCTUnwrap(arranged.firstIndex { $0.contains("scheduleSections") })
+        XCTAssertLessThan(o, sch, "the schedule half came before the overview")
+        XCTAssertEqual(Self.firstSeen(arranged), order, "Android's 状态 list changed places")
         // the 月卡 rows: every game, in this order, registered or not
         XCTAssertEqual(MonthCardStore.games, ["明日方舟", "终末地", "鸣潮"])
         let rows = try RepoFiles.lines("Sources/ArkRemote/Pages/Status/MonthCardRows.swift").map(RepoFiles.code)
@@ -81,9 +93,10 @@ import XCTest
 
     /// A page that moved 月卡 above the stamina tiles is caught.
     func testTheOrderScanSeesAMove() {
-        let page = ["    private var page: some View {", "        return List {", "            actionTiles",
-                    "            MonthCardRows(today: MonthCardStore.today())", "            staminaSection", "            shifts",
-                    "            machineSection", "        }", "    }"]
+        let page = ["    @ViewBuilder private var overviewSections: some View {", "        actionTiles",
+                    "        MonthCardRows(today: MonthCardStore.today())", "        staminaSection", "    }",
+                    "    @ViewBuilder private var scheduleSections: some View {", "        shifts",
+                    "        machineSection", "    }"]
         XCTAssertEqual(Self.blockOrder(page), ["actionTiles", "MonthCardRows(today:", "staminaSection", "shifts", "machineSection"])
     }
 }
