@@ -221,8 +221,15 @@ struct ContentView: View {
 
 private extension View {
     /// The pending-receipt line (both platforms) and the update notice (Android) above the tab's content (topNotices).
+    /// iOS: the tab's large title sits in the toolbar's own row, not on a row of its own under an empty bar (his 10-08
+    /// 04:27 「最顶上那部分空间被浪费了」 next to Fitness › Summary, title and button on one line; Music › Library on his
+    /// iPhone Duo does the same).
     func noticed() -> some View {
+        #if os(iOS)
+        topNotices().toolbarTitleDisplayMode(.inlineLarge)
+        #else
         topNotices()
+        #endif
     }
 }
 
