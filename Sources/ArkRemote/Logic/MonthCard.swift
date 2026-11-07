@@ -300,20 +300,15 @@ struct MonthCardEntry: Sendable, Equatable {
     /// Registered here and shown at once; the relay gets its copy (a failed send is retried by resend()).
     /// monthcard.js register(): counted as sent first so a render meanwhile does not resend it beside this add.
     func register(_ g: String, add: Int? = nil, left: Int? = nil, last: String) async {
-        // on ntfy's clock (Relay.clockSkewMs): the relay keeps the newest registration by `at` (monthcard.py:146) and
-        // caughtUp() compares its 登记于 with this; a phone running slow had its registration ignored there and then
-        // dropped here as caught up, with no word (edge audit 13)
-        let at = Relay.shared.serverNowMs()
-        // A top-up with nothing of ours still unsynced goes as a bare `add`: the relay adds 30 × N to its own last day
-        // (monthcard.py:150-156, the same rule as after()), and with no `at` it is not dropped as older. Sent with this
-        // phone's `last` and `at`, two phones topping up before either synced each sent its own sum and the newest
-        // replaced the other: one purchase was lost (edge audit 13).
-        let bare = add != nil && (mine(g).map { caughtUp($0, Self.fromRelay(g)) } ?? true)
+        // on ntfy's clock (Relay.clockSkewMs): the relay keeps the newest registration by `at` (monthcard.py:148) and
+        // caughtUp() compares its 登记于 with this; always carry `last` and `at` so an order read the next morning keeps
+        // the purchase day's date and never beats a later calibration (11-08 [D-07]).
+        let at = max(Relay.shared.serverNowMs(), (records[g]?.at ?? 0) + 1)
         remember(g, last: last, at: at, sentAt: at)
         // no message: the page's rows show the new date and days at once (HIG Alerts "Avoid using an alert merely to
         // provide information … prefer finding an alternative way to communicate it within the relevant context")
         do {
-            try await post(g, add: add, left: left, last: bare ? nil : last, at: bare ? nil : at)
+            try await post(g, add: add, left: left, last: last, at: at)
         } catch {
             if let r = mine(g), r.at == at { remember(g, last: last, at: at, sentAt: 0) }
         }

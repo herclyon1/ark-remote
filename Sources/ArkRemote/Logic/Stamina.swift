@@ -260,7 +260,10 @@ func stampFrom(_ epoch: Double?) -> String {
         if let e = sk["错误"], e.truthy { return false }
         guard let cred = sk["cred"], cred.truthy else { return false }
         let cur = tokens ?? loadTokens()
-        if let old = cur?["sk"]?["cred"], old == cred { return false }
+        if let old = cur?["sk"]?["cred"], old == cred,
+           cur?["sk"]?["efRole"]?.truthy == true || sk["efRole"]?.truthy != true {
+            return false
+        }
         saveTokens(merged(cur, "sk", sk))
         return true
     }
