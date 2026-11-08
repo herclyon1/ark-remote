@@ -152,15 +152,22 @@ let schema: [SchemaSection] = [
         SchemaField(path: "Infrast/UsesOfDrones", type: "select", label: "无人机用在哪",
                     hint: "贸易站＝加速龙门币或合成玉订单，制造站＝加速对应产物"),
     ]),
+    // All seven bool switches of MAA's AwardTask since 2026-11-08 (relay mastercfg_maa.MAA_AWARD, same order).
     SchemaSection(title: "明日方舟 · 领取奖励", owner: "MAA", src: "master", game: "MAA", fields: [
+        SchemaField(path: "Award/Award", type: "bool", label: "领取每日/每周任务奖励",
+                    hint: "开着＝每趟把每日、每周任务完成后的奖励领了"),
         SchemaField(path: "Award/Mail", type: "bool", label: "领取所有邮件奖励",
                     hint: "开着＝每趟顺手把邮箱里的奖励全收了。关着邮件会一直躺着，到期作废"),
+        SchemaField(path: "Award/FreeGacha", type: "bool", label: "每日免费单抽",
+                    hint: "开着＝活动送每日免费单抽时，每天把那一抽抽掉"),
         SchemaField(path: "Award/Orundum", type: "bool", label: "领取幸运墙的每日合成玉",
                     hint: "开着＝每天去幸运墙领那份合成玉"),
         SchemaField(path: "Award/Mining", type: "bool", label: "领取限时开采许可的合成玉",
                     hint: "开着＝有限时开采许可时每天领它的合成玉"),
         SchemaField(path: "Award/SpecialAccess", type: "bool", label: "领取周年赠送月卡",
                     hint: "开着＝周年送的月卡每天的那份也领"),
+        SchemaField(path: "Award/SignInEvent", type: "bool", label: "限时签到活动领取",
+                    hint: "开着＝有限时签到活动时每天去签到领奖励"),
     ]),
     SchemaSection(title: "终末地 · 基质刷取", owner: "MaaEnd", src: "master", game: "MaaEnd", tree: "AutoEssence", fields: [
         SchemaField(path: "AutoEssence/@enabled", type: "bool", label: "跑这个任务",

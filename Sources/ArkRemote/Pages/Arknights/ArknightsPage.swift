@@ -75,10 +75,13 @@ struct ArknightsPage: View {
         // the row shows only while 活动关优先 is on (stageRows), so the hint no longer says when it is used
         "Task.ActivityStageIndex": "活动关按活动关卡列表从上往下数第几关来选。",
         "Infrast/UsesOfDrones": "贸易站加速订单，制造站加速产物。",
+        "Award/Award": "每趟领每日、每周任务的奖励。",
         "Award/Mail": "每趟收下邮箱里的奖励，关着的话邮件到期作废。",
+        "Award/FreeGacha": "活动送每日免费单抽时，每天抽掉那一次。",
         "Award/Orundum": "每天去幸运墙领合成玉。",
         "Award/Mining": "有限时开采许可时每天领合成玉。",
         "Award/SpecialAccess": "周年送的月卡每天也领。",
+        "Award/SignInEvent": "有限时签到活动时每天去签到领奖励。",
     ]
 
     /// The hints leave the rows for a footer under the card (view.js:978-995), one sentence a line. No 「行名：」 list in
@@ -217,15 +220,22 @@ struct ArknightsPage: View {
 
     // MARK: 明日方舟 · 领取奖励 (schema.js:132-141)
 
+    /// The seven switches in MAA's order (AwardTask.cs; relay mastercfg_maa.MAA_AWARD), with the page's field for each.
+    private struct AwardField: Identifiable {
+        let path: String
+        let key: WritableKeyPath<ArknightsPageData, Bool?>
+        var id: String { path }
+    }
+
+    private static let awardFields: [AwardField] = [
+        AwardField(path: "Award/Award", key: \.awardAward), AwardField(path: "Award/Mail", key: \.awardMail),
+        AwardField(path: "Award/FreeGacha", key: \.awardFreeGacha), AwardField(path: "Award/Orundum", key: \.awardOrundum),
+        AwardField(path: "Award/Mining", key: \.awardMining), AwardField(path: "Award/SpecialAccess", key: \.awardSpecialAccess),
+        AwardField(path: "Award/SignInEvent", key: \.awardSignInEvent),
+    ]
+
     private var awardRows: [String] {
-        var out: [String] = []
-        if data.awardMail != nil { out.append("Award/Mail") }
-        if data.awardOrundum != nil { out.append("Award/Orundum") }
-        if data.awardMining != nil { out.append("Award/Mining") }
-        if data.awardSpecialAccess != nil {
-            out.append("Award/SpecialAccess")
-        }
-        return out
+        Self.awardFields.filter { data[keyPath: $0.key] != nil }.map(\.path)
     }
 
     var awardSection: some View {
@@ -235,28 +245,10 @@ struct ArknightsPage: View {
                 ArknightsWarningRow()
             } else {
                 masterWarnings
-                if data.awardMail != nil {
-                    tagged("Award/Mail") {
-                        ArknightsToggleRow(label: label("Award/Mail", Self.awardName["Award/Mail"]!),
-                                           isOn: binding(\.awardMail, default: false))
-                    }
-                }
-                if data.awardOrundum != nil {
-                    tagged("Award/Orundum") {
-                        ArknightsToggleRow(label: label("Award/Orundum", Self.awardName["Award/Orundum"]!),
-                                           isOn: binding(\.awardOrundum, default: false))
-                    }
-                }
-                if data.awardMining != nil {
-                    tagged("Award/Mining") {
-                        ArknightsToggleRow(label: label("Award/Mining", Self.awardName["Award/Mining"]!),
-                                           isOn: binding(\.awardMining, default: false))
-                    }
-                }
-                if data.awardSpecialAccess != nil {
-                    tagged("Award/SpecialAccess") {
-                        ArknightsToggleRow(label: label("Award/SpecialAccess", Self.awardName["Award/SpecialAccess"]!),
-                                           isOn: binding(\.awardSpecialAccess, default: false))
+                ForEach(Self.awardFields.filter { data[keyPath: $0.key] != nil }) { f in
+                    tagged(f.path) {
+                        ArknightsToggleRow(label: label(f.path, Self.awardName[f.path]!),
+                                           isOn: binding(f.key, default: false))
                     }
                 }
             }
@@ -305,8 +297,9 @@ struct ArknightsPage: View {
     }
 
     /// The 领取奖励 rows' names: the header says 领取奖励, so the rows drop 「领取」 and 「奖励」 (HIG Writing).
-    private static let awardName = ["Award/Mail": "邮件", "Award/Orundum": "幸运墙合成玉",
-                                    "Award/Mining": "开采许可合成玉", "Award/SpecialAccess": "周年月卡"]
+    private static let awardName = ["Award/Award": "每日每周任务", "Award/Mail": "邮件", "Award/FreeGacha": "每日免费单抽",
+                                    "Award/Orundum": "幸运墙合成玉", "Award/Mining": "开采许可合成玉",
+                                    "Award/SpecialAccess": "周年月卡", "Award/SignInEvent": "限时签到活动"]
 
     /// Our short name for the row; the machine's own name (view.js labelOf: 「是否理智作战」,
     /// 「活动期间是否优先刷活动关」) only where we have none. Its long question-form names wrapped the rows (HIG Toggles: "the

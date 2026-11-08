@@ -28,14 +28,20 @@ struct ArknightsPageData: Equatable {
     var usesOfDronesOptions: [ArknightsOption] = []
 
     // Section 明日方舟 · 领取奖励 — src "master", game "MAA" (schema.js:132-141)
+    /// Award/Award (daily / weekly mission rewards)
+    var awardAward: Bool?
     /// Award/Mail
     var awardMail: Bool?
+    /// Award/FreeGacha (the daily free pull)
+    var awardFreeGacha: Bool?
     /// Award/Orundum
     var awardOrundum: Bool?
     /// Award/Mining
     var awardMining: Bool?
     /// Award/SpecialAccess
     var awardSpecialAccess: Bool?
+    /// Award/SignInEvent (time-limited sign-in events)
+    var awardSignInEvent: Bool?
 
     /// The MAA master config could not be read and there is no earlier copy (view.js:415-419).
     /// When true the two master sections show a warning instead of rows.
@@ -100,10 +106,13 @@ extension ArknightsPageData {
             ArknightsOption(label: "制造站 · 源石碎片", value: "OriginStone"),
             ArknightsOption(label: "制造站 · 芯片", value: "Chip"),
         ],
+        awardAward: true,
         awardMail: true,
+        awardFreeGacha: false,
         awardOrundum: false,
         awardMining: true,
         awardSpecialAccess: false,
+        awardSignInEvent: true,
         annihilationDoneThisWeek: false
     )
 }

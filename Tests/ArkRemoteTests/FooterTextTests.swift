@@ -8,7 +8,8 @@ import XCTest
 @MainActor final class FooterTextTests: XCTestCase {
     private let arknightsStage = ["Info.Stage", "Info.MedicineNumb", "Task.IfFight", "Task.IfActivityFirst",
                                   "Task.ActivityStageIndex"]
-    private let arknightsAward = ["Award/Mail", "Award/Orundum", "Award/Mining", "Award/SpecialAccess"]
+    private let arknightsAward = ["Award/Award", "Award/Mail", "Award/FreeGacha", "Award/Orundum", "Award/Mining",
+                                  "Award/SpecialAccess", "Award/SignInEvent"]
 
     /// No line starts with a row name and 「：」.
     private func assertNoNameList(_ text: String, _ names: [String], file: StaticString = #filePath, line: UInt = #line) {
@@ -42,8 +43,11 @@ import XCTest
 
     func testArknightsAwardFooterHasNoRowNames() {
         let foot = ArknightsPage.footerText(arknightsAward)
-        assertNoNameList(foot, ["邮件", "幸运墙合成玉", "开采许可合成玉", "周年月卡"])
+        assertNoNameList(foot, ["每日每周任务", "邮件", "每日免费单抽", "幸运墙合成玉", "开采许可合成玉", "周年月卡",
+                                "限时签到活动"])
         assertNoLabelPrefix(foot)
+        // one sentence per switch: none of the seven is drawn without its line in the footer
+        XCTAssertEqual(foot.split(separator: "\n").count, arknightsAward.count, foot)
     }
 
     func testWuwaDailyFooterHasNoRowNames() {

@@ -43,7 +43,7 @@ struct ArknightsFieldRef {
 enum ArknightsField: CaseIterable {
     case stage, medicineNumb, ifFight, ifActivityFirst, activityStageIndex
     case usesOfDrones
-    case awardMail, awardOrundum, awardMining, awardSpecialAccess
+    case awardAward, awardMail, awardFreeGacha, awardOrundum, awardMining, awardSpecialAccess, awardSignInEvent
 
     var src: String {
         switch self {
@@ -61,10 +61,13 @@ enum ArknightsField: CaseIterable {
         case .ifActivityFirst: return "Task.IfActivityFirst"
         case .activityStageIndex: return "Task.ActivityStageIndex"
         case .usesOfDrones: return "Infrast/UsesOfDrones"
+        case .awardAward: return "Award/Award"
         case .awardMail: return "Award/Mail"
+        case .awardFreeGacha: return "Award/FreeGacha"
         case .awardOrundum: return "Award/Orundum"
         case .awardMining: return "Award/Mining"
         case .awardSpecialAccess: return "Award/SpecialAccess"
+        case .awardSignInEvent: return "Award/SignInEvent"
         }
     }
 
@@ -96,10 +99,13 @@ enum ArknightsField: CaseIterable {
         case .ifActivityFirst: return data.ifActivityFirst.map { .bool($0) }
         case .activityStageIndex: return number(data.activityStageIndex)
         case .usesOfDrones: return data.usesOfDrones.map { options[$0] ?? .string($0) }
+        case .awardAward: return data.awardAward.map { .bool($0) }
         case .awardMail: return data.awardMail.map { .bool($0) }
+        case .awardFreeGacha: return data.awardFreeGacha.map { .bool($0) }
         case .awardOrundum: return data.awardOrundum.map { .bool($0) }
         case .awardMining: return data.awardMining.map { .bool($0) }
         case .awardSpecialAccess: return data.awardSpecialAccess.map { .bool($0) }
+        case .awardSignInEvent: return data.awardSignInEvent.map { .bool($0) }
         }
     }
 
@@ -114,10 +120,13 @@ enum ArknightsField: CaseIterable {
         case .ifActivityFirst: data.ifActivityFirst = v.truthy
         case .activityStageIndex: data.activityStageIndex = n
         case .usesOfDrones: data.usesOfDrones = v.isNull ? "" : v.jsString
+        case .awardAward: data.awardAward = v.truthy
         case .awardMail: data.awardMail = v.truthy
+        case .awardFreeGacha: data.awardFreeGacha = v.truthy
         case .awardOrundum: data.awardOrundum = v.truthy
         case .awardMining: data.awardMining = v.truthy
         case .awardSpecialAccess: data.awardSpecialAccess = v.truthy
+        case .awardSignInEvent: data.awardSignInEvent = v.truthy
         }
     }
 }
