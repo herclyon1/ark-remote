@@ -260,8 +260,14 @@ func stampFrom(_ epoch: Double?) -> String {
         if let e = sk["错误"], e.truthy { return false }
         guard let cred = sk["cred"], cred.truthy else { return false }
         let cur = tokens ?? loadTokens()
+        // The same cred is no change only while the role it reads is the same too: a uid, efRole or efServer the machine
+        // now hands over that differs from the kept one (another 终末地 role, a role read for the first time) is saved
+        // (app-opt-round7-1108 R7-03, D-06; until then only a first efRole was).
         if let old = cur?["sk"]?["cred"], old == cred,
-           cur?["sk"]?["efRole"]?.truthy == true || sk["efRole"]?.truthy != true {
+           !["uid", "efRole", "efServer"].contains(where: { k in
+               guard let v = sk[k], v.truthy else { return false }
+               return cur?["sk"]?[k] != v
+           }) {
             return false
         }
         saveTokens(merged(cur, "sk", sk))
@@ -435,7 +441,9 @@ func stampFrom(_ epoch: Double?) -> String {
             let args = [("gameId", "3"), ("serverId", serverId), ("roleId", roleId), ("type", "1"), ("sizeType", "1")]
             let hdr = ["token": jsStr(k["token"]), "did": jsStr(k["did"])]
             var w = try await kuroPost("/gamer/widget/game3/getData", hdr, args)
-            let now = Date().timeIntervalSince1970
+            // ntfy's clock, as every other age here (Relay.serverNowMs): 库街区's serverTime and the full-time stamp are a
+            // server's, which a phone clock that is off misread (app-opt-round7-1108 R7-03, D-19).
+            let now = Relay.shared.serverNowMs() / 1000
             let age: Double = (w["serverTime"]?.truthy == true) ? now - (jsNumber(w["serverTime"]) ?? .nan) : .infinity
             if age > 600 {
                 if let fresh = try? await kuroPost("/gamer/widget/game3/refresh", hdr, args) { w = fresh }   // rate-limited: the cache will do

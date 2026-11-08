@@ -187,11 +187,15 @@ enum EWSave {
                 : .object(["action": .string("set_config"), "confirmed": .bool(true), "script": .string(e.owner),
                            "path": .string(e.path), "value": e.to])
             do {
+                // Taken before the POST: Net.send stamps the envelope's ts before it too, so the state that answers
+                // it is never older than sentAt (taken after the reply, a fast machine's `at` of second T read as
+                // older than a sentAt of T + 1 and that state was skipped; app-opt-round7-1108 R7-01).
+                let sentAt = nowSec()
                 try await relay.send(body)
                 sent += 1
                 left[k] = nil
                 Pending.shared.add(k, PendingEdit(label: e.label, src: e.src, owner: e.owner, path: e.path,
-                                                  from: e.from, to: e.to, sentAt: nowSec()))
+                                                  from: e.from, to: e.to, sentAt: sentAt))
             } catch { failed = error; break }
         }
         for k in ordered(edits) {
@@ -201,10 +205,11 @@ enum EWSave {
             // 审查 B10)
             let body = Pending.skipDayNow(raw)
             do {
+                let sentAt = nowSec()   // before the POST, as above (R7-01)
                 try await relay.send(body)
                 sent += 1
                 left[k] = nil
-                Pending.shared.add(k, PendingEdit(label: e.label, src: "relay", to: e.to, sentAt: nowSec(), body: body))
+                Pending.shared.add(k, PendingEdit(label: e.label, src: "relay", to: e.to, sentAt: sentAt, body: body))
             } catch { if failed == nil { failed = error } }
         }
         // 周本 has one editable item, sent as weekly_boss (view.js:2984-2998). It gets the same receipt as the switches
@@ -216,12 +221,13 @@ enum EWSave {
                 let n = Int(last.to.number ?? 1)   // view.js: Number(...) || 1
                 let idx = n == 0 ? 1 : n
                 let body: JSONValue = .object(["action": .string("weekly_boss"), "index": .int(idx)])
+                let sentAt = nowSec()   // before the POST, as above (R7-01)
                 try await relay.send(body)
                 sent += wb.count
                 for k in wb {
                     left[k] = nil
                     guard let w = edits[k] else { continue }
-                    Pending.shared.add(k, PendingEdit(label: w.label, src: "wb", from: w.from, to: .int(idx), sentAt: nowSec(),
+                    Pending.shared.add(k, PendingEdit(label: w.label, src: "wb", from: w.from, to: .int(idx), sentAt: sentAt,
                                                       body: body))
                 }
             } catch { if failed == nil { failed = error } }

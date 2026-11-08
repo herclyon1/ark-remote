@@ -34,9 +34,10 @@ enum StatusCommands {
     static func send(_ a: StatusAsk) async -> String? {
         let relay = Relay.shared
         do {
+            let sentAt = nowSec()   // before the POST, as Edits.send does (app-opt-round7-1108 R7-01)
             try await relay.send(a.body)
             if let k = a.pendingKey, var e = a.pendingEdit {
-                e.sentAt = nowSec()
+                e.sentAt = sentAt
                 Pending.shared.add(k, e)
             }
             Feedback.status(a.okText)

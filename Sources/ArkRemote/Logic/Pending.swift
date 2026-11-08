@@ -272,8 +272,12 @@ struct PendingBar: Sendable, Equatable {
         guard let at = relay.snapAt, at != 0 else { return }
         var changed = false
         for (key, p) in items {
-            // sentAt is this phone's clock, `at` the machine's: compare on ntfy's (Relay.clockSkewMs, edge audit 3)
-            if Double(at) <= Double(p.resentAt ?? p.sentAt) + relay.clockSkewMs / 1000 { continue }
+            // sentAt is this phone's clock, `at` the machine's: compare on ntfy's (Relay.clockSkewMs, edge audit 3).
+            // A state of the send's own second counts (`<`, not `<=`): sentAt is taken before the POST (R7-01) and a
+            // machine that answers within that second stamps the same second, which `<=` skipped - the race R7-01 is
+            // about, only moved one second (app-opt-round7-1108). Such a state can only clear the change when it shows
+            // the value sent, and say 「没生效」 only with a receipt of this send (machineActed).
+            if Double(at) < Double(p.resentAt ?? p.sentAt) + relay.clockSkewMs / 1000 { continue }
             guard let live = liveVals[key] else { continue }   // this state does not carry the field; wait for the next
             if Self.sameVal(live, p.to) {
                 items[key] = nil
@@ -320,8 +324,28 @@ struct PendingBar: Sendable, Equatable {
         let rs = receipts(for: p)
         return rs.contains { q in
             guard q["queued"]?.truthy == true else { return false }
-            let sent = q["sent"]?.jsString ?? ""
-            return !rs.contains { $0["queued"]?.truthy != true && ($0["sent"]?.jsString ?? "") == sent }
+            return !rs.contains { $0["queued"]?.truthy != true && Self.sameSend($0, q) }
+        }
+    }
+
+    /// Two receipts answer the same press: the same send second and target when the relay wrote them (modes.py
+    /// add_receipt "ts" / "target", relay-opt-round6-1108 R6-04), else the same 「MM-dd HH:mm」 `sent`, as before.
+    static func sameSend(_ a: JSONValue, _ b: JSONValue) -> Bool {
+        if let ta = a["ts"]?.number, let tb = b["ts"]?.number {
+            return ta == tb && (a["target"]?.string ?? "") == (b["target"]?.string ?? "")
+        }
+        return (a["sent"]?.jsString ?? "") == (b["sent"]?.jsString ?? "")
+    }
+
+    /// What the relay writes as a receipt's "target" for this change (phone_channel.receipt_target): set_master
+    /// game:path and set_config script:path, a skip's queue; "" for anything else.
+    static func target(of p: PendingEdit) -> String {
+        switch p.src {
+        case "master", "mas": return "\(p.owner):\(p.path)"
+        case "relay":
+            let action = p.body?["action"]?.string ?? ""
+            return action == "skip_today" || action == "unskip_today" ? (p.body?["queue"]?.string ?? "") : ""
+        default: return ""
         }
     }
 
@@ -338,11 +362,19 @@ struct PendingBar: Sendable, Equatable {
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = machineZone
         f.dateFormat = "MM-dd HH:mm"   // modes.py:584-587
-        // sentAt is this phone's clock, `sent` ntfy's (Net.send) and `at` the machine's: compare on ntfy's (edge audit 3)
-        let from = f.string(from: Date(timeIntervalSince1970: Double(p.resentAt ?? p.sentAt) + relay.clockSkewMs / 1000 - 60))
+        // sentAt is this phone's clock, `sent` / `ts` ntfy's (Net.send) and `at` the machine's: compare on ntfy's (edge audit 3)
+        let since = Double(p.resentAt ?? p.sentAt) + relay.clockSkewMs / 1000
+        let from = f.string(from: Date(timeIntervalSince1970: since - 60))
+        let want = Self.target(of: p)
         let rcs = relay.snap?["relay"]?["最近指令"]?.array ?? []
         return rcs.filter { r in
             guard r["action"]?.jsString == action else { return false }
+            // Another setting of the same action (a save of several set_master at once): not this change's receipt.
+            // A receipt without "target" (a relay before R6-04) still counts by action.
+            if !want.isEmpty, let t = r["target"]?.string, !t.isEmpty, t != want { return false }
+            // To the second when the relay wrote "ts" (sentAt and the envelope's ts are both taken before the POST,
+            // R7-01; 2 s for the whole seconds each side keeps); the minute string, 60 s back, only without it.
+            if let ts = r["ts"]?.number { return ts >= since - 2 }
             let s = r["sent"]?.jsString ?? ""
             return (s.isEmpty ? (r["at"]?.jsString ?? "") : s) >= from
         }
@@ -373,8 +405,9 @@ struct PendingBar: Sendable, Equatable {
                             "path": .string(p.path), "value": p.to])
         }
         do {
+            let resentAt = nowSec()   // before the POST, as Edits.send does (app-opt-round7-1108 R7-01)
             try await relay.send(body)
-            items[key]?.resentAt = nowSec()
+            items[key]?.resentAt = resentAt
             if p.src == "relay" { items[key]?.body = body }
             items[key]?.mismatchAt = nil
             items[key]?.elsewhere = nil
